@@ -1,0 +1,104 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// --- Enums ---
+
+enum DataSourceType {
+  ZABBIX
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  CLOSED
+}
+
+// --- Models ---
+
+model Client {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  createdAt DateTime @default(now())
+
+  stores      Store[]
+  dataSources DataSource[]
+  incidents   Incident[]
+  notes       Note[]
+}
+
+model Store {
+  id        String   @id @default(cuid())
+  clientId  String
+  name      String
+  code      String
+  createdAt DateTime @default(now())
+
+  client    Client     @relation(fields: [clientId], references: [id])
+  incidents Incident[]
+  notes     Note[]
+
+  @@unique([clientId, code])
+}
+
+model DataSource {
+  id        String         @id @default(cuid())
+  clientId  String
+  type      DataSourceType
+  name      String
+  baseUrl   String
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+
+  client Client @relation(fields: [clientId], references: [id])
+}
+
+model Incident {
+  id          String           @id @default(cuid())
+  clientId    String
+  storeId     String?
+  sourceType  DataSourceType
+  externalId  String?
+  severity    IncidentSeverity
+  category    String
+  title       String
+  description String?
+  startedAt   DateTime
+  endedAt     DateTime?
+  status      IncidentStatus   @default(OPEN)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  client Client  @relation(fields: [clientId], references: [id])
+  store  Store?  @relation(fields: [storeId], references: [id])
+  notes  Note[]
+}
+
+model Note {
+  id         String   @id @default(cuid())
+  clientId   String
+  storeId    String?
+  incidentId String?
+  title      String
+  body       String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  client   Client    @relation(fields: [clientId], references: [id])
+  store    Store?    @relation(fields: [storeId], references: [id])
+  incident Incident? @relation(fields: [incidentId], references: [id])
+}

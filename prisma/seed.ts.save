@@ -1,0 +1,167 @@
+import { PrismaClient } from "../src/generated/prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+const prisma = new PrismaClient({ adapter });
+
+async function main() {
+  // Clean existing data
+  await prisma.note.deleteMany();
+  await prisma.incident.deleteMany();
+  await prisma.dataSource.deleteMany();
+  await prisma.store.deleteMany();
+  await prisma.client.deleteMany();
+
+  // Create client
+  const client = await prisma.client.create({
+    data: {
+      name: "Demo Retail Group",
+      code: "DEMO-RETAIL",
+    },
+  });
+
+  // Create stores
+  const store1 = await prisma.store.create({
+    data: {
+      clientId: client.id,
+      name: "Vilnius Central Store",
+      code: "VLN-001",
+    },
+  });
+
+  const store2 = await prisma.store.create({
+    data: {
+      clientId: client.id,
+      name: "Kaunas Mall Store",
+      code: "KNS-001",
+    },
+  });
+
+  // Create Zabbix data source
+  await prisma.dataSource.create({
+    data: {
+      clientId: client.id,
+      type: "ZABBIX",
+      name: "Production Zabbix",
+      baseUrl: "https://zabbix.example.com/api_jsonrpc.php",
+      isActive: true,
+    },
+  });
+
+  // Create demo incidents
+  const incidents = await Promise.all([
+    prisma.incident.create({
+      data: {
+        clientId: client.id,
+        storeId: store1.id,
+        sourceType: "ZABBIX",
+        externalId: "ZBX-10234",
+        severity: "CRITICAL",
+        category: "Network",
+        title: "POS terminal network unreachable",
+        description:
+          "All POS terminals in Vilnius Central lost network connectivity. Zabbix detected ICMP loss on the store gateway.",
+        startedAt: new Date("2026-03-23T08:15:00Z"),
+        status: "OPEN",
+      },
+    }),
+    prisma.incident.create({
+      data: {
+        clientId: client.id,
+        storeId: store2.id,
+        sourceType: "ZABBIX",
+        externalId: "ZBX-10230",
+        severity: "HIGH",
+        category: "Hardware",
+        title: "Self-checkout kiosk #3 offline",
+        description:
+          "Self-checkout kiosk #3 in Kaunas Mall has been unresponsive since morning. Zabbix agent stopped reporting.",
+        startedAt: new Date("2026-03-22T10:30:00Z"),
+        status: "ACKNOWLEDGED",
+      },
+    }),
+    prisma.incident.create({
+      data: {
+        clientId: client.id,
+        storeId: store1.id,
+        sourceType: "ZABBIX",
+        externalId: "ZBX-10215",
+        severity: "MEDIUM",
+        category: "Performance",
+        title: "High CPU on store server",
+        description:
+          "CPU usage exceeded 90% on the Vilnius store server for over 30 minutes.",
+        startedAt: new Date("2026-03-21T14:00:00Z"),
+        endedAt: new Date("2026-03-21T15:20:00Z"),
+        status: "RESOLVED",
+      },
+    }),
+    prisma.incident.create({
+      data: {
+        clientId: client.id,
+        storeId: null,
+        sourceType: "ZABBIX",
+        externalId: "ZBX-10200",
+        severity: "LOW",
+        category: "Maintenance",
+        title: "Scheduled backup completed with warnings",
+        description:
+          "Nightly backup job completed but reported 2 warnings about large table sizes.",
+        startedAt: new Date("2026-03-20T02:00:00Z"),
+        endedAt: new Date("2026-03-20T02:45:00Z"),
+        status: "CLOSED",
+      },
+    }),
+    prisma.incident.create({
+      data: {
+        clientId: client.id,
+        storeId: store2.id,
+        sourceType: "ZABBIX",
+        externalId: "ZBX-10240",
+        severity: "HIGH",
+        category: "Security",
+        title: "Unusual login attempts on store POS",
+        description:
+          "Multiple failed login attempts detected on Kaunas Mall POS management interface.",
+        startedAt: new Date("2026-03-23T12:00:00Z"),
+        status: "OPEN",
+      },
+    }),
+  ]);
+
+  // Create demo notes
+  await prisma.note.create({
+    data: {
+      clientId: client.id,
+      storeId: store1.id,
+      incidentId: incidents[0].id,
+      title: "Contacted ISP about outage",
+      body: "Called the ISP support line. They confirmed a regional fiber cut affecting the area. ETA for fix: 4-6 hours.",
+    },
+  });
+
+  await prisma.note.create({
+    data: {
+      clientId: client.id,
+      storeId: store2.id,
+      incidentId: null,
+      title: "Kaunas Mall store maintenance window",
+      body: "Scheduled maintenance window for Kaunas Mall store systems: Saturday March 28, 22:00-02:00. All POS and kiosk systems will be updated.",
+    },
+  });
+
+  console.log("Seed data created successfully.");
+  console.log(`  Client: ${client.name}`);
+  console.log(`  Stores: ${store1.name}, ${store2.name}`);
+  console.log(`  Incidents: ${incidents.length}`);
+  console.log(`  Notes: 2`);
+}
+
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
