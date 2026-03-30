@@ -23,7 +23,12 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const stores = await prisma.store.findMany({ orderBy: { name: "asc" } });
+  let stores: { id: string; name: string }[] = [];
+  try {
+    stores = await prisma.store.findMany({ orderBy: { name: "asc" } });
+  } catch {
+    // DB not ready — app still loads, just without store filter
+  }
 
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>

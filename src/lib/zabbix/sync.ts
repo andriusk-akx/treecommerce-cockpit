@@ -64,7 +64,7 @@ export async function syncZabbixProblems(clientId: string): Promise<SyncResult> 
         if (existing.severity !== severity || existing.status !== newStatus) {
           await prisma.incident.update({
             where: { id: existing.id },
-            data: { severity, status: newStatus, resolvedAt: isResolved ? new Date() : null },
+            data: { severity, status: newStatus, endedAt: isResolved ? new Date() : null },
           });
           result.updated++;
         } else {
@@ -101,7 +101,7 @@ export async function syncZabbixProblems(clientId: string): Promise<SyncResult> 
     for (const stale of staleIncidents) {
       await prisma.incident.update({
         where: { id: stale.id },
-        data: { status: "RESOLVED", resolvedAt: new Date() },
+        data: { status: "RESOLVED", endedAt: new Date() },
       });
       result.resolved++;
     }

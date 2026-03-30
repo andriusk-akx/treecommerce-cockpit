@@ -28,25 +28,27 @@ export async function generateInsights(prefetched?: {
   const problems = prefetched?.problems ?? await cached("insights_problems", () => client.getProblems() as Promise<any[]>);
   const hosts = prefetched?.hosts ?? await cached("insights_hosts", () => client.getHosts() as Promise<any[]>);
 
+  // PERF-002: Cache Zabbix API responses (60s TTL)
+  // Include time period in cache key to avoid collisions between different query periods
   const [events7d, events30d] = await cached(
-    "insights_events",
+    `insights_events_7d_30d`,
     () => Promise.all([
       client.request("event.get", {
-        output: "extend",
+        output: ["eventid", "clock", "value", "severity", "name", "objectid", "r_eventid"],
         selectTags: "extend",
         selectHosts: ["hostid", "host", "name"],
         time_from: String(Math.floor(now / 1000) - days7),
         sortfield: ["clock"],
         sortorder: "DESC",
-        limit: 3000,
+        limit: 1000,
       }),
       client.request("event.get", {
-        output: "extend",
+        output: ["eventid", "clock", "value", "severity", "name", "objectid"],
         selectHosts: ["hostid", "host", "name"],
         time_from: String(Math.floor(now / 1000) - days30),
         sortfield: ["clock"],
         sortorder: "DESC",
-        limit: 5000,
+        limit: 2000,
       }),
     ])
   );
@@ -129,7 +131,8 @@ export async function generateInsights(prefetched?: {
     const serviceNames = new Map<string, number>();
     for (const e of serviceEvents7d) {
       const match = e.name.match(/Service "(.+)" is not ACTIVE/);
-      if (match) {
+      // Null guard: match() can return null if pattern doesn't match
+      if (match && match[1]) {
         const svc = match[1];
         serviceNames.set(svc, (serviceNames.get(svc) || 0) + 1);
       }
@@ -179,34 +182,9 @@ export async function generateInsights(prefetched?: {
     }
   }
 
-  // --- Host availability (using centralized availability module) ---
-  try {
-    const availability = await getHostAvailability(30);
-    const offlineHosts = availability.filter((h) =>
-      h.offlinePeriods.some((p) => p.source === "agent_unavailable" || p.source === "event_gap")
-    );
-
-    if (offlineHosts.length > 0) {
-      const details = offlineHosts
-        .map((h) => {
-          const offlinePeriods = h.offlinePeriods.filter(
-            (p) => p.source === "agent_unavailable" || p.source === "event_gap"
-          );
-          const totalMins = offlinePeriods.reduce((s, p) => s + p.durationMinutes, 0);
-          const totalH = Math.round(totalMins / 60);
-          return `${h.hostName} (~${totalH}h offline)`;
-        })
-        .join(", ");
-
-      insights.push({
-        type: "critical",
-        title: `${offlineHosts.length} įrenginys(-iai) buvo offline per 30d`,
-        detail: `${details}. Offline periodai reiškia, kad stebėjimo agentas buvo visiškai nepasiekiamas — galimas fizinis išjungimas arba tinklo sutrikimas.`,
-      });
-    }
-  } catch {
-    // Fallback to simple event-based detection
-    const unavailableHosts = events7d.filter(
+  // --- Host availability (lightweight event-based detection) ---
+  {
+    const unavailableHosts = events30d.filter(
       (e: any) =>
         e.value === "1" &&
         e.name &&

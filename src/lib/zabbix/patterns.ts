@@ -224,11 +224,12 @@ export async function getPatternData(
       return { date, dayLabel: DAY_LABELS[dayOfWeek], dayOfWeek, hours, downtimeBars };
     });
 
-  // Peak / quiet stats
-  const peakHourIdx = hourSummary.reduce((max, h, i) => h.count > hourSummary[max].count ? i : max, 0);
-  const quietHourIdx = hourSummary.reduce((min, h, i) => h.count < hourSummary[min].count ? i : min, 0);
-  const peakDayIdx = daySummary.reduce((max, d, i) => d.count > daySummary[max].count ? i : max, 0);
-  const quietDayIdx = daySummary.reduce((min, d, i) => d.count < daySummary[min].count ? i : min, 0);
+  // Peak / quiet stats — guard against empty arrays
+  // hourSummary and daySummary are always 24 and 7 elements respectively, but add guards for safety
+  const peakHourIdx = hourSummary.length > 0 ? hourSummary.reduce((max, h, i) => h.count > hourSummary[max].count ? i : max, 0) : 0;
+  const quietHourIdx = hourSummary.length > 0 ? hourSummary.reduce((min, h, i) => h.count < hourSummary[min].count ? i : min, 0) : 0;
+  const peakDayIdx = daySummary.length > 0 ? daySummary.reduce((max, d, i) => d.count > daySummary[max].count ? i : max, 0) : 0;
+  const quietDayIdx = daySummary.length > 0 ? daySummary.reduce((min, d, i) => d.count < daySummary[min].count ? i : min, 0) : 0;
 
   return {
     heatmap,

@@ -14,67 +14,84 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const clientFilter = params.client || "";
 
-  // Build where clause for client filtering
-  const storeWhere = clientFilter ? { storeId: clientFilter } : {};
-  const openWhere = { ...storeWhere, status: { in: ["OPEN", "ACKNOWLEDGED"] as const } };
+  // DB data — gracefully handle missing/uninitialized database
+  let totalIncidents = 0, openIncidents = 0, criticalIncidents = 0, highIncidents = 0, resolvedIncidents = 0, notesCount = 0;
+  let incidentsByStore: any[] = [];
+  let storeMap = new Map<string, string>();
+  let recentIncidents: any[] = [];
+  let severityMap: Record<string, number> = {};
 
-  const [
-    totalIncidents,
-    openIncidents,
-    criticalIncidents,
-    highIncidents,
-    resolvedIncidents,
-    notesCount,
-    incidentsByStore,
-  ] = await Promise.all([
-    prisma.incident.count({ where: storeWhere }),
-    prisma.incident.count({ where: openWhere }),
-    prisma.incident.count({ where: { ...openWhere, severity: "CRITICAL" } }),
-    prisma.incident.count({ where: { ...openWhere, severity: "HIGH" } }),
-    prisma.incident.count({ where: { ...storeWhere, status: "RESOLVED" } }),
-    prisma.note.count({ where: clientFilter ? { storeId: clientFilter } : {} }),
-    prisma.incident.groupBy({
-      by: ["storeId"],
-      where: openWhere,
-      _count: true,
-    }),
+  // PERF: Parallelize ALL DB, Zabbix, and Insights queries simultaneously
+  const [dbResult, zabbixResult, insightsResult] = await Promise.allSettled([
+    // DB queries in one Promise.all
+    (async () => {
+      const storeWhere: any = clientFilter ? { storeId: clientFilter } : {};
+      const openWhere: any = { ...storeWhere, status: { in: ["OPEN", "ACKNOWLEDGED"] } };
+
+      const [totIncidents, openInc, critInc, highInc, resInc, notCnt, incByStore, stores, recent, sevCounts] =
+        await Promise.all([
+          prisma.incident.count({ where: storeWhere }),
+          prisma.incident.count({ where: openWhere }),
+          prisma.incident.count({ where: { ...openWhere, severity: "CRITICAL" } }),
+          prisma.incident.count({ where: { ...openWhere, severity: "HIGH" } }),
+          prisma.incident.count({ where: { ...storeWhere, status: "RESOLVED" } }),
+          prisma.note.count({ where: clientFilter ? { storeId: clientFilter } : {} }),
+          prisma.incident.groupBy({ by: ["storeId"], where: openWhere, _count: true }),
+          prisma.store.findMany(),
+          prisma.incident.findMany({
+            take: 10,
+            where: storeWhere,
+            orderBy: { startedAt: "desc" },
+            include: { store: true },
+          }),
+          prisma.incident.groupBy({ by: ["severity"], where: openWhere, _count: true }),
+        ]);
+
+      const stMap = new Map(stores.map((s) => [s.id, s.name]));
+      const sevMap: Record<string, number> = {};
+      for (const s of sevCounts) {
+        sevMap[s.severity] = typeof s._count === 'number' ? s._count : 0;
+      }
+
+      return { totIncidents, openInc, critInc, highInc, resInc, notCnt, incByStore, stMap, recent, sevMap };
+    })(),
+    // Zabbix queries in one Promise.all
+    (async () => {
+      const zClient = getZabbixClient();
+      const [version, problems, hosts] = await Promise.all([
+        zClient.getVersion(),
+        zClient.getProblems() as Promise<any[]>,
+        zClient.getHosts() as Promise<any[]>,
+      ]);
+      return { version, problems, hosts };
+    })(),
+    // Insights — runs in parallel with DB + Zabbix (has own cached API calls)
+    generateInsights(),
   ]);
 
-  const stores = await prisma.store.findMany();
-  const storeMap = new Map(stores.map((s) => [s.id, s.name]));
-
-  const recentIncidents = await prisma.incident.findMany({
-    take: 10,
-    where: storeWhere,
-    orderBy: { startedAt: "desc" },
-    include: { store: true },
-  });
-
-  const severityCounts = await prisma.incident.groupBy({
-    by: ["severity"],
-    where: openWhere,
-    _count: true,
-  });
-  const severityMap: Record<string, number> = {};
-  for (const s of severityCounts) {
-    severityMap[s.severity] = s._count;
-  }
-
-  // PERF-004: Fetch Zabbix data once, share with insights to avoid duplicate API calls
+  // Extract results from settled promises
   let zabbixData: { version: string; problems: any[]; hosts: any[] } | null = null;
   let insights: Insight[] = [];
-  try {
-    const zClient = getZabbixClient();
-    const [version, problems, hosts] = await Promise.all([
-      zClient.getVersion(),
-      zClient.getProblems() as Promise<any[]>,
-      zClient.getHosts() as Promise<any[]>,
-    ]);
-    zabbixData = { version, problems, hosts };
-    // Pass pre-fetched data to insights — avoids 2 redundant API calls
-    insights = await generateInsights({ problems, hosts });
-  } catch (e) {
-    // Zabbix unavailable
+
+  if (dbResult.status === "fulfilled" && dbResult.value) {
+    totalIncidents = dbResult.value.totIncidents;
+    openIncidents = dbResult.value.openInc;
+    criticalIncidents = dbResult.value.critInc;
+    highIncidents = dbResult.value.highInc;
+    resolvedIncidents = dbResult.value.resInc;
+    notesCount = dbResult.value.notCnt;
+    incidentsByStore = dbResult.value.incByStore;
+    storeMap = dbResult.value.stMap;
+    recentIncidents = dbResult.value.recent;
+    severityMap = dbResult.value.sevMap;
+  }
+
+  if (zabbixResult.status === "fulfilled" && zabbixResult.value) {
+    zabbixData = zabbixResult.value;
+  }
+
+  if (insightsResult.status === "fulfilled" && insightsResult.value) {
+    insights = insightsResult.value;
   }
 
   // Current client name for header
@@ -158,12 +175,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               <div className="space-y-3">
                 {incidentsByStore.map((item) => {
                   const name = item.storeId ? storeMap.get(item.storeId) || "Unknown" : "Unassigned";
-                  const pct = Math.round((item._count / Math.max(openIncidents, 1)) * 100);
+                  const count = typeof item._count === 'number' ? item._count : (item._count as any)?._all ?? 0;
+                  const pct = Math.round((count / Math.max(openIncidents, 1)) * 100);
                   return (
                     <div key={item.storeId || "null"}>
                       <div className="flex justify-between text-sm mb-1">
                         <span className="font-medium text-gray-700">{name}</span>
-                        <span className="text-gray-500">{item._count}</span>
+                        <span className="text-gray-500">{count}</span>
                       </div>
                       <div className="w-full bg-gray-100 rounded-full h-2">
                         <div className="h-2 rounded-full bg-blue-500" style={{ width: `${pct}%` }} />
@@ -218,7 +236,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {zabbixData.problems.map((p: any) => {
-                  const started = new Date(parseInt(p.clock) * 1000);
+                  // Guard against invalid clock values that produce NaN
+                  const clockVal = parseInt(p.clock);
+                  if (!Number.isFinite(clockVal) || clockVal <= 0) return null;
+                  const started = new Date(clockVal * 1000);
                   const duration = formatDuration(Date.now() - started.getTime());
                   return (
                     <tr key={p.eventid} className="hover:bg-gray-50">

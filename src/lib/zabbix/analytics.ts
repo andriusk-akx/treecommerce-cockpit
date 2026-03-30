@@ -62,9 +62,14 @@ export async function getAnalytics(daysBack: number = 30, clientStoreName: strin
   const client = getZabbixClient();
   const safeDaysBack = Number.isFinite(daysBack) && daysBack > 0 ? Math.min(daysBack, 365) : 30;
 
+  // Snapshot Date.now() once at the start to ensure consistent timestamps throughout
+  const nowMs = Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
+
   // PERF-002: Cache Zabbix API responses (60s TTL)
+  // Include all filter params in cache key to avoid collisions between different clients
   const [events, hosts, triggers] = await cached(
-    `analytics_${safeDaysBack}`,
+    `analytics_${safeDaysBack}_${clientStoreName || "all"}`,
     () => Promise.all([
       client.getEventsForPeriod(safeDaysBack, 1000),
       client.getHosts(),
@@ -73,7 +78,7 @@ export async function getAnalytics(daysBack: number = 30, clientStoreName: strin
   );
 
   const periodMs = safeDaysBack * 24 * 3600 * 1000;
-  const periodStart = Date.now() - periodMs;
+  const periodStart = nowMs - periodMs;
 
   // Build host name map from triggers
   const hostNameMap = new Map<string, string>();
@@ -110,16 +115,56 @@ export async function getAnalytics(daysBack: number = 30, clientStoreName: strin
   });
   const resolutionEvents = events.filter((e: any) => e.value === "0");
 
-  // Match problems with resolutions
+  // PERF-001: Match problems with resolutions using O(n) pointer algorithm instead of O(n²) .find()
+  // Group problems and resolutions by objectid, sort by clock, then use two-pointer matching
+  const problemsByObject = new Map<string, any[]>();
+  const resolutionsByObject = new Map<string, any[]>();
+
+  for (const e of problemEvents) {
+    const objectId = e.objectid;
+    if (!problemsByObject.has(objectId)) problemsByObject.set(objectId, []);
+    problemsByObject.get(objectId)!.push(e);
+  }
+
+  for (const e of resolutionEvents) {
+    const objectId = e.objectid;
+    if (!resolutionsByObject.has(objectId)) resolutionsByObject.set(objectId, []);
+    resolutionsByObject.get(objectId)!.push(e);
+  }
+
+  // Sort both by clock
+  for (const arr of problemsByObject.values()) {
+    arr.sort((a: any, b: any) => parseInt(a.clock) - parseInt(b.clock));
+  }
+  for (const arr of resolutionsByObject.values()) {
+    arr.sort((a: any, b: any) => parseInt(a.clock) - parseInt(b.clock));
+  }
+
+  // Build problem -> resolution map using pointer algorithm
+  const problemResolutionMap = new Map<string, any>();
+  for (const [objectId, problems] of problemsByObject) {
+    const resolutions = resolutionsByObject.get(objectId) || [];
+    let resIdx = 0;
+    for (const prob of problems) {
+      const probClock = parseInt(prob.clock);
+      // Advance resIdx past all resolutions with clock <= probClock
+      while (resIdx < resolutions.length && parseInt(resolutions[resIdx].clock) <= probClock) {
+        resIdx++;
+      }
+      // resIdx now points to first resolution after this problem (if any)
+      if (resIdx < resolutions.length) {
+        problemResolutionMap.set(prob.eventid, resolutions[resIdx]);
+      }
+    }
+  }
+
+  // Build resolved problems list
   const resolvedProblems: { name: string; severity: string; startClock: number; endClock: number; objectid: string; hosts: string[] }[] = [];
 
   for (const prob of problemEvents) {
-    const resolution = resolutionEvents.find(
-      (r: any) => r.objectid === prob.objectid && parseInt(r.clock) > parseInt(prob.clock)
-    );
-
+    const resolution = problemResolutionMap.get(prob.eventid);
     const startClock = parseInt(prob.clock);
-    const endClock = resolution ? parseInt(resolution.clock) : Math.floor(Date.now() / 1000);
+    const endClock = resolution ? parseInt(resolution.clock) : nowSec;
     const hosts = triggerHostMap.get(prob.objectid) || [];
 
     resolvedProblems.push({
@@ -132,8 +177,8 @@ export async function getAnalytics(daysBack: number = 30, clientStoreName: strin
     });
   }
 
-  // Calculate total resolution stats
-  const resolvedOnly = resolvedProblems.filter((p) => p.endClock !== Math.floor(Date.now() / 1000));
+  // Calculate total resolution stats using snapshotted nowSec
+  const resolvedOnly = resolvedProblems.filter((p) => p.endClock !== nowSec);
   const totalResolutionMinutes = resolvedOnly.reduce((sum, p) => sum + (p.endClock - p.startClock) / 60, 0);
   const avgResolutionMinutes = resolvedOnly.length > 0 ? Math.round(totalResolutionMinutes / resolvedOnly.length) : 0;
 
@@ -146,7 +191,7 @@ export async function getAnalytics(daysBack: number = 30, clientStoreName: strin
       const durationMinutes = (prob.endClock - prob.startClock) / 60;
       existing.totalMinutes += durationMinutes;
       existing.count++;
-      if (prob.endClock !== Math.floor(Date.now() / 1000)) {
+      if (prob.endClock !== nowSec) {
         existing.resolutionSum += durationMinutes;
         existing.resolvedCount++;
       }
@@ -194,24 +239,36 @@ export async function getAnalytics(daysBack: number = 30, clientStoreName: strin
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
 
-  // Daily incident counts
+  // Daily incident counts — use local date formatting, not UTC ISO string
+  // ISO .slice(0,10) gives UTC date, which can differ from local date
   const dailyMap = new Map<string, { count: number; resolved: number }>();
+
+  // Helper: format date in local time as YYYY-MM-DD
+  const formatLocalDate = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   for (let d = 0; d < safeDaysBack; d++) {
-    const date = new Date(Date.now() - d * 24 * 3600 * 1000);
-    const key = date.toISOString().slice(0, 10);
+    const date = new Date(nowMs - d * 24 * 3600 * 1000);
+    const key = formatLocalDate(date);
     dailyMap.set(key, { count: 0, resolved: 0 });
   }
 
   for (const prob of resolvedProblems) {
-    const date = new Date(prob.startClock * 1000).toISOString().slice(0, 10);
-    const existing = dailyMap.get(date);
+    const date = new Date(prob.startClock * 1000);
+    const dateKey = formatLocalDate(date);
+    const existing = dailyMap.get(dateKey);
     if (existing) {
       existing.count++;
     }
   }
   for (const res of resolvedOnly) {
-    const date = new Date(res.endClock * 1000).toISOString().slice(0, 10);
-    const existing = dailyMap.get(date);
+    const date = new Date(res.endClock * 1000);
+    const dateKey = formatLocalDate(date);
+    const existing = dailyMap.get(dateKey);
     if (existing) {
       existing.resolved++;
     }

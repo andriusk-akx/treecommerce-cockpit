@@ -87,7 +87,8 @@ export async function getFullEventStream(
   const timeFrom = Math.floor(Date.now() / 1000) - safeDaysBack * 24 * 3600;
 
   // PERF-002: Cache Zabbix API responses (60s TTL)
-  const cacheKey = `stream_${timeFrom}`;
+  // Include clientStoreName in cache key to avoid collisions between different clients
+  const cacheKey = `stream_${timeFrom}_${clientStoreName || "all"}`;
   const [events, triggers] = await cached(
     cacheKey,
     () => Promise.all([
@@ -143,9 +144,12 @@ export async function getFullEventStream(
       while (resIdx < resolutions.length && parseInt(resolutions[resIdx].clock) <= probClock) {
         resIdx++;
       }
+      // BUG FIX: Only consume the resolution if we're within bounds
+      // The while-loop already advanced resIdx to the first resolution after probClock
+      // Do NOT increment again or we'll skip resolutions
       if (resIdx < resolutions.length) {
         problemResolutionMap.set(prob.eventid, resolutions[resIdx]);
-        resIdx++;
+        // Don't increment resIdx here — it's already pointing to the next resolution for the next problem
       }
     }
   }

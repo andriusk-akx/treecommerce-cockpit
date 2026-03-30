@@ -18,6 +18,7 @@ export class ZabbixClient {
       method: "POST",
       headers,
       body: JSON.stringify({ jsonrpc: "2.0", method, params, id: this.requestId }),
+      signal: AbortSignal.timeout(15_000),
     });
     const data = await response.json();
     if (data.error) {

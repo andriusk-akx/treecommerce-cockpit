@@ -116,7 +116,8 @@ export async function getDowntimeIntervals(
   const timeFrom = nowSec - safeDaysBack * 24 * 3600;
 
   // PERF-002: Cache Zabbix API responses (60s TTL) to avoid redundant calls
-  const cacheKey = `downtime_${timeFrom}`;
+  // Include all filter params in cache key to avoid collisions between different clients
+  const cacheKey = `downtime_${timeFrom}_${clientStoreName || "all"}_${hostFilter || "all"}`;
   const [events, triggers, hosts] = await cached(
     cacheKey,
     () => Promise.all([

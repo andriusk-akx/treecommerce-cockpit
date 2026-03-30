@@ -15,17 +15,24 @@ export default async function PatternsPage({ searchParams }: PageProps) {
   // hostFilter is validated after we know the known hosts list (below)
   const rawHostFilter = sanitizeParam(params.host);
 
+  // PERF-003: Parallelize store lookup and host fetching
+  const [storeResult, hostsResult] = await Promise.allSettled([
+    clientFilter
+      ? prisma.store.findUnique({ where: { id: clientFilter } })
+      : Promise.resolve(null),
+    getAvailableHosts(),
+  ]);
+
   let clientStoreName: string | null = null;
-  if (clientFilter) {
-    const store = await prisma.store.findUnique({ where: { id: clientFilter } });
-    clientStoreName = store?.name || null;
+  if (storeResult.status === "fulfilled" && storeResult.value) {
+    clientStoreName = storeResult.value.name || null;
   }
 
-  // Fetch hosts first, then validate hostFilter against known hosts (P0-5)
-  const allHosts = await getAvailableHosts();
+  const allHosts = hostsResult.status === "fulfilled" && hostsResult.value ? hostsResult.value : [];
   const knownHostNames = allHosts.map((h) => h.hostName);
   const hostFilter = validateHostFilter(rawHostFilter, knownHostNames);
 
+  // Now fetch pattern data (depends on clientStoreName)
   const data = await getPatternData(days, clientStoreName, hostFilter || null);
 
   // Group hosts by client

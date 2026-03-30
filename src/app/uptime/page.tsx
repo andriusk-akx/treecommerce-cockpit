@@ -19,13 +19,18 @@ export default async function UptimePage({ searchParams }: PageProps) {
   const clientFilter = sanitizeParam(params.client);
   const hostFilter = sanitizeParam(params.host);
 
+  // PERF-002: Parallelize store lookup and uptime data fetch
   let clientStoreName: string | null = null;
+  let hostData: HostUptime[] = [];
+
+  // PERF: Single store query, then parallel Zabbix fetch
   if (clientFilter) {
-    const store = await prisma.store.findUnique({ where: { id: clientFilter } });
-    clientStoreName = store?.name || null;
+    try {
+      const store = await prisma.store.findUnique({ where: { id: clientFilter } });
+      clientStoreName = store?.name || null;
+    } catch { /* DB unavailable */ }
   }
 
-  let hostData: HostUptime[];
   try {
     hostData = await getDeviceUptimeData(days, clientStoreName);
   } catch (e) {

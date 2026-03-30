@@ -1,6 +1,7 @@
 import { getZabbixClient } from "./client";
 import { getClientForHost } from "./analytics";
 import { getDowntimeIntervals } from "./availability";
+import { cached } from "./cache";
 
 export interface EventTag {
   tag: string;
@@ -48,19 +49,22 @@ export async function getDeviceUptimeData(
   const safeDaysBack = Number.isFinite(daysBack) && daysBack > 0 ? Math.min(daysBack, 365) : 30;
   const client = getZabbixClient();
 
-  // 1. Get centralized downtime intervals (handles all 3 signals)
-  const { intervals, events, hosts } = await getDowntimeIntervals(safeDaysBack, clientStoreName);
-
-  // 2. Also fetch triggers with items for context enrichment
-  const triggers = await client.request("trigger.get", {
-    output: ["triggerid", "description", "priority", "lastchange", "value", "status", "comments", "expression", "opdata", "event_name"],
-    selectHosts: ["hostid", "host", "name"],
-    selectItems: ["itemid", "name", "key_", "lastvalue", "units"],
-    expandDescription: true,
-    expandComment: true,
-    expandExpression: true,
-    limit: 500,
-  });
+  // PERF: Parallelize downtime intervals + cached trigger context fetch
+  const [downtimeResult, triggers] = await Promise.all([
+    getDowntimeIntervals(safeDaysBack, clientStoreName),
+    cached(`triggers_context`, () =>
+      client.request("trigger.get", {
+        output: ["triggerid", "description", "priority", "lastchange", "value", "status", "comments", "expression", "opdata", "event_name"],
+        selectHosts: ["hostid", "host", "name"],
+        selectItems: ["itemid", "name", "key_", "lastvalue", "units"],
+        expandDescription: true,
+        expandComment: true,
+        expandExpression: true,
+        limit: 500,
+      })
+    ),
+  ]);
+  const { intervals, events, hosts } = downtimeResult;
 
   const triggerMap = new Map<string, any>();
   for (const t of triggers) {
