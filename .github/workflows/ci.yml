@@ -1,0 +1,41 @@
+name: CI
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+jobs:
+  build-and-lint:
+    name: Build, Lint & Type Check
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: treecommerce
+          POSTGRES_PASSWORD: treecommerce_dev
+          POSTGRES_DB: treecommerce_cockpit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Generate Prisma Client
+        run: npx prisma generate
+      - name: Lint
+        run: npm run lint
+      - name: Type Check
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: postgres://treecommerce:treecommerce_dev@localhost:5432/treecommerce_cockpit
