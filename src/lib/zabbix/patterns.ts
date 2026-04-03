@@ -33,6 +33,26 @@ export interface DowntimeBar {
   severity: number;
   ongoing: boolean;
   source: "agent_unavailable" | "event_pair" | "event_gap";
+  startMs: number;           // clipped to this day
+  endMs: number;             // clipped to this day
+  originalStartMs: number;   // full interval start
+  originalEndMs: number;     // full interval end
+  originalOngoing: boolean;  // is the FULL interval still ongoing?
+  durationMinutes: number;   // clipped day duration
+  totalDurationMinutes: number; // FULL interval duration
+  objectId: string;
+  intervalId: string;        // unique: objectId_hostName — groups bars across days
+}
+
+export interface TimelineEvent {
+  eventId: string;
+  clock: number;    // unix seconds
+  hostName: string;
+  hostId: string;
+  name: string;
+  severity: number;
+  value: string;    // "1"=problem, "0"=ok
+  objectId: string;
 }
 
 export interface TimelineSlot {
@@ -41,6 +61,7 @@ export interface TimelineSlot {
   dayOfWeek: number;
   hours: { hour: number; count: number; severity: number }[];
   downtimeBars: DowntimeBar[];
+  events: TimelineEvent[]; // all events for this day (for detail panel)
 }
 
 export interface PatternData {
@@ -88,7 +109,13 @@ export async function getPatternData(
 ): Promise<PatternData> {
   // Use centralized availability module for downtime detection
   // This single call handles all 3 signals: agent unavailable, event pairs, event gaps
-  const { intervals, events } = await getDowntimeIntervals(daysBack, clientStoreName, hostFilter);
+  const { intervals, events, triggerHostMap } = await getDowntimeIntervals(daysBack, clientStoreName, hostFilter);
+
+  // Helper: resolve host from event
+  function resolveHost(e: any): { hostName: string; hostId: string } | null {
+    if (e.hosts?.[0]) return { hostName: e.hosts[0].name || e.hosts[0].host, hostId: e.hosts[0].hostid };
+    return triggerHostMap.get(e.objectid) || null;
+  }
 
   // ── Build heatmap + timeline from events ──
 
@@ -101,6 +128,8 @@ export async function getPatternData(
   }
 
   const timelineMap = new Map<string, { hours: Map<number, { count: number; maxSev: number }> }>();
+  // Build per-day events list for detail panel
+  const eventsByDate = new Map<string, TimelineEvent[]>();
 
   for (const e of events) {
     const ts = new Date(parseInt(e.clock) * 1000);
@@ -108,12 +137,26 @@ export async function getPatternData(
     const day = jsDay === 0 ? 6 : jsDay - 1;
     const hour = ts.getHours();
     const isProblem = e.value === "1";
+    const host = resolveHost(e);
+
+    // Store per-day event for detail panel
+    const dateKey = ts.toISOString().slice(0, 10);
+    if (!eventsByDate.has(dateKey)) eventsByDate.set(dateKey, []);
+    eventsByDate.get(dateKey)!.push({
+      eventId: e.eventid,
+      clock: parseInt(e.clock),
+      hostName: host?.hostName || "Unknown",
+      hostId: host?.hostId || "",
+      name: e.name || "",
+      severity: parseInt(e.severity) || 0,
+      value: e.value,
+      objectId: e.objectid || "",
+    });
 
     grid[day][hour].count++;
     if (isProblem) grid[day][hour].problems++;
     else grid[day][hour].resolutions++;
 
-    const dateKey = ts.toISOString().slice(0, 10);
     if (!timelineMap.has(dateKey)) {
       timelineMap.set(dateKey, { hours: new Map() });
     }
@@ -210,6 +253,7 @@ export async function getPatternData(
 
         if (widthPct < 0.1) continue;
 
+        const totalDur = interval.endMs - interval.startMs;
         downtimeBars.push({
           hostName: interval.hostName,
           problemName: interval.problemName,
@@ -218,10 +262,22 @@ export async function getPatternData(
           severity: interval.severity,
           ongoing: interval.ongoing && clipEnd >= dayEndMs - 60000,
           source: interval.source,
+          startMs: clipStart,
+          endMs: clipEnd,
+          originalStartMs: interval.startMs,
+          originalEndMs: interval.endMs,
+          originalOngoing: interval.ongoing,
+          durationMinutes: Math.round((clipEnd - clipStart) / 60000),
+          totalDurationMinutes: Math.round(totalDur / 60000),
+          objectId: interval.objectId,
+          intervalId: `${interval.objectId}_${interval.hostName}_${interval.startMs}`,
         });
       }
 
-      return { date, dayLabel: DAY_LABELS[dayOfWeek], dayOfWeek, hours, downtimeBars };
+      // Events for this day (for detail panel)
+      const dayEvents = eventsByDate.get(date) || [];
+
+      return { date, dayLabel: DAY_LABELS[dayOfWeek], dayOfWeek, hours, downtimeBars, events: dayEvents };
     });
 
   // Peak / quiet stats — guard against empty arrays

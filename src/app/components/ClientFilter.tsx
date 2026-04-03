@@ -38,12 +38,12 @@ export default function ClientFilter({ stores }: ClientFilterProps) {
         disabled={isPending}
         className={`text-sm border border-gray-300 rounded px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white font-medium text-gray-700 ${isPending ? "opacity-50" : ""}`}
       >
-        <option value="">All Clients</option>
+        <option value="">Visi klientai</option>
         {stores.map((s) => (
           <option key={s.id} value={s.id}>{s.name}</option>
         ))}
       </select>
-      {isPending && <span className="text-xs text-gray-400">Loading...</span>}
+      {isPending && <span className="text-xs text-gray-400">Kraunama...</span>}
     </div>
   );
 }

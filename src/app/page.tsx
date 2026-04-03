@@ -3,6 +3,8 @@ import SyncButton from "./components/SyncButton";
 import AutoSync from "./components/AutoSync";
 import { getZabbixClient } from "@/lib/zabbix/client";
 import { generateInsights, type Insight } from "@/lib/zabbix/insights";
+import { fetchSource } from "@/lib/data-source";
+import DataSourceStatus from "@/app/components/DataSourceStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +14,12 @@ interface PageProps {
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const clientFilter = params.client || "";
+  const rawClient = params.client || "";
+
+  // Validate client filter — only allow known store IDs to prevent cache pollution
+  const stores = await prisma.store.findMany({ select: { id: true, name: true } });
+  const validStoreIds = new Set(stores.map((s) => s.id));
+  const clientFilter = validStoreIds.has(rawClient) ? rawClient : "";
 
   // DB data — gracefully handle missing/uninitialized database
   let totalIncidents = 0, openIncidents = 0, criticalIncidents = 0, highIncidents = 0, resolvedIncidents = 0, notesCount = 0;
@@ -21,93 +28,125 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   let recentIncidents: any[] = [];
   let severityMap: Record<string, number> = {};
 
-  // PERF: Parallelize ALL DB, Zabbix, and Insights queries simultaneously
-  const [dbResult, zabbixResult, insightsResult] = await Promise.allSettled([
-    // DB queries in one Promise.all
-    (async () => {
-      const storeWhere: any = clientFilter ? { storeId: clientFilter } : {};
-      const openWhere: any = { ...storeWhere, status: { in: ["OPEN", "ACKNOWLEDGED"] } };
+  // Use universal data-source for all three sources in parallel
+  const [dbResult, zabbixResult, insightsResult] = await Promise.all([
+    // DB via universal data-source
+    fetchSource(`db-dashboard-${clientFilter || "all"}`, {
+      source: "db",
+      label: "PostgreSQL Duomenų bazė",
+      env: "prod",
+      fetcher: async () => {
+        const storeWhere: any = clientFilter ? { storeId: clientFilter } : {};
+        const openWhere: any = { ...storeWhere, status: { in: ["OPEN", "ACKNOWLEDGED"] } };
 
-      const [totIncidents, openInc, critInc, highInc, resInc, notCnt, incByStore, stores, recent, sevCounts] =
-        await Promise.all([
-          prisma.incident.count({ where: storeWhere }),
-          prisma.incident.count({ where: openWhere }),
-          prisma.incident.count({ where: { ...openWhere, severity: "CRITICAL" } }),
-          prisma.incident.count({ where: { ...openWhere, severity: "HIGH" } }),
-          prisma.incident.count({ where: { ...storeWhere, status: "RESOLVED" } }),
-          prisma.note.count({ where: clientFilter ? { storeId: clientFilter } : {} }),
-          prisma.incident.groupBy({ by: ["storeId"], where: openWhere, _count: true }),
-          prisma.store.findMany(),
-          prisma.incident.findMany({
-            take: 10,
-            where: storeWhere,
-            orderBy: { startedAt: "desc" },
-            include: { store: true },
-          }),
-          prisma.incident.groupBy({ by: ["severity"], where: openWhere, _count: true }),
+        const [totIncidents, openInc, critInc, highInc, resInc, notCnt, incByStore, stores, recent, sevCounts] =
+          await Promise.all([
+            prisma.incident.count({ where: storeWhere }),
+            prisma.incident.count({ where: openWhere }),
+            prisma.incident.count({ where: { ...openWhere, severity: "CRITICAL" } }),
+            prisma.incident.count({ where: { ...openWhere, severity: "HIGH" } }),
+            prisma.incident.count({ where: { ...storeWhere, status: "RESOLVED" } }),
+            prisma.note.count({ where: clientFilter ? { storeId: clientFilter } : {} }),
+            prisma.incident.groupBy({ by: ["storeId"], where: openWhere, _count: true }),
+            prisma.store.findMany(),
+            prisma.incident.findMany({
+              take: 10,
+              where: storeWhere,
+              orderBy: { startedAt: "desc" },
+              include: { store: true },
+            }),
+            prisma.incident.groupBy({ by: ["severity"], where: openWhere, _count: true }),
+          ]);
+
+        const stMap = Object.fromEntries(stores.map((s) => [s.id, s.name]));
+        const sevMap: Record<string, number> = {};
+        for (const s of sevCounts) {
+          sevMap[s.severity] = typeof s._count === 'number' ? s._count : 0;
+        }
+
+        return { totIncidents, openInc, critInc, highInc, resInc, notCnt, incByStore, stMap, recent, sevMap };
+      },
+    }),
+    // Zabbix via universal data-source
+    fetchSource("zabbix-dashboard", {
+      source: "zabbix",
+      label: "Zabbix Monitoringas",
+      env: "prod",
+      fetcher: async () => {
+        const zClient = getZabbixClient();
+        const [version, problems, hosts] = await Promise.all([
+          zClient.getVersion(),
+          zClient.getProblems() as Promise<any[]>,
+          zClient.getHosts() as Promise<any[]>,
         ]);
-
-      const stMap = new Map(stores.map((s) => [s.id, s.name]));
-      const sevMap: Record<string, number> = {};
-      for (const s of sevCounts) {
-        sevMap[s.severity] = typeof s._count === 'number' ? s._count : 0;
-      }
-
-      return { totIncidents, openInc, critInc, highInc, resInc, notCnt, incByStore, stMap, recent, sevMap };
-    })(),
-    // Zabbix queries in one Promise.all
-    (async () => {
-      const zClient = getZabbixClient();
-      const [version, problems, hosts] = await Promise.all([
-        zClient.getVersion(),
-        zClient.getProblems() as Promise<any[]>,
-        zClient.getHosts() as Promise<any[]>,
-      ]);
-      return { version, problems, hosts };
-    })(),
-    // Insights — runs in parallel with DB + Zabbix (has own cached API calls)
-    generateInsights(),
+        return { version, problems, hosts };
+      },
+    }),
+    // Insights via universal data-source
+    fetchSource("zabbix-insights", {
+      source: "zabbix",
+      label: "AI Įžvalgos",
+      env: "prod",
+      fetcher: () => generateInsights(),
+    }),
   ]);
 
-  // Extract results from settled promises
+  // Extract results — universal data-source gives us status for free
   let zabbixData: { version: string; problems: any[]; hosts: any[] } | null = null;
   let insights: Insight[] = [];
 
-  if (dbResult.status === "fulfilled" && dbResult.value) {
-    totalIncidents = dbResult.value.totIncidents;
-    openIncidents = dbResult.value.openInc;
-    criticalIncidents = dbResult.value.critInc;
-    highIncidents = dbResult.value.highInc;
-    resolvedIncidents = dbResult.value.resInc;
-    notesCount = dbResult.value.notCnt;
-    incidentsByStore = dbResult.value.incByStore;
-    storeMap = dbResult.value.stMap;
-    recentIncidents = dbResult.value.recent;
-    severityMap = dbResult.value.sevMap;
+  // Always have a storeMap from the validation query above
+  storeMap = new Map(stores.map((s) => [s.id, s.name]));
+
+  if (dbResult.data) {
+    const db = dbResult.data;
+    totalIncidents = db.totIncidents;
+    openIncidents = db.openInc;
+    criticalIncidents = db.critInc;
+    highIncidents = db.highInc;
+    resolvedIncidents = db.resInc;
+    notesCount = db.notCnt;
+    incidentsByStore = db.incByStore;
+    recentIncidents = db.recent;
+    severityMap = db.sevMap;
   }
 
-  if (zabbixResult.status === "fulfilled" && zabbixResult.value) {
-    zabbixData = zabbixResult.value;
+  if (zabbixResult.data) {
+    zabbixData = zabbixResult.data;
   }
 
-  if (insightsResult.status === "fulfilled" && insightsResult.value) {
-    insights = insightsResult.value;
+  if (insightsResult.data) {
+    insights = insightsResult.data;
   }
+
+  // Build source summary for the status bar
+  const sourceSummary = [dbResult, zabbixResult, insightsResult].map((r) => ({
+    source: r.source,
+    label: r.label,
+    env: r.env,
+    status: r.status,
+    cachedAt: r.cachedAt,
+    error: r.error,
+    fetchMs: r.fetchMs,
+  }));
 
   // Current client name for header
   const currentClientName = clientFilter ? storeMap.get(clientFilter) : null;
 
   return (
     <div>
+      {/* Universal data source status bar */}
+      <DataSourceStatus sources={sourceSummary} />
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-semibold text-gray-800">
-            Overview{currentClientName ? ` — ${currentClientName}` : ""}
+            Apžvalga{currentClientName ? ` — ${currentClientName}` : ""}
           </h2>
           {zabbixData && (
             <p className="text-xs text-gray-400 mt-0.5">
-              Zabbix v{zabbixData.version} — {zabbixData.hosts.length} hosts monitored
+              Zabbix v{zabbixData.version} — {zabbixData.hosts.length} stebimi hostai
             </p>
           )}
         </div>
@@ -117,11 +156,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-        <KpiCard label="Open Incidents" value={openIncidents} highlight={openIncidents > 0} />
-        <KpiCard label="Critical" value={criticalIncidents} highlight={criticalIncidents > 0} variant="critical" />
-        <KpiCard label="High" value={highIncidents} highlight={highIncidents > 0} variant="warning" />
-        <KpiCard label="Resolved" value={resolvedIncidents} variant="success" />
-        <KpiCard label="Notes" value={notesCount} />
+        <KpiCard label="Atviri incidentai" value={openIncidents} highlight={openIncidents > 0} />
+        <KpiCard label="Kritiniai" value={criticalIncidents} highlight={criticalIncidents > 0} variant="critical" />
+        <KpiCard label="Aukšti" value={highIncidents} highlight={highIncidents > 0} variant="warning" />
+        <KpiCard label="Išspręsti" value={resolvedIncidents} variant="success" />
+        <KpiCard label="Pastabos" value={notesCount} />
       </div>
 
       {/* AI Insights */}
@@ -130,7 +169,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           <div className="flex items-center gap-2 mb-3">
             <span className="text-sm">🔍</span>
             <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">AI Įžvalgos</h3>
-            <span className="text-[10px] text-gray-400 ml-auto">Auto-generated from Zabbix data</span>
+            <span className="text-[10px] text-gray-400 ml-auto">Automatiškai generuojama iš Zabbix</span>
           </div>
           <div className="space-y-2">
             {insights.map((insight, i) => (
@@ -144,7 +183,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         {/* Severity Breakdown */}
         <div className="bg-white rounded-lg border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Open by Severity</h3>
+          <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Atviri pagal sunkumą</h3>
           <div className="space-y-3">
             {(["CRITICAL", "HIGH", "MEDIUM", "LOW"] as const).map((sev) => {
               const count = severityMap[sev] || 0;
@@ -168,9 +207,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {/* Incidents by Client */}
         {!clientFilter && (
           <div className="bg-white rounded-lg border border-gray-200 p-5">
-            <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Open by Client</h3>
+            <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Atviri pagal klientą</h3>
             {incidentsByStore.length === 0 ? (
-              <p className="text-sm text-green-600 font-medium py-4 text-center">All clear!</p>
+              <p className="text-sm text-green-600 font-medium py-4 text-center">Viskas tvarkoje!</p>
             ) : (
               <div className="space-y-3">
                 {incidentsByStore.map((item) => {
@@ -198,10 +237,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {clientFilter && (
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">
-              {currentClientName} — Open Incidents
+              {currentClientName} — Atviri incidentai
             </h3>
             {openIncidents === 0 ? (
-              <p className="text-sm text-green-600 font-medium py-4 text-center">All clear!</p>
+              <p className="text-sm text-green-600 font-medium py-4 text-center">Viskas tvarkoje!</p>
             ) : (
               <div className="space-y-2">
                 {recentIncidents.filter((i) => i.status === "OPEN" || i.status === "ACKNOWLEDGED").map((i) => (
@@ -221,7 +260,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <div className="mb-8">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
-              Zabbix Live — {zabbixData.problems.length} active problem{zabbixData.problems.length !== 1 ? "s" : ""}
+              Zabbix Live — {zabbixData.problems.length} aktyvi{zabbixData.problems.length !== 1 ? "os" : ""} problem{zabbixData.problems.length !== 1 ? "os" : "a"}
             </h3>
             <StatusDot active={zabbixData.problems.length === 0} />
           </div>
@@ -229,9 +268,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-500 text-left text-xs uppercase tracking-wide">
                 <tr>
-                  <th className="px-4 py-3">Problem</th>
-                  <th className="px-4 py-3">Severity</th>
-                  <th className="px-4 py-3">Duration</th>
+                  <th className="px-4 py-3">Problema</th>
+                  <th className="px-4 py-3">Sunkumas</th>
+                  <th className="px-4 py-3">Trukmė</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -250,7 +289,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   );
                 })}
                 {zabbixData.problems.length === 0 && (
-                  <tr><td colSpan={3} className="px-4 py-6 text-center text-green-600 font-medium">All clear — no active problems!</td></tr>
+                  <tr><td colSpan={3} className="px-4 py-6 text-center text-green-600 font-medium">Viskas tvarkoje — aktyvių problemų nėra!</td></tr>
                 )}
               </tbody>
             </table>
@@ -262,7 +301,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       {zabbixData && zabbixData.hosts.length > 0 && (
         <div className="mb-8">
           <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">
-            Monitored Hosts ({zabbixData.hosts.length})
+            Stebimi hostai ({zabbixData.hosts.length})
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {zabbixData.hosts.map((h: any) => (
@@ -276,17 +315,17 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       )}
 
       {/* Recent Incidents */}
-      <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Recent Incidents</h3>
+      <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Paskutiniai incidentai</h3>
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 text-left text-xs uppercase tracking-wide">
             <tr>
-              <th className="px-4 py-3">Title</th>
-              <th className="px-4 py-3">Severity</th>
-              <th className="px-4 py-3">Category</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Client</th>
-              <th className="px-4 py-3">Started</th>
+              <th className="px-4 py-3">Pavadinimas</th>
+              <th className="px-4 py-3">Sunkumas</th>
+              <th className="px-4 py-3">Kategorija</th>
+              <th className="px-4 py-3">Statusas</th>
+              <th className="px-4 py-3">Klientas</th>
+              <th className="px-4 py-3">Pradžia</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -301,7 +340,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               </tr>
             ))}
             {recentIncidents.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-400">No incidents yet. Press Sync Zabbix to import.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-400">Incidentų dar nėra. Paspauskite Sync Zabbix, kad importuotumėte.</td></tr>
             )}
           </tbody>
         </table>
@@ -350,7 +389,7 @@ function StatusDot({ active }: { active: boolean }) {
     <div className="flex items-center gap-1.5">
       <span className={`w-2 h-2 rounded-full ${active ? "bg-green-500" : "bg-red-500"} animate-pulse`} />
       <span className={`text-xs font-medium ${active ? "text-green-600" : "text-red-600"}`}>
-        {active ? "All Clear" : "Issues Detected"}
+        {active ? "Viskas tvarkoje" : "Aptikta problemų"}
       </span>
     </div>
   );

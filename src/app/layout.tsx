@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
-import Link from "next/link";
 import { prisma } from "@/lib/db";
 import ClientFilter from "./components/ClientFilter";
+import NavLinks from "./components/NavLinks";
 import { Suspense } from "react";
 import "./globals.css";
 
@@ -40,51 +40,16 @@ export default async function RootLayout({
                 TreeCommerce Pilot Cockpit
               </h1>
               <p className="text-sm text-gray-500">
-                Pilot monitoring &amp; incident tracking
+                Piloto stebėjimas ir incidentų valdymas
               </p>
             </div>
             <div className="flex items-center gap-6">
               <Suspense fallback={null}>
                 <ClientFilter stores={stores.map((s) => ({ id: s.id, name: s.name }))} />
               </Suspense>
-              <nav className="flex gap-6 text-sm font-medium">
-                <Link
-                  href="/"
-                  className="text-gray-600 hover:text-gray-900 transition-colors"
-                >
-                  Overview
-                </Link>
-                <Link
-                  href="/incidents"
-                  className="text-gray-600 hover:text-gray-900 transition-colors"
-                >
-                  Events
-                </Link>
-                <Link
-                  href="/notes"
-                  className="text-gray-600 hover:text-gray-900 transition-colors"
-                >
-                  Notes
-                </Link>
-                <Link
-                  href="/uptime"
-                  className="text-gray-600 hover:text-gray-900 transition-colors"
-                >
-                  Uptime
-                </Link>
-                <Link
-                  href="/patterns"
-                  className="text-gray-600 hover:text-gray-900 transition-colors"
-                >
-                  Patterns
-                </Link>
-                <Link
-                  href="/analytics"
-                  className="text-gray-600 hover:text-gray-900 transition-colors"
-                >
-                  Analytics
-                </Link>
-              </nav>
+              <Suspense fallback={null}>
+                <NavLinks />
+              </Suspense>
             </div>
           </div>
         </header>

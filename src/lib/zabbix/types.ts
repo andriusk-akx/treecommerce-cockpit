@@ -42,3 +42,15 @@ export interface ZabbixTrigger {
   status: number;
   value: number; // 0 = OK, 1 = PROBLEM
 }
+
+/** Resource metrics for a single host */
+export interface HostResources {
+  hostId: string;
+  hostName: string;
+  status: "up" | "down";
+  cpu: { utilization: number; load: number; itemId: string; valueType: string } | null;
+  memory: { utilization: number; available: number; total: number; itemId: string; valueType: string } | null;
+  disk: { utilization: number; path: string; itemId: string; valueType: string } | null;
+  network: { inBps: number; outBps: number; inItemId: string; outItemId: string; valueType: string } | null;
+  items: any[];
+}

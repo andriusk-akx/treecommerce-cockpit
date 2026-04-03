@@ -196,6 +196,16 @@ export async function getDowntimeIntervals(
 
   const intervals: DowntimeInterval[] = [];
 
+  // Pre-build per-host sorted event clocks — used to infer end time when no resolution exists
+  const hostEventClocks = new Map<string, number[]>();
+  for (const e of filtered) {
+    const h = resolveHost(e);
+    if (!h) continue;
+    if (!hostEventClocks.has(h.hostName)) hostEventClocks.set(h.hostName, []);
+    hostEventClocks.get(h.hostName)!.push(parseInt(e.clock) * 1000);
+  }
+  for (const clocks of hostEventClocks.values()) clocks.sort((a, b) => a - b);
+
   for (const [objectId, problems] of problemsByObject) {
     // PERF-001: Pre-sort resolutions once, then consume with pointer — O(n) instead of O(n²)
     const resolutions = (resolutionsByObject.get(objectId) || [])
@@ -221,8 +231,34 @@ export async function getDowntimeIntervals(
       const resolution = resIdx < resolutions.length ? resolutions[resIdx] : null;
       if (resolution) resIdx++; // consume it
 
-      const endMs = resolution ? parseInt(resolution.clock) * 1000 : nowMs;
-      const ongoing = !resolution;
+      let endMs: number;
+      let ongoing: boolean;
+
+      if (resolution) {
+        // Explicit resolution event — use it
+        endMs = parseInt(resolution.clock) * 1000;
+        ongoing = false;
+      } else {
+        // No resolution event. Check if the host sent ANY newer events after this problem.
+        // If yes — the host recovered; use the first subsequent event as implicit end.
+        const clocks = hostEventClocks.get(host.hostName) || [];
+        // Binary search for first clock > startMs
+        let lo = 0, hi = clocks.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (clocks[mid] <= startMs) lo = mid + 1; else hi = mid;
+        }
+        // Find first event that's meaningfully later (>5min after problem start)
+        const implicitEnd = clocks.slice(lo).find((c) => c > startMs + 300000);
+        if (implicitEnd) {
+          endMs = implicitEnd;
+          ongoing = false;
+        } else {
+          endMs = nowMs;
+          ongoing = true;
+        }
+      }
+
       const isAgentUnavailable = name.toLowerCase().includes("not available");
 
       intervals.push({

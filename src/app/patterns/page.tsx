@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getPatternData, getAvailableHosts } from "@/lib/zabbix/patterns";
 import { parsePeriodParams, sanitizeParam, validateHostFilter } from "@/lib/params";
+import TimelineChart from "./TimelineChart";
 
 export const dynamic = "force-dynamic";
 
@@ -90,10 +91,6 @@ export default async function PatternsPage({ searchParams }: PageProps) {
         .filter(({ idx }) => data.daySummary[idx]?.count > 0)
     : DAY_LABELS.map((label, idx) => ({ label, idx }));
 
-  const timelineMax = Math.max(
-    ...data.timeline.flatMap((t) => t.hours.map((h) => h.count)),
-    1
-  );
 
   return (
     <div>
@@ -170,144 +167,12 @@ export default async function PatternsPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {/* ===== TIMELINE: Events + Downtime (MAIN CHART — TOP) ===== */}
+      {/* ===== INTERACTIVE TIMELINE: Events + Downtime (MAIN CHART — TOP) ===== */}
       {data.timeline.length > 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-                Laiko juosta — events + downtime
-              </h3>
-              <p className="text-[10px] text-gray-400 mt-0.5">Kiekviena eilutė — viena diena, padalinta į 24 valandas. Taškeliai rodo įvykius, oranžinės juostos — laikotarpius kai sistema neveikė.</p>
-            </div>
-            {data.totalDowntimeMinutes > 0 && (
-              <span className="text-[10px] text-orange-600 font-medium">
-                {formatMinutes(data.totalDowntimeMinutes)} total downtime
-              </span>
-            )}
-          </div>
-          <div>
-            <div>
-              {/* Hour axis */}
-              <div className="flex ml-[52px] mb-1">
-                {Array.from({ length: 24 }, (_, i) => (
-                  <div key={i} className="flex-1 text-center text-[8px] text-gray-300">
-                    {i % 4 === 0 ? String(i).padStart(2, "0") : ""}
-                  </div>
-                ))}
-              </div>
-
-              {data.timeline.map((slot) => {
-                const hasDowntime = slot.downtimeBars.length > 0;
-                const isWeekend = slot.dayOfWeek >= 5;
-                return (
-                  <div key={slot.date} className={`flex items-center ${hasDowntime ? "mb-[2px]" : "mb-[1px]"}`}>
-                    {/* Date label */}
-                    <div className="w-[52px] flex items-center gap-1 pr-2">
-                      <span className={`text-[8px] ${isWeekend ? "text-blue-400" : "text-gray-300"}`}>{slot.dayLabel}</span>
-                      <span className={`text-[9px] font-medium ${hasDowntime ? "text-gray-700" : "text-gray-400"}`}>
-                        {slot.date.slice(5)}
-                      </span>
-                    </div>
-
-                    {/* Track */}
-                    <div className={`flex-1 relative ${hasDowntime ? "h-[22px]" : "h-[14px]"} bg-gray-50 rounded-[2px] overflow-hidden`}>
-                      {/* Hour grid lines */}
-                      <div className="absolute inset-0 flex pointer-events-none">
-                        {Array.from({ length: 24 }, (_, h) => (
-                          <div
-                            key={h}
-                            className="flex-1"
-                            style={{ borderRight: h < 23 ? "1px solid #f0f0f0" : "none" }}
-                          />
-                        ))}
-                      </div>
-
-                      {/* Downtime bars (bottom layer) */}
-                      {slot.downtimeBars.map((bar, bi) => {
-                        // Color by source: agent_unavailable/event_gap = red, event_pair = orange
-                        const isOffline = bar.source === "agent_unavailable" || bar.source === "event_gap";
-                        const bg = isOffline
-                          ? "rgba(220, 38, 38, 0.40)"
-                          : bar.severity >= 4
-                            ? "rgba(234, 88, 12, 0.55)"
-                            : "rgba(251, 146, 60, 0.50)";
-                        const border = isOffline
-                          ? "2px solid rgba(220, 38, 38, 0.7)"
-                          : "2px solid rgba(234, 88, 12, 0.8)";
-                        const sourceLabel = isOffline ? "OFFLINE" : "DOWNTIME";
-                        return (
-                          <div
-                            key={`dt-${bi}`}
-                            className="absolute rounded-[2px]"
-                            style={{
-                              left: `${bar.startPct}%`,
-                              width: `${bar.widthPct}%`,
-                              top: hasDowntime ? "2px" : "1px",
-                              bottom: hasDowntime ? "2px" : "1px",
-                              backgroundColor: bg,
-                              borderLeft: border,
-                            }}
-                            title={`${sourceLabel}: ${bar.hostName} — ${bar.problemName} (${Math.round(bar.widthPct / 100 * 24 * 60)}min)`}
-                          />
-                        );
-                      })}
-
-                      {/* Event dots (top layer — small marks) */}
-                      {slot.hours.map((h) => {
-                        const leftPct = (h.hour / 24) * 100;
-                        const dotColor =
-                          h.severity >= 4 ? "#dc2626"
-                            : h.severity >= 2 ? "#3b82f6"
-                              : "#9ca3af";
-                        return (
-                          <div
-                            key={`ev-${h.hour}`}
-                            className="absolute rounded-full"
-                            style={{
-                              left: `calc(${leftPct}% + ${100 / 48}%)`,
-                              top: "50%",
-                              transform: "translate(-50%, -50%)",
-                              width: `${Math.min(4 + h.count * 1.5, 10)}px`,
-                              height: `${Math.min(4 + h.count * 1.5, 10)}px`,
-                              backgroundColor: dotColor,
-                              opacity: 0.85,
-                            }}
-                            title={`${slot.date} ${String(h.hour).padStart(2, "0")}:00 — ${h.count} events`}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {/* Legend */}
-              <div className="flex items-center gap-4 mt-4 ml-[52px]">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-6 h-3 rounded-[2px]" style={{ backgroundColor: "rgba(220, 38, 38, 0.40)", borderLeft: "2px solid rgba(220, 38, 38, 0.7)" }} />
-                  <span className="text-[9px] text-gray-500 font-medium">Offline (agentas nepasiekiamas)</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-6 h-3 rounded-[2px]" style={{ backgroundColor: "rgba(251, 146, 60, 0.50)", borderLeft: "2px solid rgba(234, 88, 12, 0.8)" }} />
-                  <span className="text-[9px] text-gray-500 font-medium">Problema</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full bg-red-600 opacity-85" />
-                  <span className="text-[9px] text-gray-400">High/Disaster</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full bg-blue-500 opacity-85" />
-                  <span className="text-[9px] text-gray-400">Warning</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full bg-gray-400 opacity-85" />
-                  <span className="text-[9px] text-gray-400">Info</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <TimelineChart
+          timeline={data.timeline}
+          totalDowntimeMinutes={data.totalDowntimeMinutes}
+        />
       )}
 
       {/* ===== HEATMAP: Day of week × Hour ===== */}
