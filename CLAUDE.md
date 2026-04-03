@@ -13,30 +13,50 @@ TreeCommerce Cockpit is a monitoring dashboard for TreeCommerce e-commerce pilot
 - **Database**: PostgreSQL 16 (via Docker)
 - **Data Sources**: Zabbix API integration, direct DB queries
 
+### Key Patterns
+
+- **Universal Data Source Manager** (`src/lib/data-source/index.ts`) — every external API call goes through `fetchSource()`. On success → saves to `.cache/` as JSON (status: "live"). On failure → loads from cache (status: "cached"). If both fail → status: "unavailable". Use `fetchAll()` for parallel multi-source fetching (dashboard).
+- **Server Components by default** — all pages use `export const dynamic = "force-dynamic"`. Client components only for interactivity (NavLinks, ClientFilter, TimelineChart, etc.).
+- **DataSourceStatus component** — collapsible bar showing LIVE/CACHED/DOWN per source, used on every page.
+
 ### Key Directories
 
 ```
 src/
   app/                    — Next.js App Router pages
-    analytics/            — Analytics dashboard
+    analytics/            — Zabbix analytics aggregation
     api/                  — API routes
-    components/           — Shared UI components
-    incidents/            — Incident tracking
-    notes/                — Notes system
-    patterns/             — Pattern analysis
-    promotions/           — Promotions management
-    resources/            — Resource management
-    sales/                — Sales monitoring
-    settings/             — App settings
-    uptime/               — Uptime monitoring
-    layout.tsx            — Root layout
-    page.tsx              — Home/Overview page
+      notes/              — Notes CRUD
+      settings/           — App settings + API status check
+      zabbix/             — Zabbix proxy: health/, resources/, sync/, status/, explore/, event-detail/, test/
+    components/           — NavLinks, ClientFilter, DataSourceStatus, SyncButton, AutoSync, AutoRefresh
+    incidents/            — Incident list with filtering
+    notes/                — Operations notes CRUD
+    patterns/             — Incident pattern analysis + TimelineChart
+    promotions/           — 12eat promo/campaign analytics
+    resources/            — Server resource monitoring (CPU/RAM/Disk/Network per host)
+      settings/           — Zabbix API configuration & health check
+    sales/                — 12eat POS sales data per store
+    settings/             — App settings (autostart, 12eat API env toggle)
+    uptime/               — Device uptime, MTTR, downtime periods
+    layout.tsx            — Root layout (header, nav, footer)
+    page.tsx              — Dashboard/Overview: KPIs, AI insights, live problems, severity breakdown
   generated/              — Prisma generated client
   lib/
-    db.ts                 — Database connection
-    params.ts             — Shared param utilities
-    data-source/          — Data source connectors
-    zabbix/               — Zabbix API client
+    db.ts                 — Prisma client singleton
+    params.ts             — URL param sanitization helpers
+    data-source/index.ts  — Universal Data Source Manager with cache fallback
+    zabbix/               — Zabbix integration
+      client.ts           — ZabbixClient class (JSON-RPC 2.0, Bearer token)
+      types.ts            — TypeScript interfaces
+      sync.ts             — Zabbix → DB import
+      insights.ts         — AI-style insights from Zabbix data
+      uptime.ts           — Per-device uptime calculation
+      patterns.ts         — Recurring incident pattern detection
+      analytics.ts        — Metrics aggregation
+      availability.ts     — Host availability calculations
+      cache.ts            — Zabbix-specific caching
+    12eat/client.ts       — 12eat POS REST client (test/prod env switchable)
 prisma/
   schema.prisma           — Database schema
   migrations/             — SQL migrations
@@ -91,3 +111,11 @@ npm run build && npm start
 3. **Docker** — PostgreSQL runs via `docker-compose.yml` in the parent directory (one level up). Credentials: `treecommerce/treecommerce_dev`, DB: `treecommerce_cockpit`, port 5432.
 
 4. **Prisma workflow** — Schema changes: edit `prisma/schema.prisma` → `npx prisma migrate dev --name description` → commit migration files.
+
+5. **Zabbix** — Connected to `monitoring.strongpoint.com` (v7.4.5, 9 hosts). Auth via Bearer token (`ZABBIX_TOKEN` in `.env.local`). JSON-RPC 2.0 protocol.
+
+6. **12eat POS** — REST API client switchable between TEST and PROD via Settings page. Requires VPN, 5s timeout.
+
+7. **UI language** — All user-facing labels are in Lithuanian. Code and comments are in English.
+
+8. **Data source cache** — `.cache/` directory stores JSON fallbacks. Never commit this directory.
