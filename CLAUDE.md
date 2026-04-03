@@ -76,7 +76,7 @@ npm run build && npm start
 
 ## Development
 
-- Playbook: `~/Projects/.playbook/PRINCIPLES.md`
+- Playbook: `~/Projects/AKplaybook/PRINCIPLES.md`
 - Template: `web-react`
 - CI: `.github/workflows/ci.yml`
 - Lint: ESLint (`eslint.config.mjs`)
