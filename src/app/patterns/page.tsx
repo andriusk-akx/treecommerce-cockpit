@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { getPatternData, getAvailableHosts } from "@/lib/zabbix/patterns";
 import { parsePeriodParams, sanitizeParam, validateHostFilter } from "@/lib/params";
 import TimelineChart from "./TimelineChart";
+import PilotRedirectBanner from "@/app/components/PilotRedirectBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -94,6 +95,7 @@ export default async function PatternsPage({ searchParams }: PageProps) {
 
   return (
     <div>
+      <PilotRedirectBanner subPage="patterns" />
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getDeviceUptimeData, type HostUptime } from "@/lib/zabbix/uptime";
 import { parsePeriodParams, sanitizeParam } from "@/lib/params";
+import PilotRedirectBanner from "@/app/components/PilotRedirectBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,7 @@ export default async function UptimePage({ searchParams }: PageProps) {
 
   return (
     <div>
+      <PilotRedirectBanner subPage="uptime" />
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>

@@ -4,15 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Apžvalga" },
-  { href: "/incidents", label: "Įvykiai" },
-  { href: "/notes", label: "Pastabos" },
-  { href: "/uptime", label: "Uptime" },
-  { href: "/patterns", label: "Šablonai" },
-  { href: "/sales", label: "Pardavimai" },
-  { href: "/promotions", label: "Akcijos" },
-  { href: "/analytics", label: "Analitika" },
-  { href: "/resources", label: "Resursai" },
+  { href: "/", label: "Apžvalga", exact: true },
+  { href: "/clients", label: "Klientai" },
+  { href: "/pilots", label: "Pilotai" },
+  { href: "/workbench", label: "Workbench" },
   { href: "/settings", label: "⚙" },
 ];
 
@@ -21,9 +16,10 @@ export default function NavLinks() {
 
   return (
     <nav className="flex gap-5 text-sm font-medium">
-      {NAV_ITEMS.map(({ href, label }) => {
-        const isActive =
-          href === "/" ? pathname === "/" : pathname.startsWith(href);
+      {NAV_ITEMS.map(({ href, label, exact }) => {
+        const isActive = exact
+          ? pathname === href
+          : pathname.startsWith(href);
 
         return (
           <Link

@@ -7,10 +7,65 @@ datasource db {
   provider = "postgresql"
 }
 
-// --- Enums ---
+// ─── Enums ─────────────────────────────────────────────────────────
+
+enum ClientType {
+  EXTERNAL
+  INTERNAL
+  PARTNER
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+  PROSPECT
+}
+
+enum PilotProductType {
+  TREECOMMERCE
+  RETELLECT
+  OTHER
+}
+
+enum PilotStatus {
+  PLANNED
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum PilotVisibility {
+  INTERNAL
+  SHAREABLE
+  CLIENT_FACING
+}
 
 enum DataSourceType {
   ZABBIX
+  TREECOMMERCE_SALES_API
+  RETELLECT_API
+  CSV
+  MANUAL
+}
+
+enum DataSourceAuthType {
+  TOKEN
+  BASIC
+  NONE
+}
+
+enum DataSourceSyncMode {
+  LIVE
+  CACHED
+  MANUAL
+}
+
+enum DeviceType {
+  SCO
+  POS
+  SERVER
+  VM
+  OTHER
 }
 
 enum IncidentSeverity {
@@ -27,51 +82,125 @@ enum IncidentStatus {
   CLOSED
 }
 
-// --- Models ---
+enum ViewType {
+  OVERVIEW
+  BUSINESS
+  TECHNICAL
+  EXECUTIVE
+  SHARE
+}
+
+// ─── Models ────────────────────────────────────────────────────────
 
 model Client {
-  id        String   @id @default(cuid())
-  name      String
-  code      String   @unique
-  createdAt DateTime @default(now())
+  id          String       @id @default(cuid())
+  name        String
+  code        String       @unique
+  type        ClientType   @default(EXTERNAL)
+  status      ClientStatus @default(ACTIVE)
+  ownerName   String?
+  notes       String?      @db.Text
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
+  pilots      Pilot[]
   stores      Store[]
   dataSources DataSource[]
   incidents   Incident[]
-  notes       Note[]
+  noteEntries Note[]
+}
+
+model Pilot {
+  id             String          @id @default(cuid())
+  clientId       String
+  name           String
+  shortCode      String          @unique
+  productType    PilotProductType @default(OTHER)
+  status         PilotStatus     @default(PLANNED)
+  visibility     PilotVisibility @default(INTERNAL)
+  startDate      DateTime?
+  endDate        DateTime?
+  goalSummary    String?         @db.Text
+  internalOwner  String?
+  notes          String?         @db.Text
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  client         Client          @relation(fields: [clientId], references: [id])
+  dataSources    DataSource[]
+  stores         Store[]
+  devices        Device[]
+  incidents      Incident[]
+  noteEntries    Note[]
+  views          View[]
+}
+
+model DataSource {
+  id            String             @id @default(cuid())
+  clientId      String
+  pilotId       String?
+  type          DataSourceType     @default(ZABBIX)
+  name          String
+  baseUrl       String
+  authType      DataSourceAuthType @default(TOKEN)
+  credentialRef String?
+  syncMode      DataSourceSyncMode @default(LIVE)
+  isActive      Boolean            @default(true)
+  lastSyncAt    DateTime?
+  configJson    String?            @db.Text
+  notes         String?            @db.Text
+  createdAt     DateTime           @default(now())
+
+  client Client @relation(fields: [clientId], references: [id])
+  pilot  Pilot? @relation(fields: [pilotId], references: [id])
 }
 
 model Store {
   id        String   @id @default(cuid())
   clientId  String
+  pilotId   String?
   name      String
   code      String
+  country   String?
+  city      String?
+  status    String   @default("active")
   createdAt DateTime @default(now())
 
   client    Client     @relation(fields: [clientId], references: [id])
+  pilot     Pilot?     @relation(fields: [pilotId], references: [id])
+  devices   Device[]
   incidents Incident[]
   notes     Note[]
 
   @@unique([clientId, code])
 }
 
-model DataSource {
-  id        String         @id @default(cuid())
-  clientId  String
-  type      DataSourceType
-  name      String
-  baseUrl   String
-  isActive  Boolean        @default(true)
-  createdAt DateTime       @default(now())
+model Device {
+  id               String     @id @default(cuid())
+  pilotId          String
+  storeId          String?
+  name             String
+  sourceHostKey    String?
+  deviceType       DeviceType @default(OTHER)
+  cpuModel         String?
+  ramGb            Float?
+  os               String?
+  status           String     @default("active")
+  retellectEnabled Boolean    @default(false)
+  notes            String?    @db.Text
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
 
-  client Client @relation(fields: [clientId], references: [id])
+  pilot Pilot  @relation(fields: [pilotId], references: [id])
+  store Store? @relation(fields: [storeId], references: [id])
 }
 
 model Incident {
   id          String           @id @default(cuid())
   clientId    String
+  pilotId     String?
   storeId     String?
-  sourceType  DataSourceType
+  sourceType  DataSourceType   @default(ZABBIX)
   externalId  String?
   severity    IncidentSeverity
   category    String
@@ -84,6 +213,7 @@ model Incident {
   updatedAt   DateTime         @updatedAt
 
   client Client  @relation(fields: [clientId], references: [id])
+  pilot  Pilot?  @relation(fields: [pilotId], references: [id])
   store  Store?  @relation(fields: [storeId], references: [id])
   notes  Note[]
 }
@@ -91,14 +221,32 @@ model Incident {
 model Note {
   id         String   @id @default(cuid())
   clientId   String
+  pilotId    String?
   storeId    String?
   incidentId String?
   title      String
-  body       String
+  body       String   @db.Text
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   client   Client    @relation(fields: [clientId], references: [id])
+  pilot    Pilot?    @relation(fields: [pilotId], references: [id])
   store    Store?    @relation(fields: [storeId], references: [id])
   incident Incident? @relation(fields: [incidentId], references: [id])
+}
+
+model View {
+  id          String         @id @default(cuid())
+  pilotId     String
+  name        String
+  slug        String
+  viewType    ViewType       @default(OVERVIEW)
+  visibility  PilotVisibility @default(INTERNAL)
+  configJson  String?        @db.Text
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  pilot Pilot @relation(fields: [pilotId], references: [id])
+
+  @@unique([pilotId, slug])
 }

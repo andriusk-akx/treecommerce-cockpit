@@ -1,17 +1,37 @@
+import { prisma } from "@/lib/db";
+import { notFound } from "next/navigation";
 import { getRecentSalesWithCache, getApiInfo } from "@/lib/12eat/client";
-import PromoDashboard from "./PromoDashboard";
+import PromoDashboard from "@/app/promotions/PromoDashboard";
 import DataSourceStatus from "@/app/components/DataSourceStatus";
-import PilotRedirectBanner from "@/app/components/PilotRedirectBanner";
 
 export const dynamic = "force-dynamic";
 
-export default async function PromotionsPage() {
+interface PageProps {
+  params: Promise<{ pilotId: string }>;
+}
+
+export default async function PilotPromotionsPage({ params }: PageProps) {
+  const { pilotId } = await params;
+
+  const pilot = await prisma.pilot.findUnique({
+    where: { id: pilotId },
+    select: { id: true, name: true, productType: true },
+  });
+
+  if (!pilot) return notFound();
+
+  if (pilot.productType !== "TREECOMMERCE") {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 px-5 py-12 text-center">
+        <p className="text-gray-400">Akcijų puslapis prieinamas tik TreeCommerce tipo pilotams.</p>
+      </div>
+    );
+  }
+
   const apiInfo = getApiInfo();
   const result = await getRecentSalesWithCache(500);
+  const { analytics, sourceResult } = result;
 
-  const { analytics, isLive, cachedAt, sourceResult } = result;
-
-  // Always show status bar
   const sourceSummary = [{
     source: sourceResult.source,
     label: sourceResult.label,
@@ -26,7 +46,7 @@ export default async function PromotionsPage() {
     return (
       <div>
         <DataSourceStatus sources={sourceSummary} />
-        <h2 className="text-lg font-semibold text-gray-800 mb-2">Akcijų Dashboard</h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-2">Akcijos — {pilot.name}</h2>
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
           <span className="font-semibold">Nėra duomenų.</span> 12eat API nepasiekiamas ir nėra išsaugotų duomenų.
           <p className="text-xs text-red-400 mt-1">
@@ -39,8 +59,11 @@ export default async function PromotionsPage() {
 
   return (
     <div>
-      <PilotRedirectBanner subPage="promotions" productType="TREECOMMERCE" />
       <DataSourceStatus sources={sourceSummary} />
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-gray-800">Akcijos — {pilot.name}</h2>
+        <p className="text-xs text-gray-400 mt-0.5">Reklaminių kampanijų analitika</p>
+      </div>
       <PromoDashboard
         promo={analytics.promo}
         totalSales={analytics.totalSales}
@@ -50,8 +73,8 @@ export default async function PromotionsPage() {
         timeRange={analytics.timeRange}
         isTestData={analytics.isTestData}
         apiEnv={analytics.apiEnv}
-        isLive={isLive}
-        cachedAt={cachedAt}
+        isLive={result.isLive}
+        cachedAt={result.cachedAt}
       />
     </div>
   );

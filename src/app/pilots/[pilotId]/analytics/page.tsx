@@ -1,25 +1,29 @@
-import { getAnalytics } from "@/lib/zabbix/analytics";
 import { prisma } from "@/lib/db";
-import { parsePeriodParams, sanitizeParam } from "@/lib/params";
-import PilotRedirectBanner from "@/app/components/PilotRedirectBanner";
+import { notFound } from "next/navigation";
+import { getAnalytics } from "@/lib/zabbix/analytics";
+import { parsePeriodParams } from "@/lib/params";
 
 export const dynamic = "force-dynamic";
 
 interface PageProps {
-  searchParams: Promise<{ days?: string; hours?: string; client?: string }>;
+  params: Promise<{ pilotId: string }>;
+  searchParams: Promise<{ days?: string; hours?: string }>;
 }
 
-export default async function AnalyticsPage({ searchParams }: PageProps) {
-  const params = await searchParams;
-  const { days, hoursParam, periodLabel } = parsePeriodParams(params);
-  const clientFilter = sanitizeParam(params.client);
+export default async function PilotAnalyticsPage({ params, searchParams }: PageProps) {
+  const { pilotId } = await params;
+  const sp = await searchParams;
+  const { days, hoursParam, periodLabel } = parsePeriodParams(sp);
 
-  // Get store name for filtering Zabbix hosts
-  let clientStoreName: string | null = null;
-  if (clientFilter) {
-    const store = await prisma.store.findUnique({ where: { id: clientFilter } });
-    clientStoreName = store?.name || null;
-  }
+  const pilot = await prisma.pilot.findUnique({
+    where: { id: pilotId },
+    include: { client: { select: { name: true } } },
+  });
+
+  if (!pilot) return notFound();
+
+  const clientStoreName = pilot.client.name;
+  const basePath = `/pilots/${pilotId}/analytics`;
 
   let analytics;
   try {
@@ -27,9 +31,9 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
   } catch (e) {
     return (
       <div>
-        <h2 className="text-lg font-semibold text-gray-800 mb-6">Analytics</h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-6">Analitika — {pilot.name}</h2>
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-          Failed to load analytics: {String(e)}
+          Nepavyko gauti analitikos: {String(e)}
         </div>
       </div>
     );
@@ -37,24 +41,19 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
 
   return (
     <div>
-      <PilotRedirectBanner subPage="analytics" />
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-lg font-semibold text-gray-800">
-            Analytics{clientStoreName ? ` — ${clientStoreName}` : ""}
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-800">Analitika — {pilot.name}</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            Last {analytics.period} — {analytics.totalEvents} events analyzed
+            {periodLabel} — {analytics.totalEvents} įvykiai analizuota
           </p>
         </div>
         <div className="flex gap-2">
           <a
-            href={`/analytics?hours=1${clientFilter ? `&client=${clientFilter}` : ""}`}
+            href={`${basePath}?hours=1`}
             className={`px-3 py-1.5 text-xs rounded font-medium ${
-              hoursParam === 1
-                ? "bg-gray-800 text-white"
-                : "bg-white text-gray-600 border border-gray-300 hover:bg-gray-50"
+              hoursParam === 1 ? "bg-gray-800 text-white" : "bg-white text-gray-600 border border-gray-300 hover:bg-gray-50"
             }`}
           >
             1h
@@ -62,11 +61,9 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
           {[1, 7, 14, 30, 90].map((d) => (
             <a
               key={d}
-              href={`/analytics?days=${d}${clientFilter ? `&client=${clientFilter}` : ""}`}
+              href={`${basePath}?days=${d}`}
               className={`px-3 py-1.5 text-xs rounded font-medium ${
-                !hoursParam && Math.round(days) === d
-                  ? "bg-gray-800 text-white"
-                  : "bg-white text-gray-600 border border-gray-300 hover:bg-gray-50"
+                !hoursParam && Math.round(days) === d ? "bg-gray-800 text-white" : "bg-white text-gray-600 border border-gray-300 hover:bg-gray-50"
               }`}
             >
               {d}d
@@ -77,15 +74,11 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
 
       {/* Summary KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <SummaryCard label="Total Problems" value={analytics.totalProblems} />
-        <SummaryCard label="Resolved" value={analytics.totalResolved} variant="success" />
+        <SummaryCard label="Problemos" value={analytics.totalProblems} />
+        <SummaryCard label="Išspręsta" value={analytics.totalResolved} variant="success" />
+        <SummaryCard label="Vid. sprendimo laikas" value={formatMinutes(analytics.avgResolutionMinutes)} isText />
         <SummaryCard
-          label="Avg Resolution Time"
-          value={formatMinutes(analytics.avgResolutionMinutes)}
-          isText
-        />
-        <SummaryCard
-          label="Unresolved"
+          label="Neišspręsta"
           value={analytics.totalProblems - analytics.totalResolved}
           variant={analytics.totalProblems - analytics.totalResolved > 0 ? "warning" : "success"}
         />
@@ -93,21 +86,16 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
 
       {/* Daily Trend */}
       <div className="bg-white rounded-lg border border-gray-200 p-5 mb-8">
-        <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">
-          Daily Incident Trend
-        </h3>
+        <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Incidentų tendencija</h3>
         <div className="flex items-end gap-1 h-32">
           {analytics.dailyCounts.map((day) => {
             const maxCount = Math.max(...analytics.dailyCounts.map((d) => d.count), 1);
             const height = Math.max((day.count / maxCount) * 100, day.count > 0 ? 4 : 0);
             const isToday = day.date === new Date().toISOString().slice(0, 10);
             return (
-              <div
-                key={day.date}
-                className="flex-1 flex flex-col items-center justify-end group relative"
-              >
+              <div key={day.date} className="flex-1 flex flex-col items-center justify-end group relative">
                 <div className="absolute -top-6 hidden group-hover:block bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
-                  {day.date}: {day.count} problems, {day.resolved} resolved
+                  {day.date}: {day.count} problemos, {day.resolved} išspręsta
                 </div>
                 <div
                   className={`w-full rounded-t ${isToday ? "bg-blue-500" : day.count > 0 ? "bg-orange-400" : "bg-gray-100"}`}
@@ -119,7 +107,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
         </div>
         <div className="flex justify-between text-xs text-gray-400 mt-2">
           <span>{analytics.dailyCounts[0]?.date}</span>
-          <span>Today</span>
+          <span>Šiandien</span>
         </div>
       </div>
 
@@ -127,24 +115,20 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         {/* Top Problems */}
         <div className="bg-white rounded-lg border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">
-            Most Frequent Problems
-          </h3>
+          <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Dažniausios problemos</h3>
           {analytics.topProblems.length === 0 ? (
-            <p className="text-sm text-green-600 font-medium py-4 text-center">No problems in this period!</p>
+            <p className="text-sm text-green-600 font-medium py-4 text-center">Problemų nėra!</p>
           ) : (
             <div className="space-y-3">
               {analytics.topProblems.map((prob, i) => (
                 <div key={i} className="border-b border-gray-50 pb-3 last:border-0">
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-sm font-medium text-gray-800 leading-tight">{prob.name}</span>
-                    <span className="bg-gray-100 text-gray-700 text-xs font-bold px-2 py-0.5 rounded shrink-0">
-                      {prob.count}x
-                    </span>
+                    <span className="bg-gray-100 text-gray-700 text-xs font-bold px-2 py-0.5 rounded shrink-0">{prob.count}x</span>
                   </div>
                   <div className="flex gap-3 mt-1 text-xs text-gray-400">
                     <span className={severityColor(prob.severity)}>{prob.severity}</span>
-                    <span>Avg: {formatMinutes(prob.avgDurationMinutes)}</span>
+                    <span>Vid.: {formatMinutes(prob.avgDurationMinutes)}</span>
                     <span>{prob.hosts.join(", ")}</span>
                   </div>
                 </div>
@@ -153,11 +137,9 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
           )}
         </div>
 
-        {/* Host Uptime */}
+        {/* Host Reliability */}
         <div className="bg-white rounded-lg border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">
-            Host Reliability
-          </h3>
+          <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Patikimumas</h3>
           {analytics.hostDowntimes.length === 0 ? (
             <p className="text-sm text-green-600 font-medium py-4 text-center">100% uptime!</p>
           ) : (
@@ -177,8 +159,8 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
                     />
                   </div>
                   <div className="flex gap-4 text-xs text-gray-400">
-                    <span>{host.incidentCount} incidents</span>
-                    <span>Downtime: {formatMinutes(host.totalDowntimeMinutes)}</span>
+                    <span>{host.incidentCount} incidentai</span>
+                    <span>Prastova: {formatMinutes(host.totalDowntimeMinutes)}</span>
                     <span>MTTR: {formatMinutes(host.avgResolutionMinutes)}</span>
                   </div>
                 </div>
@@ -188,49 +170,43 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {/* Triggers by Host */}
+      {/* Monitoring Coverage */}
       <div className="bg-white rounded-lg border border-gray-200 p-5 mb-8">
-        <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">
-          Monitoring Coverage by Host
-        </h3>
-        <div className="overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="text-gray-500 text-left text-xs uppercase tracking-wide">
-              <tr>
-                <th className="pb-2">Host</th>
-                <th className="pb-2">Total Triggers</th>
-                <th className="pb-2">Active Problems</th>
-                <th className="pb-2">Status</th>
+        <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4">Stebėjimo aprėptis</h3>
+        <table className="w-full text-sm">
+          <thead className="text-gray-500 text-left text-xs uppercase tracking-wide">
+            <tr>
+              <th className="pb-2">Hostas</th>
+              <th className="pb-2">Trigeriai</th>
+              <th className="pb-2">Aktyvios problemos</th>
+              <th className="pb-2">Statusas</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {analytics.activeTriggersByHost.map((host) => (
+              <tr key={host.hostName}>
+                <td className="py-2 font-medium text-gray-800">{host.hostName}</td>
+                <td className="py-2 text-gray-600">{host.triggerCount}</td>
+                <td className="py-2">
+                  <span className={`font-medium ${host.activeProblemCount > 0 ? "text-red-600" : "text-green-600"}`}>
+                    {host.activeProblemCount}
+                  </span>
+                </td>
+                <td className="py-2">
+                  {host.activeProblemCount === 0 ? (
+                    <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">OK</span>
+                  ) : (
+                    <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">PROBLEMA</span>
+                  )}
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {analytics.activeTriggersByHost.map((host) => (
-                <tr key={host.hostName}>
-                  <td className="py-2 font-medium text-gray-800">{host.hostName}</td>
-                  <td className="py-2 text-gray-600">{host.triggerCount}</td>
-                  <td className="py-2">
-                    <span className={`font-medium ${host.activeProblemCount > 0 ? "text-red-600" : "text-green-600"}`}>
-                      {host.activeProblemCount}
-                    </span>
-                  </td>
-                  <td className="py-2">
-                    {host.activeProblemCount === 0 ? (
-                      <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">OK</span>
-                    ) : (
-                      <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">PROBLEM</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
 }
-
-// --- Helpers ---
 
 function formatMinutes(minutes: number): string {
   if (minutes < 1) return "<1m";
@@ -260,7 +236,6 @@ function SummaryCard({ label, value, variant, isText }: {
   let borderColor = "border-gray-200";
   if (variant === "success") { valueColor = "text-green-600"; borderColor = "border-green-200"; }
   else if (variant === "warning") { valueColor = "text-orange-600"; borderColor = "border-orange-200"; }
-
   return (
     <div className={`bg-white rounded-lg border ${borderColor} px-5 py-4`}>
       <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">{label}</p>
