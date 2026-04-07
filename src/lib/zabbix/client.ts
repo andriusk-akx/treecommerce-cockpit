@@ -96,7 +96,7 @@ export class ZabbixClient {
     return this.request("item.get", {
       output: ["itemid", "hostid", "name", "key_", "lastvalue", "units", "lastclock", "value_type", "state", "status"],
       hostids: hostIds,
-      ...(search ? { search: { key_: search }, searchWildcardsEnabled: true } : {}),
+      ...(search ? { search: { key_: search },  } : {}),
       filter: { status: 0, state: 0 },
       sortfield: "name",
     });
@@ -121,16 +121,21 @@ export class ZabbixClient {
     const hostIds = hosts.map((h: any) => h.hostid);
     if (hostIds.length === 0) return [];
 
-    // Fetch all relevant items for these hosts
-    const items = await this.request("item.get", {
+    // Fetch all relevant items — Zabbix search doesn't support comma-separated terms
+    // so we run parallel queries for each category
+    const itemParams = {
       output: ["itemid", "hostid", "name", "key_", "lastvalue", "units", "lastclock", "value_type"],
       hostids: hostIds,
       filter: { status: 0, state: 0 },
-      search: { key_: "system.cpu,vm.memory,vfs.fs,net.if" },
-      searchByAny: true,
-      searchWildcardsEnabled: true,
       sortfield: "name",
-    });
+    };
+    const [cpuItems, memItems, diskItems, netItems] = await Promise.all([
+      this.request("item.get", { ...itemParams, search: { key_: "system.cpu" } }),
+      this.request("item.get", { ...itemParams, search: { key_: "vm.memory" } }),
+      this.request("item.get", { ...itemParams, search: { key_: "vfs.fs" } }),
+      this.request("item.get", { ...itemParams, search: { key_: "net.if" } }),
+    ]);
+    const items = [...cpuItems, ...memItems, ...diskItems, ...netItems];
 
     // Group by host
     const hostMap = new Map<string, any>();
@@ -155,10 +160,12 @@ export class ZabbixClient {
       const key = item.key_ as string;
       const val = parseFloat(item.lastvalue);
 
-      // CPU
+      // CPU — track user/system separately, compute total
       if (key.includes("system.cpu.util") || key === "system.cpu.load[all,avg1]" || key === "system.cpu.load[percpu,avg1]") {
-        if (!host.cpu) host.cpu = { utilization: 0, load: 0, itemId: item.itemid, valueType: item.value_type };
-        if (key.includes("system.cpu.util")) host.cpu.utilization = val;
+        if (!host.cpu) host.cpu = { utilization: 0, userPct: 0, systemPct: 0, load: 0, itemId: item.itemid, valueType: item.value_type };
+        if (key === "system.cpu.util[,user]") host.cpu.userPct = val;
+        if (key === "system.cpu.util[,system]") host.cpu.systemPct = val;
+        if (key === "system.cpu.util" && val > 0) host.cpu.utilization = val;
         if (key.includes("system.cpu.load")) host.cpu.load = val;
         host.cpu.itemId = item.itemid;
         host.cpu.valueType = item.value_type;
@@ -193,6 +200,13 @@ export class ZabbixClient {
         if (!host.network) host.network = { inBps: 0, outBps: 0, inItemId: "", outItemId: "", valueType: item.value_type };
         if (key.includes("net.if.in")) { host.network.inBps = val; host.network.inItemId = item.itemid; }
         if (key.includes("net.if.out")) { host.network.outBps = val; host.network.outItemId = item.itemid; }
+      }
+    }
+
+    // Post-process: compute CPU utilization from user+system if base key was 0
+    for (const host of hostMap.values()) {
+      if (host.cpu && host.cpu.utilization === 0 && (host.cpu.userPct > 0 || host.cpu.systemPct > 0)) {
+        host.cpu.utilization = host.cpu.userPct + host.cpu.systemPct;
       }
     }
 

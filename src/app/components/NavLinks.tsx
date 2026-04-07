@@ -4,11 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Apžvalga", exact: true },
-  { href: "/clients", label: "Klientai" },
+  { href: "/", label: "Home", exact: true },
+  { href: "/retellect", label: "Retellect" },
   { href: "/pilots", label: "Pilotai" },
-  { href: "/workbench", label: "Workbench" },
-  { href: "/settings", label: "⚙" },
+  { href: "/clients", label: "Klientai" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export default function NavLinks() {
