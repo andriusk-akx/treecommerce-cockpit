@@ -164,9 +164,23 @@ export class ZabbixClient {
   }
 
   /**
-   * Get CPU history for multiple items, aggregated into daily max/avg.
-   * Uses history.get (raw 5-min samples) since trend.get may not be available.
-   * Fetches in batches to avoid hitting API limits.
+   * Get CPU history for multiple items, aggregated into daily max/avg/min.
+   *
+   * Strategy: combine `trend.get` (Zabbix's pre-aggregated hourly data, fast,
+   * cheap, but only retained ~5–7 days on this deployment) with `history.get`
+   * (raw 1-min samples, full retention but slower). The two sources are
+   * unioned: a per-(host,date) bucket takes the max across both, so we never
+   * lose recent days due to limit truncation.
+   *
+   * Why per-item history.get instead of batched: items emit at different
+   * delays (5min vs 1min). When a 1-min item shares a batch with 5-min items
+   * and `limit: 50000` clips the response, the recent days for some items
+   * disappear silently. Per-item fetch with 25000-record limit is enough for
+   * 14 days × 1440 1-min samples and avoids cross-item contention.
+   *
+   * Daily grouping uses Europe/Vilnius local date — the cockpit's working
+   * timezone — so that timeline cell labels match the day boundaries the
+   * drill-down API uses.
    */
   async getCpuHistoryDaily(
     itemIds: string[],
@@ -174,44 +188,92 @@ export class ZabbixClient {
     daysBack: number = 14
   ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number }[]> {
     if (itemIds.length === 0) return [];
-    // Limit to actual available history (Zabbix retention is typically 2-7 days)
     const effectiveDays = Math.min(daysBack, 14);
     const timeFrom = Math.floor(Date.now() / 1000) - effectiveDays * 24 * 3600;
 
-    // Fetch all items in one request — Zabbix handles multiple itemids efficiently
-    let allRecords: any[] = [];
+    type Bucket = { max: number; sum: number; min: number; count: number };
+    const dailyMap = new Map<string, Bucket>();
+    const localDate = (clockSec: number) =>
+      new Date(clockSec * 1000).toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" });
+    const merge = (hostId: string, date: string, value: number) => {
+      const key = `${hostId}|${date}`;
+      const b = dailyMap.get(key);
+      if (b) {
+        b.max = Math.max(b.max, value);
+        b.min = Math.min(b.min, value);
+        b.sum += value;
+        b.count += 1;
+      } else {
+        dailyMap.set(key, { max: value, sum: value, min: value, count: 1 });
+      }
+    };
+
+    // 1) trend.get — single call for all items, cheap (~hour-level aggregates).
+    //    Retention is short on this Zabbix (~5–7 days) but covers exactly the
+    //    recent days that history.get tends to truncate.
     try {
-      allRecords = await this.request("history.get", {
-        output: ["itemid", "clock", "value"],
+      const trends = (await this.request("trend.get", {
+        output: ["itemid", "clock", "value_min", "value_avg", "value_max"],
         itemids: itemIds,
-        history: 0, // float
         time_from: String(timeFrom),
-        sortfield: "clock",
-        sortorder: "ASC",
-        limit: 500000,
-      });
+        limit: 100000,
+      })) as Array<{ itemid: string; clock: string; value_min: string; value_avg: string; value_max: string }>;
+      for (const t of trends) {
+        const hostId = itemHostMap.get(t.itemid);
+        if (!hostId) continue;
+        const clockSec = parseInt(t.clock);
+        const date = localDate(clockSec);
+        const vmax = parseFloat(t.value_max) || 0;
+        const vavg = parseFloat(t.value_avg) || 0;
+        const vmin = parseFloat(t.value_min) || 0;
+        // Treat each hourly trend record as ONE observation for avg purposes —
+        // it is itself an hourly mean, so summing avgs and dividing by count
+        // gives a reasonable day-level mean. Min/max use the trend's min/max.
+        const key = `${hostId}|${date}`;
+        const b = dailyMap.get(key);
+        if (b) {
+          b.max = Math.max(b.max, vmax);
+          b.min = Math.min(b.min, vmin);
+          b.sum += vavg;
+          b.count += 1;
+        } else {
+          dailyMap.set(key, { max: vmax, sum: vavg, min: vmin, count: 1 });
+        }
+      }
     } catch (e) {
-      console.warn(`[Zabbix] history.get failed:`, e);
-      return [];
+      console.warn("[Zabbix] trend.get failed, will rely on history.get:", e);
     }
 
-    // Aggregate into daily max/avg/min per host
-    const dailyMap = new Map<string, { max: number; sum: number; min: number; count: number }>();
-    for (const r of allRecords) {
-      const hostId = itemHostMap.get(r.itemid);
-      if (!hostId) continue;
-      const date = new Date(parseInt(r.clock) * 1000).toISOString().slice(0, 10);
-      const val = parseFloat(r.value) || 0;
-      const key = `${hostId}|${date}`;
-      const existing = dailyMap.get(key);
-      if (existing) {
-        existing.max = Math.max(existing.max, val);
-        existing.min = Math.min(existing.min, val);
-        existing.sum += val;
-        existing.count++;
-      } else {
-        dailyMap.set(key, { max: val, sum: val, min: val, count: 1 });
+    // 2) history.get — per item, with sortorder DESC + ample limit. Even at
+    //    1-min sampling, 25000 covers 17 days; combined with the 14-day window
+    //    no item gets truncated. Run with bounded concurrency to keep the
+    //    Zabbix API happy.
+    const PER_ITEM_LIMIT = 25000;
+    const CONCURRENCY = 8;
+    const fetchOne = async (itemId: string) => {
+      try {
+        const records = (await this.request("history.get", {
+          output: ["itemid", "clock", "value"],
+          itemids: [itemId],
+          history: 0,
+          time_from: String(timeFrom),
+          sortfield: "clock",
+          sortorder: "DESC",
+          limit: PER_ITEM_LIMIT,
+        })) as Array<{ itemid: string; clock: string; value: string }>;
+        const hostId = itemHostMap.get(itemId);
+        if (!hostId) return;
+        for (const r of records) {
+          const date = localDate(parseInt(r.clock));
+          merge(hostId, date, parseFloat(r.value) || 0);
+        }
+      } catch (e) {
+        console.warn(`[Zabbix] history.get item ${itemId} failed:`, e);
       }
+    };
+    for (let i = 0; i < itemIds.length; i += CONCURRENCY) {
+      const slice = itemIds.slice(i, i + CONCURRENCY);
+      await Promise.all(slice.map(fetchOne));
     }
 
     const result: { hostId: string; date: string; max: number; avg: number; min: number }[] = [];

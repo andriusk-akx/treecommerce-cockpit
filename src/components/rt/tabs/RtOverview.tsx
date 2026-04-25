@@ -275,14 +275,14 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
               type="button"
               onClick={() => setWithinGroupSort((v) => v === "retellect-on" ? "default" : "retellect-on")}
               className={`w-24 flex justify-start items-center flex-shrink-0 cursor-pointer hover:text-blue-600 transition ${withinGroupSort === "retellect-on" ? "text-blue-600" : ""}`}
-              title="Click to sort within group: Retellect on first"
-            >Retellect CPU{withinGroupSort === "retellect-on" ? " ↓" : ""}</button>
+              title="Latest 1-min sample of python.cpu sum (Retellect-only). Age label appears next to the value if the sample is older than 5 min. Click to sort: Retellect-on hosts first."
+            >Retellect CPU (latest){withinGroupSort === "retellect-on" ? " ↓" : ""}</button>
             <button
               type="button"
               onClick={() => setWithinGroupSort((v) => v === "cpu-desc" ? "default" : "cpu-desc")}
               className={`w-20 flex justify-start items-center flex-shrink-0 cursor-pointer hover:text-blue-600 transition ${withinGroupSort === "cpu-desc" ? "text-blue-600" : ""}`}
-              title="Click to sort within group by CPU (high → low)"
-            >Host CPU{withinGroupSort === "cpu-desc" ? " ↓" : ""}</button>
+              title="Latest 1-min sample of system.cpu.util — instantaneous host CPU, NOT a 1-hour average. The age label (e.g. '1h') means the sample is that old. Click to sort by CPU desc."
+            >Host CPU (latest){withinGroupSort === "cpu-desc" ? " ↓" : ""}</button>
           </div>
           <div className="space-y-1.5 text-sm max-h-80 overflow-y-auto pr-6">
             {(() => {
@@ -370,7 +370,6 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   : r.cpuTotal > 0 ? "text-emerald-600"
                   : "text-gray-400";
                 const staleLabel = r.ageSec === null ? "no data" : r.ageSec < 300 ? "live" : formatAgeShort(r.ageSec);
-                const staleColor = r.ageSec === null || (r.ageSec ?? 0) > 1800 ? "text-gray-400" : (r.ageSec ?? 0) > 300 ? "text-amber-500" : "text-emerald-500";
                 out.push(
                   <div key={r.hostId} className="flex items-center gap-3">
                     <span className="flex-1 min-w-0 truncate text-gray-700 text-xs">{r.hostName}</span>

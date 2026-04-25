@@ -10,6 +10,12 @@ import { RtReference } from "./tabs/RtReference";
 import { RtCapacityRisk } from "./tabs/RtCapacityRisk";
 import { RtHypotheses } from "./tabs/RtHypotheses";
 import { RtDataHealth } from "./tabs/RtDataHealth";
+// `RtFiltersBar` (chip bar with active-filter chips and "Clear all") is
+// implemented in RtFiltersContext but intentionally not mounted here yet —
+// the surface felt too noisy for the current dashboard. Filters still persist
+// across tabs via the provider; the bar can be turned back on by importing
+// it alongside RtFiltersProvider and rendering above the tabs.
+import { RtFiltersProvider } from "./RtFiltersContext";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -113,9 +119,9 @@ export interface ZabbixData {
 
 const tabs = [
   { id: "overview", label: "Overview" },
+  { id: "timeline", label: "CPU Timeline" },
   { id: "inventory", label: "Host Inventory" },
   { id: "health", label: "Data Health" },
-  { id: "timeline", label: "CPU Timeline" },
   { id: "cpu", label: "CPU Comparison" },
   { id: "reference", label: "Resource Overview" },
   { id: "risk", label: "Capacity Risk" },
@@ -168,6 +174,7 @@ export function RtPilotWorkspace({
   ).length;
 
   return (
+    <RtFiltersProvider pilotId={pilot.id}>
     <div>
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
@@ -241,5 +248,6 @@ export function RtPilotWorkspace({
         {activeTab === "hypotheses" && <RtHypotheses pilot={pilot} zabbix={zabbix} />}
       </div>
     </div>
+    </RtFiltersProvider>
   );
 }

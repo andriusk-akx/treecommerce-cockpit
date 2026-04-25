@@ -1,29 +1,34 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
 import { generateIntervalData, type IntervalSlot } from "./rt-timeline-math";
 import { DataCoverageBanner } from "./DataCoverageBanner";
+import { useRtFilters } from "../RtFiltersContext";
 
+// Heatmap is a per-DAY peak view, so periods shorter than 1 day make no sense.
+// Trend retention on this Zabbix is also limited (~5–7 days for trend.get,
+// 14 days for raw history.get), so we don't expose 30d/90d either until the
+// data layer can backfill from a rollup table.
 const PERIODS = [
-  { id: "1h", label: "1h", days: 0 },
-  { id: "1d", label: "1d", days: 1 },
-  { id: "7d", label: "7d", days: 7 },
   { id: "14d", label: "14d", days: 14 },
   { id: "30d", label: "30d", days: 30 },
   { id: "90d", label: "90d", days: 90 },
 ] as const;
 
+// 1m default — agent already samples every minute, so no info loss.
+// 5m / 15m smooth out short spikes; 1h shows the broadest pattern.
 const GRANULARITIES = [
-  { id: 60, label: "1h", slots: 24 },
-  { id: 15, label: "15min", slots: 96 },
+  { id: 1, label: "1min", slots: 1440 },
   { id: 5, label: "5min", slots: 288 },
+  { id: 15, label: "15min", slots: 96 },
+  { id: 60, label: "1h", slots: 24 },
 ] as const;
 
 const C = {
   belowBg: "#e0effe", belowText: "#868e96",
   thresholdBg: "#fbbf24", highBg: "#f59f00", criticalBg: "#ef4444", exceededText: "#fff",
-  retellect: "#fa5252", scoApp: "#f59f00", system: "#0c8feb", free: "#e0effe",
+  retellect: "#fa5252", scoApp: "#f59f00", db: "#9775fa", system: "#0c8feb", free: "#e0effe",
   pillActive: "#0070c9", border: "#e9ecef", headerBg: "#f1f3f5", headerText: "#868e96",
   textSec: "#6c757d", okGreen: "#059669",
   riskRedBg: "#fef2f2", riskRedText: "#b91c1c",
@@ -41,11 +46,24 @@ const DEVICE_COLORS: Record<string, { bg: string; text: string }> = {
 const PROCESSES = [
   { key: "retellect" as const, label: "Retellect", color: C.retellect },
   { key: "scoApp" as const, label: "SCO App", color: C.scoApp },
+  { key: "db" as const, label: "DB (SQL)", color: C.db },
   { key: "system" as const, label: "System", color: C.system },
   { key: "free" as const, label: "Free", color: C.free, border: true },
 ];
 
-interface DrillState { date: string; dateObj: Date; hostName: string; peak: number; }
+// Drill-down state. `hostId` is the Zabbix host id — unique even when device
+// names collide across stores (e.g. multiple "SCO2" devices in different
+// pilots). `displayName` is what we show in headers ("SCO2"). `sourceHostKey`
+// is the full Zabbix display name (e.g. "SHM Pavilnionys [T803] SCO2") used
+// only for diagnostic display.
+interface DrillState {
+  date: string;
+  dateObj: Date;
+  hostId: string;
+  displayName: string;
+  sourceHostKey: string;
+  peak: number;
+}
 
 type SortKey = "name" | "type" | "exceed" | "cpu";
 type SortDir = "asc" | "desc";
@@ -95,20 +113,58 @@ function slotEndLabel(slot: IntervalSlot, minutesPerSlot: number): string {
 // ─── Component ──────────────────────────────────────────────────────
 
 export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: ZabbixData }) {
-  const [threshold, setThreshold] = useState(70);
-  const [period, setPeriod] = useState("14d");
+  // Cross-tab filters live in the workspace-level RtFiltersContext so they
+  // survive tab switches and page reloads. Tab-local UI state (drill-down
+  // selection, sort, custom-input toggles) stays in component state.
+  const { filters, setFilter } = useRtFilters();
+  const threshold = filters.threshold;
+  const setThreshold = (v: number) => setFilter("threshold", v);
+  const period = filters.period;
+  const setPeriod = (v: string) => setFilter("period", v);
+  const storeFilter = filters.store;
+  const setStoreFilter = (v: string) => setFilter("store", v);
+  const search = filters.search;
+  const setSearch = (v: string) => setFilter("search", v);
+  const granularity = filters.granularity;
+  const setGranularity = (v: number) => setFilter("granularity", v);
+  // chartMode kept in filter context for backwards-compat with stored prefs;
+  // chart now has a single visualisation (line) so we don't read it.
+
   const [drill, setDrill] = useState<DrillState | null>(null);
-  const [storeFilter, setStoreFilter] = useState("all");
   const [drillTab, setDrillTab] = useState<"process" | "resources">("process");
-  const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("exceed");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
-  const [granularity, setGranularity] = useState<number>(60);
-  const [customMin, setCustomMin] = useState<string>("");
-  const [showCustom, setShowCustom] = useState(false);
+  // (custom-granularity state removed — only fixed presets are exposed now.)
   const [customPeriodDays, setCustomPeriodDays] = useState<string>("");
   const [showCustomPeriod, setShowCustomPeriod] = useState(false);
+
+  // Real per-process history fetched when user drills into a host.
+  // Categories: retellect (sum python*.cpu), scoApp (spss), db (sql), system (vm).
+  // sysCpuAvg/sysCpuMax: overall system.cpu.util[,,avg1] for the same slot,
+  //   shown as a reference line above the per-process bars (per-process sum
+  //   only counts monitored processes, while system.cpu.util counts everything).
+  type ProcessSlot = {
+    slot: number; hourKey: string; hour: number; minute: number; label: string;
+    retellect: number; scoApp: number; db: number; system: number; free: number;
+    sysCpuAvg: number | null; sysCpuMax: number | null;
+  };
+  const [drillIntervals, setDrillIntervals] = useState<ProcessSlot[] | null>(null);
+  const [drillLoading, setDrillLoading] = useState(false);
+  // chartMode lives in RtFiltersContext (above) so it persists across tabs.
+  // Day summary (overall system.cpu.util statistics for the drill date) —
+  // answers the user's primary question: when did the spike happen and how
+  // long was the host actually stressed.
+  type DaySummary = {
+    samples: number;
+    maxValue: number;
+    maxAtClock: number;
+    maxLabel: string;
+    avgValue: number;
+    minutesAbove: { t50: number; t70: number; t90: number; t95: number };
+    raw: Array<{ clock: number; value: number }>;
+  };
+  const [daySummary, setDaySummary] = useState<DaySummary | null>(null);
 
   const split = useSplitPane(240, 120, 200);
   const isPresetPeriod = PERIODS.some((p) => p.id === period);
@@ -160,19 +216,25 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         // Use real Zabbix history data only. Missing days → null (rendered as empty gray cell).
         // Previously we back-filled gaps with synthetic data; that masked the fact that we have
         // no real history, which is misleading during demos.
+        // Date keys come from getCpuHistoryDaily, which uses Europe/Vilnius local date — match
+        // here too so timeline labels and stored data line up regardless of UTC offset.
         let peaks: (number | null)[];
+        // Keep parallel arrays of full trend data (max/avg/min) so cell tooltips
+        // can show day-level context alongside the displayed peak.
+        let dayTrends: (ZabbixCpuTrend | null)[];
         if (zHost && hasTrendData) {
           const hostTrends = trendByHostDate.get(zHost.hostId);
-          peaks = dates.map((d) => {
-            const dateStr = d.toISOString().slice(0, 10);
-            const trend = hostTrends?.get(dateStr);
-            return trend ? trend.max : null;
+          dayTrends = dates.map((d) => {
+            const dateStr = d.toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" });
+            return hostTrends?.get(dateStr) ?? null;
           });
+          peaks = dayTrends.map((t) => t ? t.max : null);
         } else {
           peaks = Array<number | null>(days).fill(null);
+          dayTrends = Array<ZabbixCpuTrend | null>(days).fill(null);
         }
         const exceedCount = peaks.filter((p): p is number => p !== null && p >= threshold).length;
-        return { name: device.name, cpuModel: device.cpuModel || "—", deviceType: device.deviceType || "—", currentCpu: Math.round(cpuTotal * 10) / 10, cores: detail?.numCpus || 0, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, exceedCount };
+        return { name: device.name, cpuModel: device.cpuModel || "—", deviceType: device.deviceType || "—", currentCpu: Math.round(cpuTotal * 10) / 10, cores: detail?.numCpus || 0, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedCount };
       });
   }, [pilot, zabbixByName, cpuDetail, trendByHostDate, storeFilter, threshold, periodDays, dates, hasTrendData]);
 
@@ -210,11 +272,28 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // Real per-hour process breakdown requires Zabbix `perf_counter` history for
   // python.exe / sp.sss / sqlservr / vmware-vmx — those items are not deployed
   // on Rimi hosts yet. We show an honest empty state instead of simulated bars.
-  const drillIntervals = null as ReturnType<typeof generateIntervalData> | null;
+  useEffect(() => {
+    if (!drill) { setDrillIntervals(null); setDaySummary(null); return; }
+    // Drill carries the unambiguous Zabbix host id (set when the cell was
+    // clicked). Multiple devices can share the same display name across stores
+    // (e.g. "SCO2" in 8 stores), so we never resolve by name here.
+    setDrillLoading(true);
+    const isoDate = `${drill.dateObj.getFullYear()}-${String(drill.dateObj.getMonth() + 1).padStart(2, "0")}-${String(drill.dateObj.getDate()).padStart(2, "0")}`;
+    fetch(`/api/rt/process-history?hostId=${drill.hostId}&date=${isoDate}&granularity=${granularity}`)
+      .then((r) => r.json())
+      .then((d) => {
+        setDrillIntervals(Array.isArray(d.slots) ? d.slots : null);
+        setDaySummary(d.daySummary ?? null);
+      })
+      .catch(() => { setDrillIntervals(null); setDaySummary(null); })
+      .finally(() => setDrillLoading(false));
+  }, [drill, granularity]);
 
   const drillResources = useMemo(() => {
     if (!drill) return null;
-    const row = hostRows.find((r) => r.name === drill.hostName);
+    // Look up the row by hostId — the unambiguous identifier — so we don't
+    // accidentally pick a different store's "SCO2".
+    const row = hostRows.find((r) => r.zHost?.hostId === drill.hostId);
     if (!row?.zHost) return null;
     const h = row.zHost;
     const d = cpuDetail.get(h.hostId);
@@ -222,28 +301,87 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     const diskBase = h.disk?.utilization || 0;
     const cpuBase = d ? ((d.user + d.system) > 0 ? d.user + d.system : d.total) : 0;
     const totalRamGb = h.memory ? h.memory.totalBytes / 1024 / 1024 / 1024 : 0;
-    // Per-hour CPU/Memory/Disk history is not fetched yet. We have 14 days of
-    // daily max/avg/min from `history.get` (cpuTrends), but hourly aggregation
-    // would need a per-drill fetch. Return null hourly → UI shows honest empty state.
-    return { hostName: drill.hostName, cores: row.cores, totalRamGb: Math.round(totalRamGb * 10) / 10, deviceType: row.deviceType, diskPath: h.disk?.path || "/", hourly: null as { hour: number; cpu: number; memory: number; disk: number; ramUsedGb: number }[] | null, currentCpu: cpuBase, currentMem: memBase, currentDisk: diskBase };
+    return { hostName: drill.displayName, cores: row.cores, totalRamGb: Math.round(totalRamGb * 10) / 10, deviceType: row.deviceType, diskPath: h.disk?.path || "/", hourly: null as { hour: number; cpu: number; memory: number; disk: number; ramUsedGb: number }[] | null, currentCpu: cpuBase, currentMem: memBase, currentDisk: diskBase };
   }, [drill, hostRows, cpuDetail]);
 
+  // Per-process Zabbix items (python.cpu, spss.cpu, sql.cpu, vm.cpu) are
+  // emitted by the StrongPoint agent in **% of total host CPU**, NOT
+  // "% of one core". Probe (2026-04-18 SCO2): per-process sum = 23% raw vs
+  // system.cpu.util = 27%. So we do NOT divide by core count — the API already
+  // returns host-relative percentages. We just clamp `free` ≥ 0 in case the
+  // sum exceeds 100% (rounding error or item overlap).
+  const normalizeSlot = useCallback((raw: ProcessSlot): ProcessSlot => {
+    const r = raw.retellect;
+    const sa = raw.scoApp;
+    const dbv = raw.db;
+    const sys = raw.system;
+    return {
+      ...raw,
+      retellect: r,
+      scoApp: sa,
+      db: dbv,
+      system: sys,
+      free: Math.max(0, 100 - r - sa - dbv - sys),
+    };
+  }, []);
+
+  // Peak slot = the slot with the highest overall host CPU (system.cpu.util).
+  // Earlier this used the sum of monitored processes, which is misleading: the
+  // host can be at 100% while monitored processes only account for ~9% (the
+  // rest being kernel / untracked work). The host-CPU peak is what the user
+  // cares about — it's the same metric driving the timeline cell colour.
   const peakSlot = drillIntervals
-    ? drillIntervals.reduce((max, s) => (s.retellect + s.scoApp + s.system) > (max.retellect + max.scoApp + max.system) ? s : max, drillIntervals[0])
+    ? drillIntervals.reduce((max, s) => ((s.sysCpuMax ?? 0) > (max.sysCpuMax ?? 0) ? s : max), drillIntervals[0])
     : null;
+  const peakSlotNorm = peakSlot ? normalizeSlot(peakSlot) : null;
 
   const selSlotData = useMemo(() => {
     if (selectedSlot === null || !drillIntervals) return null;
-    return drillIntervals[selectedSlot] || null;
-  }, [selectedSlot, drillIntervals]);
+    const raw = drillIntervals[selectedSlot] || null;
+    return raw ? normalizeSlot(raw) : null;
+  }, [selectedSlot, drillIntervals, normalizeSlot]);
 
-  const openDrill = useCallback((date: Date, hostName: string, peak: number) => {
+  const openDrill = useCallback((date: Date, hostId: string, displayName: string, sourceHostKey: string, peak: number) => {
     const newDate = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    if (drill?.date === newDate && drill?.hostName === hostName) { setDrill(null); setSelectedSlot(null); return; }
-    setDrill({ date: newDate, dateObj: date, hostName, peak });
+    if (drill?.date === newDate && drill?.hostId === hostId) { setDrill(null); setSelectedSlot(null); return; }
+    setDrill({ date: newDate, dateObj: date, hostId, displayName, sourceHostKey, peak });
     setDrillTab("process");
     setSelectedSlot(null);
   }, [drill]);
+
+  // Keyboard navigation: ←/→ moves the cursor across the day, Home/End jump to
+  // the edges, Esc clears the selection. If nothing is selected yet, ← starts
+  // at the peak (most informative), → at the start of the day.
+  useEffect(() => {
+    if (!drill || !drillIntervals || drillIntervals.length === 0) return;
+    if (drillTab !== "process") return;
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      const intervals = drillIntervals;
+      if (!intervals) return;
+      const max = intervals.length - 1;
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const dir = e.key === "ArrowLeft" ? -1 : 1;
+        const step = e.shiftKey ? 10 : 1;
+        setSelectedSlot((s) => {
+          const start = s ?? (peakSlot ? peakSlot.slot : 0);
+          return Math.max(0, Math.min(max, start + dir * step));
+        });
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        setSelectedSlot(0);
+      } else if (e.key === "End") {
+        e.preventDefault();
+        setSelectedSlot(max);
+      } else if (e.key === "Escape") {
+        setSelectedSlot(null);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drill, drillIntervals, drillTab, peakSlot]);
 
   const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === "desc" ? " ↓" : " ↑") : "";
 
@@ -371,9 +509,13 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             </thead>
             <tbody>
               {hostRows.map((row, rowIdx) => {
-                const sel = drill?.hostName === row.name;
+                const rowHostId = row.zHost?.hostId;
+                const sel = !!rowHostId && drill?.hostId === rowHostId;
                 const zebra = rowIdx % 2 === 1 ? C.zebraOdd : "#fff";
                 const rowBg = sel ? "#eff6ff" : zebra;
+                // Show store name in tooltip so duplicate device names ("SCO2"
+                // in 8 stores) are disambiguated for the user.
+                const rowTitle = row.zHost?.hostName ? `${row.name} — ${row.zHost.hostName}` : row.name;
                 return (
                   <tr key={`${row.name}-${rowIdx}`} style={{ borderTop: `1px solid ${rowIdx === 0 ? C.border : "#f1f3f5"}`, background: rowBg }}>
                     <td style={{
@@ -382,7 +524,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                       position: "sticky", left: 0, background: rowBg, zIndex: 10,
                       color: sel ? C.pillActive : "#343a40",
                       maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis",
-                    }} title={row.name}>{row.name}</td>
+                    }} title={rowTitle}>{row.name}</td>
                     <td style={{ padding: "3px 4px", textAlign: "center" }}>{typeBadge(row.deviceType)}</td>
                     <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={row.cpuModel}>{row.cpuModel}</td>
                     {row.peaks.map((peak, i) => {
@@ -396,10 +538,20 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                         : peak >= 80 ? C.highBg
                         : exceeded ? C.thresholdBg
                         : C.belowBg;
+                      // Tooltip: explain that the cell value is the day MAX, plus
+                      // show day avg/min so user can see the spike was a spike.
+                      const trend = row.dayTrends[i];
+                      const cellTitle = !row.hasMatch
+                        ? "No Zabbix host match"
+                        : peak === null
+                          ? "No history for this day"
+                          : trend
+                            ? `${row.name} · ${dateStr}\nDay max:  ${trend.max}%\nDay avg:  ${trend.avg}%\nDay min:  ${trend.min}%\nClick to open drill-down (per-minute breakdown)`
+                            : `Day max ${Math.round(peak!)}% — click to drill down`;
                       return (
                         <td key={i} style={{ padding: 0, textAlign: "center", width: 32, cursor: hasValue ? "pointer" : "default" }}
-                          onClick={() => hasValue && openDrill(dates[i], row.name, peak!)}
-                          title={!row.hasMatch ? "No Zabbix host match" : peak === null ? "No history for this day" : undefined}>
+                          onClick={() => hasValue && rowHostId && openDrill(dates[i], rowHostId, row.name, row.zHost?.hostName || row.name, peak!)}
+                          title={cellTitle}>
                           <div style={{
                             background: bg,
                             color: !hasValue ? "#d1d5db" : exceeded ? C.exceededText : C.belowText,
@@ -438,97 +590,110 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     </>
   );
 
-  // ─── Determine label strategy based on granularity ────────────────
-  const slotsPerHour = 60 / granularity;
-  const totalSlots = Math.floor(1440 / granularity);
-  const labelEvery = totalSlots <= 24 ? 1 : totalSlots <= 48 ? 2 : totalSlots <= 96 ? 4 : Math.max(1, Math.round(slotsPerHour));
-  const barGap = totalSlots <= 24 ? 1.5 : totalSlots <= 96 ? 0.5 : 0;
-  const barRadius = totalSlots <= 24 ? 3 : totalSlots <= 96 ? 2 : 1;
-  const isPreset = GRANULARITIES.some(g => g.id === granularity);
+  // (Bar / label sizing constants no longer needed — the chart is a line now,
+  // and the time axis renders fixed hour markers independent of granularity.)
 
-  // ─── Hour detail panel ────────────────────────────────────────────
-  const hourDetailPanel = selSlotData && (
-    <div style={{
-      background: "#fff", border: `1px solid ${C.border}`, borderRadius: 8,
-      padding: "10px 16px", marginTop: 10, flexShrink: 0,
-      display: "flex", alignItems: "center", gap: 20,
-    }}>
-      <div style={{ flexShrink: 0, textAlign: "center", minWidth: 70 }}>
-        <div style={{ fontSize: 20, fontWeight: 700, color: "#212529", lineHeight: 1 }}>
-          {selSlotData.label}
-        </div>
-        <div style={{ fontSize: 10, color: C.textSec, marginTop: 2 }}>
-          – {slotEndLabel(selSlotData, granularity)}
-        </div>
-      </div>
-      <div style={{ width: 1, height: 44, background: C.border, flexShrink: 0 }} />
-      <div style={{ flexShrink: 0, textAlign: "center", minWidth: 60 }}>
-        <div style={{ fontSize: 10, color: C.headerText, textTransform: "uppercase", fontWeight: 600, letterSpacing: 0.4 }}>Total</div>
-        <div style={{
-          fontSize: 22, fontWeight: 700, lineHeight: 1.1,
-          color: (selSlotData.retellect + selSlotData.scoApp + selSlotData.system) >= 90 ? C.criticalBg
-            : (selSlotData.retellect + selSlotData.scoApp + selSlotData.system) >= 70 ? C.highBg
-            : "#212529",
-        }}>
-          {Math.round(selSlotData.retellect + selSlotData.scoApp + selSlotData.system)}%
-        </div>
-      </div>
-      <div style={{ width: 1, height: 44, background: C.border, flexShrink: 0 }} />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
-        {PROCESSES.filter(p => p.key !== "free").map((proc) => {
-          const val = selSlotData[proc.key];
-          return (
-            <div key={proc.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 11, color: C.textSec, width: 64, textAlign: "right", flexShrink: 0 }}>{proc.label}</span>
-              <div style={{ flex: 1, height: 14, background: "#f1f3f5", borderRadius: 3, overflow: "hidden" }}>
-                <div style={{ height: "100%", borderRadius: 3, background: proc.color, width: `${Math.max(1, val)}%`, transition: "width 0.2s ease" }} />
-              </div>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "#212529", width: 44, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
-                {Math.round(val * 10) / 10}%
-              </span>
-            </div>
-          );
-        })}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 11, color: "#adb5bd", width: 64, textAlign: "right", flexShrink: 0 }}>Free</span>
-          <div style={{ flex: 1, height: 14, background: "#f1f3f5", borderRadius: 3, overflow: "hidden" }}>
-            <div style={{ height: "100%", borderRadius: 3, background: C.free, border: "1px solid #c3dafe", width: `${Math.max(1, selSlotData.free)}%`, transition: "width 0.2s ease", boxSizing: "border-box" }} />
+  // ─── Slot detail panel ────────────────────────────────────────────
+  // Total = host CPU at that slot (system.cpu.util max). Process breakdown
+  // uses the slot averages; whatever isn't accounted for by tracked processes
+  // is shown as "Other" so the bar always sums to host CPU honestly.
+  const hourDetailPanel = selSlotData && (() => {
+    const monitoredSum = selSlotData.retellect + selSlotData.scoApp + selSlotData.db + selSlotData.system;
+    const hostCpu = selSlotData.sysCpuMax ?? selSlotData.sysCpuAvg ?? monitoredSum;
+    const other = Math.max(0, hostCpu - monitoredSum);
+    const otherFresh = selSlotData.sysCpuMax !== null;
+    return (
+      <div style={{
+        background: "#fff", border: `1px solid ${C.border}`, borderRadius: 8,
+        padding: "10px 16px", marginTop: 10, flexShrink: 0,
+        display: "flex", alignItems: "center", gap: 20,
+      }}>
+        <div style={{ flexShrink: 0, textAlign: "center", minWidth: 70 }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#212529", lineHeight: 1 }}>
+            {selSlotData.label}
           </div>
-          <span style={{ fontSize: 12, fontWeight: 600, color: "#adb5bd", width: 44, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
-            {Math.round(selSlotData.free * 10) / 10}%
-          </span>
+          <div style={{ fontSize: 10, color: C.textSec, marginTop: 2 }}>
+            – {slotEndLabel(selSlotData, granularity)}
+          </div>
+          <div style={{ fontSize: 9, color: "#cbd5e1", marginTop: 2 }}>← → keys</div>
+        </div>
+        <div style={{ width: 1, height: 60, background: C.border, flexShrink: 0 }} />
+        <div style={{ flexShrink: 0, textAlign: "center", minWidth: 70 }}>
+          <div style={{ fontSize: 10, color: C.headerText, textTransform: "uppercase", fontWeight: 600, letterSpacing: 0.4 }}>Host CPU</div>
+          <div style={{
+            fontSize: 22, fontWeight: 700, lineHeight: 1.1,
+            color: hostCpu >= 90 ? "#dc2626" : hostCpu >= 70 ? "#d97706" : "#212529",
+          }}>
+            {Math.round(hostCpu)}%
+          </div>
+          <div style={{ fontSize: 9, color: C.textSec, marginTop: 2 }}>
+            slot {otherFresh ? "max" : "avg"}
+          </div>
+        </div>
+        <div style={{ width: 1, height: 60, background: C.border, flexShrink: 0 }} />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+          {PROCESSES.filter(p => p.key !== "free").map((proc) => {
+            const val = selSlotData[proc.key];
+            return (
+              <div key={proc.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 11, color: C.textSec, width: 64, textAlign: "right", flexShrink: 0 }}>{proc.label}</span>
+                <div style={{ flex: 1, height: 12, background: "#f1f3f5", borderRadius: 3, overflow: "hidden" }}>
+                  <div style={{ height: "100%", borderRadius: 3, background: proc.color, width: `${Math.max(1, val)}%`, transition: "width 0.2s ease" }} />
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#212529", width: 44, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
+                  {Math.round(val * 10) / 10}%
+                </span>
+              </div>
+            );
+          })}
+          {/* Other = host CPU - monitored process sum. Captures kernel work /
+              processes not tracked by name (the difference between total host
+              CPU and the four monitored categories). */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 11, color: "#475569", width: 64, textAlign: "right", flexShrink: 0 }} title="CPU consumed by processes we don't monitor by name (kernel, scheduler, services).">Other</span>
+            <div style={{ flex: 1, height: 12, background: "#f1f3f5", borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ height: "100%", borderRadius: 3, background: "#94a3b8", width: `${Math.max(1, other)}%`, transition: "width 0.2s ease" }} />
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#475569", width: 44, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
+              {Math.round(other * 10) / 10}%
+            </span>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  })();
 
   // ═══ NO DRILL ═══════════════════════════════════════════════════════
   if (!drill) {
     return (
       <>
         <DataCoverageBanner
-          title="Data coverage: CPU trend duomenys — agreguoti, be per-mode/per-proc skilimo"
+          title="Data coverage: timeline = daily peak; drill-down = real per-process history"
           available={(
             <>
-              Per-host dienos peak CPU iš <code>trends.get</code> (iki 14 d), live
-              snapshot iš <code>system.cpu.util[,,avg1]</code>, Python proc CPU
-              (<code>python.cpu</code>) per šiandien.
+              Daily peak CPU per host from <code>trends.get</code> (up to 14 d),
+              live snapshot from <code>system.cpu.util[,,avg1]</code>. Drill-down
+              uses real Zabbix <code>history.get</code> for per-process items
+              (<code>python.cpu</code>, <code>spss.cpu</code>, <code>sql.cpu</code>,
+              <code>vm.cpu</code>) plus <code>system.cpu.util</code> as a reference
+              line.
             </>
           )}
           missing={(
             <>
-              Per-mode skilimas (<code>system.cpu.util[,user]</code>,
-              <code> [,system]</code>, <code>[,iowait]</code>), per-process SCO
-              telemetrija, valandinė granuliacija iš <code>history.get</code>.
-              Drill‑down’e matomas Retellect/SCO/System breakdown — simuliacija, ne
-              realios per-proc reikšmės.
+              Per-mode breakdown (<code>system.cpu.util[,user]</code>,
+              <code> [,system]</code>, <code>[,iowait]</code>) is not yet ingested.
+              Note: timeline cell shows <em>instantaneous daily max</em>, drill-down
+              bars show <em>hourly average per process</em> — they will not match
+              numerically. The black tick on each bar is the real
+              <code>system.cpu.util</code> per-slot max for direct comparison.
             </>
           )}
           footer={(
             <>
-              „Dienos be istorijos“ — hostas egzistuoja, bet <code>trends.get</code>
-              tai dienai negrąžino reikšmės (agent down, proxy lag arba retention
-              ribos). Platių gap’ų analizei naudok <strong>Data Health</strong> tab’ą.
+              &ldquo;Days without history&rdquo; — host exists, but <code>trends.get</code>
+              returned no value for that day (agent down, proxy lag, or retention
+              limits). Use the <strong>Data Health</strong> tab to analyse wide gaps.
             </>
           )}
         />
@@ -544,13 +709,13 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         {hasTrendData ? (
           <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "8px 12px", marginTop: 10 }}>
             <p style={{ fontSize: 11, color: "#065f46", margin: 0 }}>
-              <strong>✓ Live data:</strong> {zabbix.cpuTrends?.length || 0} daily CPU records from Zabbix history.get ({zabbix.status === "live" ? "LIVE" : "CACHED"}). Dienos be istorijos rodomos kaip „—“ (nėra duomenų).
+              <strong>✓ Live data:</strong> {zabbix.cpuTrends?.length || 0} daily CPU records from Zabbix history.get ({zabbix.status === "live" ? "LIVE" : "CACHED"}). Days without history shown as &ldquo;—&rdquo; (no data).
             </p>
           </div>
         ) : (
           <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "8px 12px", marginTop: 10 }}>
             <p style={{ fontSize: 11, color: "#92400e", margin: 0 }}>
-              <strong>⚠ Simulated:</strong> Heatmap ekstrapoliuotas iš dabartinio CPU snapshot ({zabbix.status === "live" ? "LIVE" : "CACHED"}).
+              <strong>⚠ Simulated:</strong> Heatmap extrapolated from current CPU snapshot ({zabbix.status === "live" ? "LIVE" : "CACHED"}).
             </p>
           </div>
         )}
@@ -591,7 +756,17 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
               background: drill.peak >= 90 ? C.criticalBg : drill.peak >= 80 ? C.highBg : drill.peak >= threshold ? C.thresholdBg : C.belowBg,
               color: drill.peak >= threshold ? "#fff" : C.belowText,
             }}>{drill.peak}%</span>
-            <span style={{ fontSize: 12, color: C.textSec, fontFamily: "monospace" }}>{drill.hostName}</span>
+            <span
+              style={{ fontSize: 12, color: C.textSec, fontFamily: "monospace" }}
+              title={drill.sourceHostKey}
+            >
+              {drill.displayName}
+              {drill.sourceHostKey && drill.sourceHostKey !== drill.displayName && (
+                <span style={{ fontSize: 10, marginLeft: 6, color: "#94a3b8", fontFamily: "inherit" }}>
+                  · {drill.sourceHostKey}
+                </span>
+              )}
+            </span>
             {drillResources && <span style={{ fontSize: 11, color: "#adb5bd" }}>{drillResources.cores} cores · {drillResources.totalRamGb} GB · {drillResources.deviceType}</span>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -606,127 +781,259 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           </div>
         </div>
 
+        {/* Day summary banner — answers "where did the timeline 100% come from".
+            Built from raw 1-min system.cpu.util samples for the selected day. */}
+        {daySummary && (
+          <div style={{
+            padding: "8px 16px", background: "#fff", borderBottom: `1px solid ${C.border}`,
+            display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", flexShrink: 0,
+          }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+              <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600, letterSpacing: 0.4 }}>Day max</span>
+              <span style={{
+                fontSize: 18, fontWeight: 700,
+                color: daySummary.maxValue >= 90 ? "#dc2626" : daySummary.maxValue >= 70 ? "#d97706" : "#212529",
+              }}>{daySummary.maxValue}%</span>
+              <span style={{ fontSize: 11, color: C.textSec }}>at <strong style={{ color: "#212529", fontFamily: "'SF Mono','Cascadia Code',monospace" }}>{daySummary.maxLabel}</strong> Vilnius</span>
+            </div>
+            <div style={{ width: 1, height: 28, background: C.border }} />
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+              <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600, letterSpacing: 0.4 }}>Day avg</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#212529" }}>{daySummary.avgValue}%</span>
+            </div>
+            <div style={{ width: 1, height: 28, background: C.border }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: C.textSec }}>
+              <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600, letterSpacing: 0.4 }}>Minutes ≥</span>
+              {[
+                { th: 95, c: "#dc2626", v: daySummary.minutesAbove.t95 },
+                { th: 90, c: "#ef4444", v: daySummary.minutesAbove.t90 },
+                { th: 70, c: "#d97706", v: daySummary.minutesAbove.t70 },
+                { th: 50, c: "#0891b2", v: daySummary.minutesAbove.t50 },
+              ].map((row) => (
+                <span key={row.th} style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: row.c, display: "inline-block" }} />
+                  {row.th}%: <strong style={{ color: row.v > 0 ? "#212529" : "#adb5bd", fontVariantNumeric: "tabular-nums" }}>{row.v}</strong>
+                </span>
+              ))}
+            </div>
+            <div style={{ width: 1, height: 28, background: C.border }} />
+            <span style={{ fontSize: 10, color: "#94a3b8", fontStyle: "italic" }}>
+              from {daySummary.samples} × 1-min samples of <code style={{ fontSize: 9, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>system.cpu.util</code>
+            </span>
+          </div>
+        )}
+
         <div style={{ flex: 1, padding: "16px 20px", background: "#fafbfc", overflow: "auto" }}>
-          {drillTab === "process" && !drillIntervals && (
+          {drillTab === "process" && drillLoading && (
+            <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <div style={{ fontSize: 12, color: C.textSec }}>Loading process history…</div>
+            </div>
+          )}
+          {drillTab === "process" && !drillLoading && (!drillIntervals || drillIntervals.length === 0) && (
             <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center" }}>
               <div style={{ background: "#fff", border: `1px dashed ${C.border}`, borderRadius: 8, padding: "24px 28px", maxWidth: 560, textAlign: "center" }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#495057", marginBottom: 6 }}>Process Breakdown dar negali būti rodomas</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#495057", marginBottom: 6 }}>No per-process CPU history</div>
                 <div style={{ fontSize: 11, color: C.textSec, lineHeight: 1.6 }}>
-                  Per-procesinei CPU istorijai (Retellect / SCO App / System skirstymui) reikia Zabbix <code style={{ fontSize: 10, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>perf_counter</code> itemų python.exe / sp.sss / sqlservr / vmware-vmx procesams.
-                  Šie itemų dar nėra deploy’inti Rimi SCO hostuose — laukėm adminą pridėti, tada bus čia.
+                  This host has not published <code style={{ fontSize: 10, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>python.cpu</code> / <code style={{ fontSize: 10, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>spss.cpu</code> / <code style={{ fontSize: 10, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>sql.cpu</code> / <code style={{ fontSize: 10, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>vm.cpu</code> samples in the last 24h.
                 </div>
               </div>
             </div>
           )}
           {drillTab === "process" && drillIntervals && (
             <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-              {/* Granularity selector */}
+              {/* Granularity selector — fixed presets, no custom (1m is the
+                  native sample rate, anything below is aliasing). */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexShrink: 0, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600, letterSpacing: 0.4 }}>Granularity</span>
                 <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
                   {GRANULARITIES.map((g) => (
-                    <button key={g.id} onClick={() => { setGranularity(g.id); setSelectedSlot(null); setShowCustom(false); }} style={{
+                    <button key={g.id} onClick={() => { setGranularity(g.id); setSelectedSlot(null); }} style={{
                       padding: "2px 8px", borderRadius: 10, fontSize: 11, cursor: "pointer",
-                      border: granularity === g.id && !showCustom ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
-                      background: granularity === g.id && !showCustom ? C.pillActive : "#fff",
-                      color: granularity === g.id && !showCustom ? "#fff" : "#495057",
-                      fontWeight: granularity === g.id && !showCustom ? 600 : 400,
+                      border: granularity === g.id ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
+                      background: granularity === g.id ? C.pillActive : "#fff",
+                      color: granularity === g.id ? "#fff" : "#495057",
+                      fontWeight: granularity === g.id ? 600 : 400,
                     }}>{g.label}</button>
                   ))}
-                  <button onClick={() => setShowCustom(!showCustom)} style={{
-                    padding: "2px 8px", borderRadius: 10, fontSize: 11, cursor: "pointer",
-                    border: showCustom || !isPreset ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
-                    background: showCustom || !isPreset ? C.pillActive : "#fff",
-                    color: showCustom || !isPreset ? "#fff" : "#495057",
-                    fontWeight: showCustom || !isPreset ? 600 : 400,
-                  }}>Custom</button>
                 </div>
-                {showCustom && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <input
-                      type="number"
-                      min="1"
-                      max="120"
-                      value={customMin}
-                      onChange={(e) => setCustomMin(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          const v = Math.max(1, Math.min(120, parseInt(customMin) || 15));
-                          if (1440 % v === 0) { setGranularity(v); setSelectedSlot(null); }
-                          else { setCustomMin(String(v)); }
-                        }
-                      }}
-                      placeholder="min"
-                      style={{ width: 48, fontSize: 11, padding: "2px 6px", border: "1px solid #dee2e6", borderRadius: 4, textAlign: "center", outline: "none" }}
-                    />
-                    <span style={{ fontSize: 10, color: C.textSec }}>min</span>
-                    <button onClick={() => {
-                      const v = Math.max(1, Math.min(120, parseInt(customMin) || 15));
-                      if (1440 % v === 0) { setGranularity(v); setSelectedSlot(null); }
-                      else {
-                        const valid = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 16, 18, 20, 24, 30, 36, 40, 45, 48, 60, 72, 80, 90, 120];
-                        const nearest = valid.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a);
-                        setCustomMin(String(nearest));
-                        setGranularity(nearest);
-                        setSelectedSlot(null);
-                      }
-                    }} style={{
-                      padding: "2px 8px", borderRadius: 4, fontSize: 10, cursor: "pointer",
-                      border: "1px solid #dee2e6", background: "#f8f9fa", color: "#495057",
-                    }}>Apply</button>
-                  </div>
-                )}
                 <span style={{ fontSize: 10, color: "#c9cdd1" }}>
-                  ({drillIntervals.length} intervals{!isPreset ? ` · ${granularity}min` : ""})
+                  ({drillIntervals.length} intervals)
                 </span>
               </div>
 
-              {/* Stacked bar chart */}
-              <div style={{ flex: 1, minHeight: 80, display: "flex", gap: 0, alignItems: "flex-end" }}>
-                {drillIntervals.map((s) => {
-                  const isSelected = selectedSlot === s.slot;
-                  const total = s.retellect + s.scoApp + s.system;
+              {/* Chart — host CPU line + reference levels + peak marker + selection cursor.
+                  Process breakdown for the selected moment lives in the panel below; we
+                  don't paint it on the chart because at low percentages it becomes a flat
+                  invisible smear next to the host CPU line. */}
+              <div style={{ flex: 1, minHeight: 100, position: "relative" }}>
+                {/* 100% ceiling + 70% threshold reference lines */}
+                <div aria-hidden style={{
+                  position: "absolute", left: 0, right: 0, top: 0,
+                  borderTop: "1px dashed #d0d7de", pointerEvents: "none", zIndex: 1,
+                }}>
+                  <span style={{
+                    position: "absolute", right: 0, top: -1,
+                    fontSize: 9, color: "#94a3b8", background: "#fafbfc",
+                    padding: "0 4px", transform: "translateY(-50%)",
+                  }}>100%</span>
+                </div>
+                <div aria-hidden style={{
+                  position: "absolute", left: 0, right: 0, top: "30%",
+                  borderTop: "1px dashed #fcd34d", pointerEvents: "none", zIndex: 1,
+                }}>
+                  <span style={{
+                    position: "absolute", right: 0, top: -1,
+                    fontSize: 9, color: "#a16207", background: "#fafbfc",
+                    padding: "0 4px", transform: "translateY(-50%)",
+                  }}>70%</span>
+                </div>
+
+                {/* SVG: host CPU line (max as solid, avg as dashed) + selection cursor + peak dot. */}
+                {(() => {
+                  const N = drillIntervals.length;
+                  if (N === 0) return null;
+                  const W = 1000, H = 100;
+                  const xAt = (i: number) => N > 1 ? (i / (N - 1)) * W : W / 2;
+                  const sysMaxPts = drillIntervals
+                    .map((s, i) => s.sysCpuMax !== null ? `${xAt(i).toFixed(2)},${(H - Math.min(100, s.sysCpuMax)).toFixed(2)}` : null)
+                    .filter((p): p is string => p !== null)
+                    .join(" ");
+                  const sysAvgPts = drillIntervals
+                    .map((s, i) => s.sysCpuAvg !== null ? `${xAt(i).toFixed(2)},${(H - Math.min(100, s.sysCpuAvg)).toFixed(2)}` : null)
+                    .filter((p): p is string => p !== null)
+                    .join(" ");
+                  const peakIdx = peakSlot ? drillIntervals.findIndex((s) => s.slot === peakSlot.slot) : -1;
+                  const peakValue = peakSlot?.sysCpuMax ?? 0;
+                  const selIdx = selectedSlot !== null ? drillIntervals.findIndex((s) => s.slot === selectedSlot) : -1;
                   return (
-                    <div key={s.slot}
-                      onClick={() => setSelectedSlot(isSelected ? null : s.slot)}
-                      style={{
-                        flex: "1 1 0%", display: "flex", flexDirection: "column-reverse",
-                        marginLeft: barGap, borderRadius: `${barRadius}px ${barRadius}px 0 0`,
-                        overflow: "hidden", height: "100%", cursor: "pointer", position: "relative",
-                        outline: isSelected ? "2px solid #0070c9" : "none", outlineOffset: -1,
-                        opacity: selectedSlot !== null && !isSelected ? 0.4 : 1,
-                        transition: "opacity 0.15s ease",
-                      }}
-                      title={`${s.label} — Total: ${Math.round(total)}% | Retellect: ${Math.round(s.retellect)}% | SCO: ${Math.round(s.scoApp)}% | System: ${Math.round(s.system)}%`}>
-                      <div style={{ height: `${s.retellect}%`, background: C.retellect }} />
-                      <div style={{ height: `${s.scoApp}%`, background: C.scoApp }} />
-                      <div style={{ height: `${s.system}%`, background: C.system }} />
-                      <div style={{ height: `${s.free}%`, background: C.free }} />
-                    </div>
+                    <svg
+                      aria-hidden
+                      viewBox={`0 0 ${W} ${H}`}
+                      preserveAspectRatio="none"
+                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 2 }}
+                    >
+                      {selIdx >= 0 && (
+                        <line
+                          x1={xAt(selIdx)} y1={0} x2={xAt(selIdx)} y2={H}
+                          stroke="#0070c9" strokeWidth="1.2" opacity="0.85"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      {sysAvgPts && (
+                        <polyline
+                          points={sysAvgPts}
+                          fill="none"
+                          stroke="#94a3b8"
+                          strokeWidth="0.8"
+                          strokeDasharray="3 2"
+                          opacity="0.7"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      {sysMaxPts && (
+                        <polyline
+                          points={sysMaxPts}
+                          fill="none"
+                          stroke="#0f172a"
+                          strokeWidth="1.6"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      {peakIdx >= 0 && peakValue > 0 && (
+                        <circle cx={xAt(peakIdx)} cy={H - Math.min(100, peakValue)} r="3" fill="#ef4444" />
+                      )}
+                    </svg>
                   );
-                })}
+                })()}
+                {/* Peak label (host CPU). Absolute-positioned HTML so the
+                    text isn't stretched by SVG preserveAspectRatio="none". */}
+                {peakSlot && (peakSlot.sysCpuMax ?? 0) > 0 && (() => {
+                  const idx = drillIntervals.findIndex((s) => s.slot === peakSlot.slot);
+                  if (idx < 0) return null;
+                  const N = drillIntervals.length;
+                  const xPct = N > 1 ? (idx / (N - 1)) * 100 : 50;
+                  const peakValue = peakSlot.sysCpuMax ?? 0;
+                  return (
+                    <span style={{
+                      position: "absolute",
+                      left: `${xPct}%`,
+                      bottom: `calc(${Math.min(100, peakValue)}% + 8px)`,
+                      transform: "translateX(-50%)",
+                      fontSize: 10, fontWeight: 700, color: "#fff",
+                      background: "#ef4444", padding: "1px 6px",
+                      borderRadius: 3, whiteSpace: "nowrap", letterSpacing: 0.3,
+                      zIndex: 3, pointerEvents: "none",
+                    }}>
+                      Host peak {Math.round(peakValue)}% at {peakSlot.label}
+                    </span>
+                  );
+                })()}
+
+                {/* Click targets — full-height transparent strips per slot. */}
+                <div style={{ position: "absolute", inset: 0, display: "flex", gap: 0, alignItems: "stretch", zIndex: 5 }}>
+                  {drillIntervals.map((rawSlot) => {
+                    const s = normalizeSlot(rawSlot);
+                    const isSelected = selectedSlot === s.slot;
+                    const sysMax = rawSlot.sysCpuMax;
+                    const sysAvg = rawSlot.sysCpuAvg;
+                    const tot = s.retellect + s.scoApp + s.db + s.system;
+                    return (
+                      <div key={s.slot}
+                        onClick={() => setSelectedSlot(isSelected ? null : s.slot)}
+                        style={{
+                          flex: "1 1 0%", cursor: "pointer", position: "relative",
+                          background: isSelected ? "rgba(0,112,201,0.06)" : "transparent",
+                        }}
+                        title={`${s.label}\nHost CPU: ${sysMax !== null ? Math.round(sysMax) + "% (max)" : "—"}${sysAvg !== null ? " · " + Math.round(sysAvg) + "% (avg)" : ""}\nMonitored processes: ${Math.round(tot)}%  (Retellect ${Math.round(s.retellect)}% · SCO ${Math.round(s.scoApp)}% · DB ${Math.round(s.db)}% · System ${Math.round(s.system)}%)`}
+                      />
+                    );
+                  })}
+                </div>
               </div>
 
-              {/* Time axis labels */}
-              <div style={{ display: "flex", gap: 0, marginTop: 4, flexShrink: 0 }}>
-                {drillIntervals.map((s, i) => {
-                  const showLabel = i % labelEvery === 0;
-                  const isSelected = selectedSlot === s.slot;
+              {/* Time axis — fixed hour markers (00 → 24). Independent of slot
+                  granularity, so the day's structure is always readable. */}
+              <div style={{ position: "relative", height: 18, marginTop: 2, flexShrink: 0 }}>
+                {Array.from({ length: 25 }, (_, h) => {
+                  const xPct = (h / 24) * 100;
+                  const showLabel = granularity === 60 ? true : h % 2 === 0;
                   return (
-                    <div key={s.slot}
-                      onClick={() => setSelectedSlot(selectedSlot === s.slot ? null : s.slot)}
-                      style={{
-                        flex: "1 1 0%", textAlign: "center",
-                        fontSize: granularity === 60 ? 10 : 7,
-                        cursor: "pointer",
-                        color: isSelected ? C.pillActive : showLabel ? "#adb5bd" : "transparent",
-                        fontWeight: isSelected ? 700 : 400,
-                        overflow: "hidden", whiteSpace: "nowrap",
-                      }}>
-                      {showLabel || isSelected ? (granularity === 60 ? s.hour : s.label) : "\u00A0"}
+                    <div key={h} aria-hidden style={{
+                      position: "absolute",
+                      left: `${xPct}%`,
+                      top: 0,
+                      transform: "translateX(-50%)",
+                      display: "flex", flexDirection: "column", alignItems: "center",
+                    }}>
+                      <div style={{ width: 1, height: 4, background: "#cbd5e1" }} />
+                      {showLabel && (
+                        <span style={{ fontSize: 9, color: "#94a3b8", marginTop: 1, fontVariantNumeric: "tabular-nums" }}>
+                          {String(h).padStart(2, "0")}
+                        </span>
+                      )}
                     </div>
                   );
                 })}
+                {selectedSlot !== null && (() => {
+                  const idx = drillIntervals.findIndex((s) => s.slot === selectedSlot);
+                  if (idx < 0) return null;
+                  const N = drillIntervals.length;
+                  const xPct = N > 1 ? (idx / (N - 1)) * 100 : 50;
+                  return (
+                    <span style={{
+                      position: "absolute",
+                      left: `${xPct}%`,
+                      top: 6,
+                      transform: "translateX(-50%)",
+                      fontSize: 9, fontWeight: 700, color: "#0070c9",
+                      background: "#fff", padding: "0 4px",
+                      borderRadius: 3, fontVariantNumeric: "tabular-nums",
+                      boxShadow: "0 0 0 1px #bfdbfe",
+                    }}>
+                      {drillIntervals[idx].label}
+                    </span>
+                  );
+                })()}
               </div>
 
               {/* Hour detail panel */}
@@ -734,17 +1041,28 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
 
               {/* Legend + peak info */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: selSlotData ? 8 : 10, flexShrink: 0 }}>
-                <div style={{ display: "flex", gap: 14, fontSize: 12, color: C.textSec }}>
+                <div style={{ display: "flex", gap: 14, fontSize: 12, color: C.textSec, flexWrap: "wrap" }}>
                   {PROCESSES.map(({ color, label, border: b }) => (
                     <span key={label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <span style={{ width: 12, height: 10, borderRadius: 2, background: color, display: "inline-block", ...(b ? { border: "1px solid #c3dafe" } : {}) }} />{label}
                     </span>
                   ))}
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }} title="system.cpu.util[,,avg1] per slot — overall host CPU including processes not tracked by name">
+                    <span style={{ width: 12, height: 0, borderTop: "2px solid #0f172a", display: "inline-block" }} />
+                    Host CPU max
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: 0.6 }}>
+                    <span style={{ width: 12, height: 0, borderTop: "1px dashed #0f172a", display: "inline-block" }} />
+                    Host CPU avg
+                  </span>
                 </div>
                 {!selSlotData && peakSlot && (
                   <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "4px 12px" }}>
                     <span style={{ fontSize: 12, color: "#92400e" }}>
-                      <strong>Peak:</strong> {Math.round(peakSlot.retellect + peakSlot.scoApp + peakSlot.system)}% at {peakSlot.label} · Retellect ~{Math.round(peakSlot.retellect)}% · Headroom ~{Math.round(peakSlot.free)}%
+                      <strong>Process activity peak:</strong> {peakSlotNorm ? Math.round(peakSlotNorm.retellect + peakSlotNorm.scoApp + peakSlotNorm.db + peakSlotNorm.system) : 0}% at {peakSlot.label} · Retellect ~{peakSlotNorm ? Math.round(peakSlotNorm.retellect) : 0}% · Headroom ~{peakSlotNorm ? Math.round(peakSlotNorm.free) : 0}%
+                    </span>
+                    <span style={{ fontSize: 10, color: "#a16207", marginLeft: 8, fontStyle: "italic" }}>
+                      ({granularity}min avg — timeline cell shows daily instantaneous max)
                     </span>
                   </div>
                 )}
@@ -781,16 +1099,19 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
               </div>
               <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#fff", border: `1px dashed ${C.border}`, borderRadius: 8, padding: "20px 24px", minHeight: 80 }}>
                 <div style={{ textAlign: "center", maxWidth: 480 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#495057", marginBottom: 4 }}>Per-valandinė CPU/Memory/Disk istorija dar neprieinama</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#495057", marginBottom: 4 }}>Hourly CPU / Memory / Disk history not available yet</div>
                   <div style={{ fontSize: 11, color: C.textSec, lineHeight: 1.5 }}>
-                    Zabbix archyvuoja dienų agregatus (max/avg/min) — juos naudojam Timeline heatmap’e.
-                    Valandos skiriai bus rodomi, kai prijungsim <code style={{ fontSize: 10, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>history.get</code> vieno hosto vienos dienos fetch’ą.
+                    Zabbix archives daily aggregates (max/avg/min) — those drive
+                    the Timeline heatmap. Per-hour breakdown will be wired up
+                    when we add a per-host single-day{" "}
+                    <code style={{ fontSize: 10, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>history.get</code>{" "}
+                    fetch for these metrics.
                   </div>
                 </div>
               </div>
               {drillResources.currentMem > 80 && (
                 <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 12px", flexShrink: 0 }}>
-                  <p style={{ fontSize: 12, color: "#991b1b", margin: 0 }}><strong>Warning:</strong> {drill.hostName} — {Math.round(drillResources.currentMem)}% memory, {drillResources.totalRamGb} GB total.</p>
+                  <p style={{ fontSize: 12, color: "#991b1b", margin: 0 }}><strong>Warning:</strong> {drill.displayName} — {Math.round(drillResources.currentMem)}% memory, {drillResources.totalRamGb} GB total.</p>
                 </div>
               )}
             </div>
