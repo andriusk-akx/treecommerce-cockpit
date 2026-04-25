@@ -54,3 +54,36 @@ export interface HostResources {
   network: { inBps: number; outBps: number; inItemId: string; outItemId: string; valueType: string } | null;
   items: any[];
 }
+
+/**
+ * Classification of a process CPU metric. Reflects Retellect pilot domain:
+ * - retellect: python, python1..N — all Retellect workers
+ * - sco:       spss / sp.sss — StrongPoint SCO application
+ * - db:        sqlservr / sql — local SQL database
+ * - hw:        cs300sd / NHSTW32 / udm / UDMServer — peripheral drivers (scanner, UDM, etc.)
+ * - sys:       vmware-vmx / vm — virtualization
+ * - other:     anything else captured by the ".cpu" custom metric convention
+ */
+export type ProcessCategory = "retellect" | "sco" | "db" | "hw" | "sys" | "other";
+
+/**
+ * A per-process CPU % reading fetched from Zabbix custom "<proc>.cpu" items.
+ * These are 1-minute averages collected by the Zabbix agent on each SCO host.
+ */
+export interface ProcessCpuItem {
+  itemId: string;
+  hostId: string;
+  /** Human-friendly display name from Zabbix (e.g. "Python CPU usage") */
+  name: string;
+  /** Raw Zabbix key (e.g. "python1.cpu") */
+  key: string;
+  /** Short process identifier parsed from the key (e.g. "python1", "spss") */
+  procName: string;
+  /** Domain classification — drives Retellect vs. SCO vs. other breakdown */
+  category: ProcessCategory;
+  /** Last reported CPU %, or 0 if unavailable */
+  cpuValue: number;
+  /** Unix timestamp (seconds) of the last reported value; 0 if never */
+  lastClock: number;
+  units: string;
+}

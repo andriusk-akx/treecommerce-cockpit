@@ -71,15 +71,15 @@ async function main() {
   const retellectPilot = await prisma.pilot.create({
     data: {
       clientId: strongpoint.id,
-      name: "Retellect SCO CPU Analizė",
+      name: "Retellect SCO CPU Analysis",
       shortCode: "SP-RETELLECT",
       productType: "RETELLECT",
       status: "ACTIVE",
       visibility: "INTERNAL",
       startDate: new Date("2025-03-15"),
-      goalSummary: "SCO įrenginių CPU bottleneck analizė prieš Retellect diegimą. Zabbix duomenų pagrindu.",
+      goalSummary: "Rimi SCO CPU load monitoring. Live Zabbix data.",
       internalOwner: "Andrius",
-      notes: "Naudoja Zabbix resource metrikos. Tikslas — identifikuoti SCO su pakankama CPU atsarga.",
+      notes: "Uses Zabbix resource metrics. Goal — identify SCO hosts with sufficient CPU headroom for Retellect.",
     },
   });
 

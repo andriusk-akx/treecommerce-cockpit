@@ -2,7 +2,8 @@ import { prisma } from "@/lib/db";
 import { notFound } from "next/navigation";
 import PilotNav from "./PilotNav";
 
-export const dynamic = "force-dynamic";
+// Pilot shell (sidebar + nav). Pure DB read of pilot metadata — safe to ISR.
+export const revalidate = 300;
 
 interface LayoutProps {
   children: React.ReactNode;

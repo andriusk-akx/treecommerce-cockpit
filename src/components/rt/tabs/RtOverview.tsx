@@ -1,40 +1,93 @@
 "use client";
-
+import { useEffect, useState } from "react";
 import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
+import { computeCpuTotal, formatAgeShort } from "./rt-inventory-helpers";
 
 export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: ZabbixData }) {
+  const [cpuSummarySort, setCpuSummarySort] = useState<"store" | "cpu">("store");
+  const [withinGroupSort, setWithinGroupSort] = useState<"default" | "host-asc" | "retellect-on" | "cpu-desc" | "age-asc">("host-asc");
+  const [rtFilter, setRtFilter] = useState<boolean>(true);
+  const [nowMs, setNowMs] = useState<number>(0);
+  useEffect(() => {
+    // Set initial client time, then tick every 30s.
+    // We deliberately don't set Date.now() during render (impure) — SSR and
+    // first client paint use 0, which downstream code interprets as "unknown"
+    // (hides age badges, skips freshness filters).
+    const id = setTimeout(() => setNowMs(Date.now()), 0);
+    const iv = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => { clearTimeout(id); clearInterval(iv); };
+  }, []);
   // Build CPU model groups from DB devices + Zabbix live metrics
-  const cpuModelMap = new Map<string, { hosts: number; cpuValues: number[] }>();
+  // Hardware class grouping: by CPU core count (from Zabbix system.cpu.num).
+  // Different SCO hardware generations have different core counts (e.g. 4 vs 12),
+  // making this a meaningful differentiator for capacity analysis.
+  const cpuModelMap = new Map<string, { hosts: number; cpuValues: number[]; cores: number }>();
   const zabbixByName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
 
-  // Also build CPU detail map (user/system per host)
-  const cpuDetailByHostId = new Map<string, { user: number; system: number; numCpus: number }>();
+  // Build CPU detail map per host — tracks user/system/total + freshest lastClock
+  const cpuDetailByHostId = new Map<string, { user: number; system: number; total: number; numCpus: number; lastClock: string | null }>();
   for (const item of zabbix.cpuDetail) {
     if (!cpuDetailByHostId.has(item.hostId)) {
-      cpuDetailByHostId.set(item.hostId, { user: 0, system: 0, numCpus: 0 });
+      cpuDetailByHostId.set(item.hostId, { user: 0, system: 0, total: 0, numCpus: 0, lastClock: null });
     }
     const entry = cpuDetailByHostId.get(item.hostId)!;
     if (item.key === "system.cpu.util[,user]") entry.user = item.value;
     if (item.key === "system.cpu.util[,system]") entry.system = item.value;
+    if (item.key === "system.cpu.util[,,avg1]" || item.key === "system.cpu.util") entry.total = item.value;
     if (item.key === "system.cpu.num") entry.numCpus = item.value;
+    // Track most-recent lastClock across all cpu items for this host
+    if (item.lastClock) {
+      if (!entry.lastClock || new Date(item.lastClock) > new Date(entry.lastClock)) {
+        entry.lastClock = item.lastClock;
+      }
+    }
   }
 
+  // For freshness comparisons (used in cpuByClass and other places below).
+  // eslint-disable-next-line react-hooks/purity
+  const refMs = nowMs || Date.now();
+
+  // Group by DB cpuModel (sourced from Excel hardware registry).
+  // Falls back to core count when cpuModel is missing.
   for (const device of pilot.devices) {
-    const model = device.cpuModel || "Unknown";
-    if (!cpuModelMap.has(model)) cpuModelMap.set(model, { hosts: 0, cpuValues: [] });
-    const group = cpuModelMap.get(model)!;
-    group.hosts++;
-    // Try to find matching Zabbix host by sourceHostKey or name
+    if (device.status !== "active") continue;
     const zHost = zabbixByName.get(device.sourceHostKey || "") || zabbixByName.get(device.name);
-    if (zHost?.cpu) {
-      group.cpuValues.push(zHost.cpu.utilization);
+    const detail = zHost ? cpuDetailByHostId.get(zHost.hostId) : null;
+    const cores = detail?.numCpus || 0;
+    const groupKey = device.cpuModel
+      ? device.cpuModel
+      : cores > 0 ? `${cores}-core (model unknown)` : "Unknown";
+    if (!cpuModelMap.has(groupKey)) cpuModelMap.set(groupKey, { hosts: 0, cpuValues: [], cores });
+    const group = cpuModelMap.get(groupKey)!;
+    group.hosts++;
+    // Use the same CPU total computation as elsewhere — fresh samples only
+    if (detail && detail.lastClock) {
+      const ageSec = (refMs - new Date(detail.lastClock).getTime()) / 1000;
+      if (ageSec < 7200) { // 2h window — matches REPORTING_WINDOW_SEC; Rimi Zabbix poll cycle for system.cpu.util can be 1h+
+        const totalCpu = computeCpuTotal(detail.user, detail.system, detail.total);
+        if (totalCpu > 0) group.cpuValues.push(totalCpu);
+      }
     }
   }
 
   const cpuByClass = Array.from(cpuModelMap.entries()).map(([name, data]) => {
     const avg = data.cpuValues.length > 0 ? Math.round(data.cpuValues.reduce((s, v) => s + v, 0) / data.cpuValues.length * 10) / 10 : 0;
-    return { name, hosts: data.hosts, avgCpu: avg, risk: avg > 70 ? "critical" : "low" };
-  }).sort((a, b) => b.avgCpu - a.avgCpu);
+    const peak = data.cpuValues.length > 0 ? Math.round(Math.max(...data.cpuValues) * 10) / 10 : 0;
+    const sampleCount = data.cpuValues.length;
+    let risk: "critical" | "warn" | "ok" | "unknown" = "unknown";
+    if (sampleCount > 0) {
+      if (avg > 70) risk = "critical";
+      else if (avg > 40) risk = "warn";
+      else risk = "ok";
+    }
+    return { name, hosts: data.hosts, avgCpu: avg, peakCpu: peak, sampleCount, risk };
+  }).sort((a, b) => {
+    // Highest CPU usage first (= least free headroom — most urgent for capacity decisions).
+    // Groups without fresh samples sink to the bottom.
+    if (a.sampleCount === 0 && b.sampleCount > 0) return 1;
+    if (b.sampleCount === 0 && a.sampleCount > 0) return -1;
+    return b.avgCpu - a.avgCpu;
+  });
 
   // Calculate totals from DB devices only (only those with Zabbix matches)
   const matchedZabbixNames = new Set(
@@ -43,16 +96,112 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   const matchedHosts = zabbix.hosts.filter((h) => matchedZabbixNames.has(h.hostName) && h.status === "up");
   const highCpuHosts = matchedHosts.filter((h) => {
     const detail = cpuDetailByHostId.get(h.hostId);
-    const totalCpu = detail ? detail.user + detail.system : (h.cpu?.utilization || 0);
+    const totalCpu = detail ? computeCpuTotal(detail.user, detail.system, detail.total) : (h.cpu?.utilization || 0);
     return totalCpu > 70;
   });
 
-  const allCpuValues = matchedHosts.map((h) => {
-    const detail = cpuDetailByHostId.get(h.hostId);
-    return detail ? detail.user + detail.system : (h.cpu?.utilization || 0);
-  }).filter((v) => v > 0);
-  const avgCpuAll = allCpuValues.length > 0 ? Math.round(allCpuValues.reduce((s, v) => s + v, 0) / allCpuValues.length * 10) / 10 : 0;
-  const peakCpuAll = allCpuValues.length > 0 ? Math.round(Math.max(...allCpuValues) * 10) / 10 : 0;
+  // Host-level counts: active = DB devices flagged active; disabled = flagged inactive (Zabbix status=1)
+  const activeHostCount = pilot.devices.filter((d) => d.status === "active").length;
+  const disabledHostCount = pilot.devices.filter((d) => d.status === "inactive").length;
+
+  // Retellect Active Stores: count distinct stores where at least one host
+  // publishes a fresh python.cpu reading > 0% (i.e. the Retellect worker is
+  // actually running right now, per Zabbix per-process telemetry).
+  const FRESH_SEC = 300;         // 5 min — for per-process live liveness
+  const RETELLECT_CPU_THRESHOLD = 1.0; // > 1% — filters out residual python noise (0.01% etc)
+
+  // Per-host Retellect 3-state aggregation:
+  //   • > 0%  → Retellect doing work
+  //   •   0%  → installed but currently idle (or stopped — Zabbix python.cpu reads 0%)
+  //   •  null → no python.cpu items at all (template not deployed) — show as "—"
+  const retellectCpuByHostId = new Map<string, number>();
+  const retellectFreshestMsByHostId = new Map<string, number>();
+  const retellectHasItemByHostId = new Set<string>();
+  for (const proc of zabbix.procCpu || []) {
+    if (proc.category !== "retellect") continue;
+    retellectHasItemByHostId.add(proc.hostId);
+    const lastMs = proc.lastClock ? new Date(proc.lastClock).getTime() : 0;
+    if (lastMs > 0) {
+      const prev = retellectFreshestMsByHostId.get(proc.hostId) || 0;
+      if (lastMs > prev) retellectFreshestMsByHostId.set(proc.hostId, lastMs);
+      const cur = retellectCpuByHostId.get(proc.hostId) || 0;
+      retellectCpuByHostId.set(proc.hostId, cur + Math.max(0, proc.cpuValue));
+    }
+  }
+
+  // Live host ids: any host with summed retellect CPU > 1% AND fresh sample (<5min)
+  const retellectLiveHostIds = new Set<string>();
+  for (const [hid, totalCpu] of retellectCpuByHostId) {
+    if (totalCpu <= 0) continue;  // Any positive python.cpu counts as active (matches column display)
+    const lastMs = retellectFreshestMsByHostId.get(hid) || 0;
+    if (lastMs && refMs - lastMs <= FRESH_SEC * 1000) {
+      retellectLiveHostIds.add(hid);
+    }
+  }
+
+  // Map each live host id back to its store via Zabbix host → DB device → store
+  const hostIdToStore = new Map<string, string>();
+  for (const device of pilot.devices) {
+    const zHost = zabbixByName.get(device.sourceHostKey || "") || zabbixByName.get(device.name);
+    if (zHost) hostIdToStore.set(zHost.hostId, device.storeName);
+  }
+  const retellectActiveStoreSet = new Set<string>();
+  for (const hid of retellectLiveHostIds) {
+    const storeName = hostIdToStore.get(hid);
+    if (storeName) retellectActiveStoreSet.add(storeName);
+  }
+  const retellectActiveStores = retellectActiveStoreSet.size;
+  const retellectActiveHosts = retellectLiveHostIds.size;
+
+  // Stores we're receiving data from: count distinct stores where at least one
+  // active host has a Zabbix match with status="up" (host-level availability,
+  // independent of cpu.util poll-cycle quirks).
+  const reportingStoreNames = new Set<string>();
+  for (const device of pilot.devices) {
+    if (device.status !== "active") continue;
+    const zHost = zabbixByName.get(device.sourceHostKey || "") || zabbixByName.get(device.name);
+    if (zHost && zHost.status === "up") reportingStoreNames.add(device.storeName);
+  }
+  const reportingStoreCount = reportingStoreNames.size;
+
+  // Hardware registry coverage — count devices with cpuModel filled
+  const hwModeledCount = pilot.devices.filter((d) => d.cpuModel && d.cpuModel.trim() !== "").length;
+
+  // ─── Anomaly detection for Key Observations ───────────────────────
+  // "Most hosts in this store have Retellect, but one or two don't —
+  // and that one IS reporting CPU data (agent is alive)." Likely
+  // installation gap or template misconfig.
+  type StoreCoverage = { storeName: string; rtCount: number; gapCount: number; gapHosts: string[] };
+  const storeCoverage = new Map<string, { total: number; rt: number; gapHosts: string[] }>();
+  for (const device of pilot.devices) {
+    if (device.status !== "active") continue; // Skip Zabbix-disabled hosts
+    const zHost = zabbixByName.get(device.sourceHostKey || "") || zabbixByName.get(device.name);
+    if (!zHost || zHost.status !== "up") continue; // Only Zabbix-monitored
+    const cur = storeCoverage.get(device.storeName) || { total: 0, rt: 0, gapHosts: [] };
+    cur.total++;
+    if (device.retellectEnabled) {
+      cur.rt++;
+    } else {
+      // Check if host IS reporting any CPU telemetry (agent alive — broader signal:
+      // even system.cpu.num (rare poll) means the agent is checking in, just maybe
+      // missing util/load items in its template).
+      const hasAnyCpuTelemetry = zabbix.cpuDetail.some((it) => {
+        if (it.hostId !== zHost.hostId || !it.lastClock) return false;
+        if (!it.key.startsWith("system.cpu")) return false;
+        const ageSec = (refMs - new Date(it.lastClock).getTime()) / 1000;
+        return ageSec < 2 * 60 * 60; // 2h
+      });
+      if (hasAnyCpuTelemetry) cur.gapHosts.push(device.name);
+    }
+    storeCoverage.set(device.storeName, cur);
+  }
+  const coverageGaps: StoreCoverage[] = [];
+  for (const [storeName, sig] of storeCoverage) {
+    if (sig.rt >= 2 && sig.gapHosts.length >= 1) {
+      coverageGaps.push({ storeName, rtCount: sig.rt, gapCount: sig.gapHosts.length, gapHosts: sig.gapHosts });
+    }
+  }
+  coverageGaps.sort((a, b) => b.rtCount - a.rtCount);
 
   return (
     <>
@@ -67,52 +216,219 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         </p>
       </div>
 
-      {/* KPIs — from live data */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <KpiCard label="Matched Hosts" value={String(matchedHosts.length)} subtitle={`of ${pilot.deviceCount} devices`} />
-        <KpiCard label="DB Devices" value={String(pilot.deviceCount)} subtitle={`${pilot.storeCount} stores`} />
+      {/* KPIs — pilot scope at a glance */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
         <KpiCard
-          label="Avg CPU (live)"
-          value={`${avgCpuAll}%`}
-          className={avgCpuAll > 70 ? "text-red-600" : avgCpuAll > 50 ? "text-amber-600" : "text-emerald-600"}
+          label="SCO's"
+          value={String(activeHostCount)}
+          subtitle={disabledHostCount > 0 ? `of ${pilot.deviceCount} total · ${disabledHostCount} disabled` : `of ${pilot.deviceCount} total`}
         />
         <KpiCard
-          label="Peak CPU (live)"
-          value={`${peakCpuAll}%`}
-          className={peakCpuAll > 80 ? "text-red-600" : "text-gray-900"}
+          label="Stores"
+          value={String(reportingStoreCount)}
+          subtitle="reporting live data"
+        />
+        <KpiCard
+          label="Retellect Active"
+          value={String(retellectActiveHosts)}
+          subtitle={`hosts running Retellect (across ${retellectActiveStores} of ${reportingStoreCount} stores)`}
+          className={retellectActiveHosts > 0 ? "text-emerald-600" : "text-gray-500"}
         />
       </div>
 
       {/* Two-column: Investigation + Risks */}
       <div className="grid grid-cols-2 gap-6 mb-6">
         <div className="bg-white rounded-lg border border-gray-200 p-5">
-          <h3 className="font-semibold text-gray-900 mb-3">Live CPU Summary (Zabbix)</h3>
-          <div className="space-y-2 text-sm">
-            {matchedHosts.map((host) => {
-              const detail = cpuDetailByHostId.get(host.hostId);
-              const totalCpu = detail ? Math.round((detail.user + detail.system) * 10) / 10 : 0;
-              const ramGb = host.memory ? (host.memory.totalBytes / 1024 / 1024 / 1024).toFixed(1) : "?";
-              return (
-                <div key={host.hostId} className="flex justify-between items-center">
-                  <div>
-                    <span className="text-gray-700 font-medium">{host.hostName}</span>
-                    <span className="text-gray-400 ml-2 text-xs">{ramGb} GB RAM</span>
+          <h3 className="font-semibold text-gray-900 mb-2">Live CPU Summary (Zabbix)</h3>
+          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-100 flex-wrap">
+            <span className="text-[10px] uppercase tracking-wider text-gray-400">Group by</span>
+            <div className="inline-flex rounded border border-gray-200 overflow-hidden text-[11px]">
+              <button
+                type="button"
+                onClick={() => setCpuSummarySort("store")}
+                className={`px-2 py-0.5 transition ${cpuSummarySort === "store" ? "bg-blue-500 text-white font-medium" : "bg-white text-gray-500 hover:bg-gray-50"}`}
+              >Store</button>
+              <button
+                type="button"
+                onClick={() => setCpuSummarySort("cpu")}
+                className={`px-2 py-0.5 border-l border-gray-200 transition ${cpuSummarySort === "cpu" ? "bg-blue-500 text-white font-medium" : "bg-white text-gray-500 hover:bg-gray-50"}`}
+              >CPU (high → low)</button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRtFilter((v) => !v)}
+              className={`ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] transition ${rtFilter ? "bg-emerald-50 border-emerald-300 text-emerald-700 font-medium" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
+              title="Show only hosts where Retellect is marked as installed (DB Device.retellectEnabled)"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${rtFilter ? "bg-emerald-500" : "bg-gray-300"}`} />
+              Retellect installed
+            </button>
+          </div>
+          <div className="flex items-center gap-3 pr-6 mb-1 text-[9px] uppercase tracking-wider text-gray-400 font-semibold">
+            <button
+              type="button"
+              onClick={() => setWithinGroupSort((v) => v === "host-asc" ? "default" : "host-asc")}
+              className={`flex-1 min-w-0 truncate text-left cursor-pointer hover:text-blue-600 transition ${withinGroupSort === "host-asc" ? "text-blue-600" : ""}`}
+              title="Click to sort within group by host name (A → Z)"
+            >Host{withinGroupSort === "host-asc" ? " ↑" : ""}</button>
+            <button
+              type="button"
+              onClick={() => setWithinGroupSort((v) => v === "retellect-on" ? "default" : "retellect-on")}
+              className={`w-24 flex justify-start items-center flex-shrink-0 cursor-pointer hover:text-blue-600 transition ${withinGroupSort === "retellect-on" ? "text-blue-600" : ""}`}
+              title="Click to sort within group: Retellect on first"
+            >Retellect CPU{withinGroupSort === "retellect-on" ? " ↓" : ""}</button>
+            <button
+              type="button"
+              onClick={() => setWithinGroupSort((v) => v === "cpu-desc" ? "default" : "cpu-desc")}
+              className={`w-20 flex justify-start items-center flex-shrink-0 cursor-pointer hover:text-blue-600 transition ${withinGroupSort === "cpu-desc" ? "text-blue-600" : ""}`}
+              title="Click to sort within group by CPU (high → low)"
+            >Host CPU{withinGroupSort === "cpu-desc" ? " ↓" : ""}</button>
+          </div>
+          <div className="space-y-1.5 text-sm max-h-80 overflow-y-auto pr-6">
+            {(() => {
+              // Build rows: one per matched, reporting host
+              const rows = matchedHosts.map((host) => {
+                const detail = cpuDetailByHostId.get(host.hostId);
+                const cpuTotal = detail ? computeCpuTotal(detail.user, detail.system, detail.total) : (host.cpu?.utilization || 0);
+                // Match back to DB device to get store name + SCO number
+                const dev = pilot.devices.find((d) => (d.sourceHostKey || d.name) === host.hostName);
+                const storeName = dev?.storeName || "(unknown store)";
+                const scoMatch = /SCO(\d+)/i.exec(host.hostName) || /SCOW_(\d+)/i.exec(host.hostName) || (dev ? /SCO(\d+)/i.exec(dev.name) : null);
+                const scoNum = scoMatch ? parseInt(scoMatch[1], 10) : 0;
+                const lastClockMs = detail?.lastClock ? new Date(detail.lastClock).getTime() : 0;
+                const ageSec = lastClockMs ? Math.max(0, Math.floor((nowMs - lastClockMs) / 1000)) : null;
+                const rtHasItem = retellectHasItemByHostId.has(host.hostId);
+                const rtCpuTotal = retellectCpuByHostId.get(host.hostId) ?? 0;
+                const rtFreshestMs = retellectFreshestMsByHostId.get(host.hostId) || 0;
+                const rtPythonAgeSec = rtFreshestMs > 0 ? Math.max(0, Math.floor((refMs - rtFreshestMs) / 1000)) : null;
+                const rtFresh = rtPythonAgeSec !== null && rtPythonAgeSec < FRESH_SEC;
+                const rtActive = rtFresh && rtCpuTotal > RETELLECT_CPU_THRESHOLD;
+                const dbDev = pilot.devices.find((d) => (d.sourceHostKey || d.name) === host.hostName);
+                const rtPlanned = dbDev?.retellectEnabled || false;
+                const rtConfidence = (dbDev?.retellectConfidence || null) as "high" | "low" | null;
+                return { hostId: host.hostId, hostName: host.hostName, storeName, scoNum, cpuTotal, ageSec, rtActive, rtPlanned, rtConfidence, rtHasItem, rtCpuTotal, rtPythonAgeSec, rtFresh };
+              }).filter((r) => {
+                if (!rtFilter) return true;
+                // Filter on: show only hosts marked as Retellect-installed in DB
+                // (regardless of current Zabbix liveness state)
+                return r.rtPlanned === true;
+              });
+
+              // Helper: secondary tiebreaker after primary group key
+              const ageRank = (r: typeof rows[number]) =>
+                r.ageSec === null ? Number.POSITIVE_INFINITY : r.ageSec;
+              const secondary = (a: typeof rows[number], b: typeof rows[number]): number => {
+                if (withinGroupSort === "cpu-desc") return b.cpuTotal - a.cpuTotal;
+                if (withinGroupSort === "host-asc") return a.hostName.localeCompare(b.hostName, "lt");
+                if (withinGroupSort === "age-asc") return ageRank(a) - ageRank(b);
+                if (withinGroupSort === "retellect-on") {
+                  if (a.rtActive !== b.rtActive) return a.rtActive ? -1 : 1;
+                  return 0;
+                }
+                return 0;
+              };
+              const defaultStoreSco = (a: typeof rows[number], b: typeof rows[number]): number => {
+                const cmp = a.storeName.localeCompare(b.storeName, "lt");
+                if (cmp !== 0) return cmp;
+                return a.scoNum - b.scoNum;
+              };
+
+              if (cpuSummarySort === "cpu") {
+                // Top-level by CPU desc; secondary still applies as tiebreaker
+                rows.sort((a, b) => {
+                  if (b.cpuTotal !== a.cpuTotal) return b.cpuTotal - a.cpuTotal;
+                  return secondary(a, b) || defaultStoreSco(a, b);
+                });
+              } else {
+                // Group by store: alpha by store, then within-group secondary
+                rows.sort((a, b) => {
+                  const cmp = a.storeName.localeCompare(b.storeName, "lt");
+                  if (cmp !== 0) return cmp;
+                  return secondary(a, b) || (a.scoNum - b.scoNum);
+                });
+              }
+
+              // When grouped by store, render store headers between groups
+              const out: React.ReactElement[] = [];
+              let lastStore = "";
+              for (const r of rows) {
+                if (cpuSummarySort === "store" && r.storeName !== lastStore) {
+                  out.push(
+                    <div key={`hdr-${r.storeName}`} className="text-[10px] uppercase tracking-wider text-gray-400 pt-2 pb-0.5 border-t border-gray-100 first:pt-0 first:border-t-0">
+                      {r.storeName}
+                    </div>
+                  );
+                  lastStore = r.storeName;
+                }
+                // CPU value is grayed out when its underlying sample is stale (>30min) —
+                // the number is from the past, not "now", so visually demote it.
+                // Color gradient by CPU value — staleness signaled by the age subtitle (gray "39m"),
+                // not by dimming the value itself, so risk colors stay legible.
+                const cpuColor =
+                    r.cpuTotal > 70 ? "text-red-600"
+                  : r.cpuTotal > 40 ? "text-amber-600"
+                  : r.cpuTotal > 0 ? "text-emerald-600"
+                  : "text-gray-400";
+                const staleLabel = r.ageSec === null ? "no data" : r.ageSec < 300 ? "live" : formatAgeShort(r.ageSec);
+                const staleColor = r.ageSec === null || (r.ageSec ?? 0) > 1800 ? "text-gray-400" : (r.ageSec ?? 0) > 300 ? "text-amber-500" : "text-emerald-500";
+                out.push(
+                  <div key={r.hostId} className="flex items-center gap-3">
+                    <span className="flex-1 min-w-0 truncate text-gray-700 text-xs">{r.hostName}</span>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {/* Retellect column — sum of all python*.cpu values (% of CPU used by Retellect) */}
+                      <span className="w-24 flex items-center gap-2">
+                        {!r.rtHasItem ? (
+                          <span className="inline-block w-7 text-xs text-gray-300" title="No python.cpu Zabbix item deployed — Retellect template not present">—</span>
+                        ) : (
+                          <>
+                            <span
+                              className={`text-xs tabular-nums ${
+                                !r.rtFresh ? "text-amber-600"
+                                : r.rtCpuTotal > 5 ? "text-emerald-700"
+                                : r.rtCpuTotal > 0 ? "text-emerald-600"
+                                : "text-gray-500"
+                              }`}
+                              title={r.rtCpuTotal > 0 ? "Sum of python*.cpu — total CPU consumed by Retellect right now" : "Retellect template installed, but python.cpu reads 0% — process is idle or not running"}
+                            >{r.rtCpuTotal > 0 ? `${Math.max(0.1, parseFloat(r.rtCpuTotal.toFixed(1))).toFixed(1)}%` : "0%"}</span>
+                            {r.rtPythonAgeSec !== null && (
+                              <span className="text-[10px] text-gray-400 tabular-nums text-left">{formatAgeShort(r.rtPythonAgeSec)}</span>
+                            )}
+                          </>
+                        )}
+                      </span>
+                      {/* CPU column — fixed-width value block + age (matches Retellect structure) */}
+                      <span className="w-20 flex items-center gap-2">
+                        {r.cpuTotal > 0
+                          ? <span className={`text-xs tabular-nums ${cpuColor}`}>{Math.round(r.cpuTotal)}%</span>
+                          : <span className="inline-block w-6 text-xs text-gray-300">—</span>
+                        }
+                        {r.ageSec !== null && r.ageSec >= 300 && (
+                          <span className="text-[10px] tabular-nums text-left text-gray-400">{staleLabel}</span>
+                        )}
+                      </span>
+                    </div>
                   </div>
-                  <span className={`font-medium ${totalCpu > 5 ? "text-amber-600" : "text-emerald-600"}`}>
-                    CPU {totalCpu}%
-                  </span>
-                </div>
-              );
-            })}
-            {matchedHosts.length === 0 && (
-              <p className="text-gray-400">No Zabbix match for DB devices</p>
-            )}
+                );
+              }
+              if (rows.length === 0) {
+                out.push(<p key="empty" className="text-gray-400">No Zabbix match for DB devices</p>);
+              }
+              return out;
+            })()}
           </div>
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 p-5">
           <h3 className="font-semibold text-gray-900 mb-3">Key Observations</h3>
           <div className="space-y-2 text-sm">
+            {coverageGaps.length > 0 && coverageGaps.map((g) => (
+              <div key={g.storeName} className="flex items-start gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0 mt-1.5" />
+                <span className="leading-snug">
+                  <span className="font-medium">{g.storeName}</span>: {g.rtCount} cash registers run Retellect, but {g.gapCount === 1 ? `one (${g.gapHosts[0]})` : `${g.gapCount} (${g.gapHosts.join(", ")})`} {g.gapCount === 1 ? "doesn't" : "don't"} — host{g.gapCount > 1 ? "s are" : " is"} alive (sending CPU data) so likely a Retellect install gap, not a dead agent.
+                </span>
+              </div>
+            ))}
             <div className="flex items-center gap-2">
               <span className={`w-2 h-2 rounded-full ${highCpuHosts.length > 0 ? "bg-red-500" : "bg-emerald-500"} flex-shrink-0`} />
               <span>{highCpuHosts.length} hosts with CPU  {">"} 70% right now</span>
@@ -133,27 +449,40 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         </div>
       </div>
 
-      {/* CPU by Hardware Class */}
+      {/* CPU by Hardware Class (grouped by Zabbix core count) */}
       {cpuByClass.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
-          <h3 className="font-semibold text-gray-900 mb-3">CPU by Hardware Class (DB devices)</h3>
+          <h3 className="font-semibold text-gray-900 mb-1">CPU by Hardware Class</h3>
+          <p className="text-xs text-gray-500 mb-3">Grouped by hardware model (from registry). Active hosts only; CPU averages use fresh samples (&lt; 2 h).</p>
           <div className="space-y-3">
-            {cpuByClass.map((c) => (
-              <div key={c.name}>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>{c.name} ({c.hosts} devices)</span>
-                  <span className={`font-medium ${c.avgCpu > 0 ? (c.risk === "critical" ? "text-red-600" : "text-gray-700") : "text-gray-400"}`}>
-                    {c.avgCpu > 0 ? `${c.avgCpu}% avg CPU` : "no Zabbix match"}
-                  </span>
+            {cpuByClass.map((c) => {
+              const barColor = c.risk === "critical" ? "bg-red-500" : c.risk === "warn" ? "bg-amber-500" : c.risk === "ok" ? "bg-emerald-500" : "bg-gray-300";
+              const textColor = c.risk === "critical" ? "text-red-600" : c.risk === "warn" ? "text-amber-600" : c.risk === "ok" ? "text-emerald-600" : "text-gray-400";
+              return (
+                <div key={c.name}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-gray-700"><span className="font-medium">{c.name}</span> · {c.hosts} hosts {c.sampleCount > 0 && <span className="text-xs text-gray-400">({c.sampleCount} fresh · last 2h)</span>}</span>
+                    {c.sampleCount > 0 ? (
+                      <span className="font-medium tabular-nums">
+                        <span className="text-gray-500">avg </span>
+                        <span className={c.avgCpu > 70 ? "text-red-600" : c.avgCpu > 40 ? "text-amber-600" : "text-emerald-600"}>{c.avgCpu}%</span>
+                        <span className="text-gray-300"> · </span>
+                        <span className="text-gray-500">peak </span>
+                        <span className={c.peakCpu > 70 ? "text-red-600" : c.peakCpu > 40 ? "text-amber-600" : "text-emerald-600"}>{c.peakCpu}%</span>
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">no fresh samples</span>
+                    )}
+                  </div>
+                  <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${barColor}`}
+                      style={{ width: `${Math.max(c.avgCpu, c.sampleCount > 0 ? 2 : 0)}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${c.risk === "critical" ? "bg-red-500" : c.avgCpu > 0 ? "bg-emerald-500" : "bg-gray-300"}`}
-                    style={{ width: `${Math.max(c.avgCpu, 2)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -180,10 +509,53 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             <span className="text-blue-600 font-semibold">OK</span>
             <span className="text-gray-400">— {pilot.deviceCount} devices, {pilot.storeCount} stores</span>
           </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className={`w-2 h-2 rounded-full ${hwModeledCount > 0 ? "bg-emerald-500" : "bg-gray-400"}`} />
+            <span className="text-gray-700 font-medium">Hardware Registry (Excel)</span>
+            <span className={`font-semibold ${hwModeledCount > 0 ? "text-emerald-600" : "text-gray-500"}`}>
+              {hwModeledCount > 0 ? "LOADED" : "EMPTY"}
+            </span>
+            <span className="text-gray-400">— {hwModeledCount}/{pilot.deviceCount} devices mapped to CPU model · WN Beetle SCO terminal registry, sourced from Intility/Wincor-Nixdorf installation list</span>
+          </div>
           <div className="flex items-center gap-2 text-xs mt-2">
             <span className="w-2 h-2 rounded-full bg-gray-400" />
             <span className="text-gray-500">Zabbix history.get / trend.get — restricted by API token permissions</span>
           </div>
+        </div>
+      </div>
+
+      {/* Methodology footnotes */}
+      <div className="mt-4 space-y-3 text-[11px] text-gray-500 leading-relaxed">
+        <div>
+          <span className="font-semibold text-gray-600">Retellect CPU calculation:</span>{" "}
+          sum of these Zabbix items per host —{" "}
+          <code className="px-1 py-0.5 rounded bg-gray-100 text-gray-700">python.cpu</code>{" "}
+          +{" "}
+          <code className="px-1 py-0.5 rounded bg-gray-100 text-gray-700">python1.cpu</code>{" "}
+          +{" "}
+          <code className="px-1 py-0.5 rounded bg-gray-100 text-gray-700">python2.cpu</code>{" "}
+          +{" "}
+          <code className="px-1 py-0.5 rounded bg-gray-100 text-gray-700">python3.cpu</code>.
+          Each is a 1-minute average of the matching <code className="px-1 py-0.5 rounded bg-gray-100 text-gray-700">python.exe</code>{" "}
+          process CPU share. Values reset to 0% when a process is idle or stopped — Zabbix cannot
+          distinguish between the two. The <em>Retellect installed</em> filter shows hosts where
+          these items have published any non-zero value within the last 7 days; high-confidence flag
+          applies when 7-day max exceeds 1%.
+        </div>
+        <div>
+          <span className="font-semibold text-gray-600">Hardware Class avg / peak calculation:</span>{" "}
+          for each model group, we collect the current{" "}
+          <code className="px-1 py-0.5 rounded bg-gray-100 text-gray-700">system.cpu.util</code>{" "}
+          value from every active host (Zabbix sample younger than 2 h, value &gt; 0%).
+          {" "}<strong>avg</strong> = arithmetic mean across the sample —{" "}
+          <em>&ldquo;how loaded is a typical host of this model right now&rdquo;</em>.{" "}
+          <strong>peak</strong> = maximum value in the sample —{" "}
+          <em>&ldquo;the worst-loaded host of this model right now&rdquo;</em>. Both are current snapshots
+          (not historical max). Each is colored independently by its own risk threshold:
+          <span className="text-emerald-600"> green ≤ 40%</span>,
+          <span className="text-amber-600"> amber &gt; 40%</span>,
+          <span className="text-red-600"> red &gt; 70%</span>.
+          Sort order: highest avg first (= least free headroom).
         </div>
       </div>
     </>

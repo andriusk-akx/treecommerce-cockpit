@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useMemo, useCallback, useRef } from "react";
-import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
-import { generateTimelineData, generateIntervalData, type IntervalSlot } from "./rt-timeline-math";
+import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
+import { generateIntervalData, type IntervalSlot } from "./rt-timeline-math";
+import { DataCoverageBanner } from "./DataCoverageBanner";
 
 const PERIODS = [
   { id: "1h", label: "1h", days: 0 },
@@ -123,18 +124,27 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     return result;
   }, [periodDays]);
 
-  const { zabbixByName, cpuDetail } = useMemo(() => {
+  const { zabbixByName, cpuDetail, trendByHostDate } = useMemo(() => {
     const byName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
-    const detail = new Map<string, { user: number; system: number; numCpus: number }>();
+    const detail = new Map<string, { user: number; system: number; total: number; numCpus: number }>();
     for (const item of zabbix.cpuDetail) {
-      if (!detail.has(item.hostId)) detail.set(item.hostId, { user: 0, system: 0, numCpus: 0 });
+      if (!detail.has(item.hostId)) detail.set(item.hostId, { user: 0, system: 0, total: 0, numCpus: 0 });
       const entry = detail.get(item.hostId)!;
       if (item.key === "system.cpu.util[,user]") entry.user = item.value;
       if (item.key === "system.cpu.util[,system]") entry.system = item.value;
+      if (item.key === "system.cpu.util[,,avg1]" || item.key === "system.cpu.util") entry.total = item.value;
       if (item.key === "system.cpu.num") entry.numCpus = item.value;
     }
-    return { zabbixByName: byName, cpuDetail: detail };
+    // Build trend/history lookup: hostId -> date -> { max, avg, min }
+    const trendMap = new Map<string, Map<string, ZabbixCpuTrend>>();
+    for (const t of (zabbix.cpuTrends || [])) {
+      if (!trendMap.has(t.hostId)) trendMap.set(t.hostId, new Map());
+      trendMap.get(t.hostId)!.set(t.date, t);
+    }
+    return { zabbixByName: byName, cpuDetail: detail, trendByHostDate: trendMap };
   }, [zabbix]);
+
+  const hasTrendData = (zabbix.cpuTrends?.length || 0) > 0;
 
   const allHostRows = useMemo(() => {
     return pilot.devices
@@ -142,14 +152,29 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       .map((device, idx) => {
         const zHost = zabbixByName.get(device.sourceHostKey || "") || zabbixByName.get(device.name);
         const detail = zHost ? cpuDetail.get(zHost.hostId) : null;
-        const cpuTotal = detail ? detail.user + detail.system : 0;
-        const seed = device.name.split("").reduce((a, c) => a + c.charCodeAt(0), 0) * 137 + idx;
+        const cpuTotal = detail
+          ? ((detail.user + detail.system) > 0 ? detail.user + detail.system : detail.total)
+          : 0;
         const days = Math.max(1, periodDays);
-        const peaks = zHost ? generateTimelineData(cpuTotal, days, seed) : Array(days).fill(0);
-        const exceedCount = peaks.filter((p) => p >= threshold).length;
-        return { name: device.name, cpuModel: device.cpuModel, deviceType: device.deviceType || "—", currentCpu: Math.round(cpuTotal * 10) / 10, cores: detail?.numCpus || 0, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, exceedCount };
+
+        // Use real Zabbix history data only. Missing days → null (rendered as empty gray cell).
+        // Previously we back-filled gaps with synthetic data; that masked the fact that we have
+        // no real history, which is misleading during demos.
+        let peaks: (number | null)[];
+        if (zHost && hasTrendData) {
+          const hostTrends = trendByHostDate.get(zHost.hostId);
+          peaks = dates.map((d) => {
+            const dateStr = d.toISOString().slice(0, 10);
+            const trend = hostTrends?.get(dateStr);
+            return trend ? trend.max : null;
+          });
+        } else {
+          peaks = Array<number | null>(days).fill(null);
+        }
+        const exceedCount = peaks.filter((p): p is number => p !== null && p >= threshold).length;
+        return { name: device.name, cpuModel: device.cpuModel || "—", deviceType: device.deviceType || "—", currentCpu: Math.round(cpuTotal * 10) / 10, cores: detail?.numCpus || 0, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, exceedCount };
       });
-  }, [pilot, zabbixByName, cpuDetail, storeFilter, threshold, periodDays]);
+  }, [pilot, zabbixByName, cpuDetail, trendByHostDate, storeFilter, threshold, periodDays, dates, hasTrendData]);
 
   const hostRows = useMemo(() => {
     let rows = allHostRows;
@@ -180,13 +205,12 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     else { setSortKey(key); setSortDir("desc"); }
   }, [sortKey]);
 
-  // Interval data for current drill + granularity
-  const drillIntervals = useMemo(() => {
-    if (!drill) return null;
-    const seed = drill.hostName.split("").reduce((a, c) => a + c.charCodeAt(0), 0) * 31 +
-      drill.date.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-    return generateIntervalData(drill.peak, seed, granularity);
-  }, [drill, granularity]);
+  // Interval data for current drill + granularity.
+  // DISABLED: previously generated synthetic PRNG data seeded by hostName+date.
+  // Real per-hour process breakdown requires Zabbix `perf_counter` history for
+  // python.exe / sp.sss / sqlservr / vmware-vmx — those items are not deployed
+  // on Rimi hosts yet. We show an honest empty state instead of simulated bars.
+  const drillIntervals = null as ReturnType<typeof generateIntervalData> | null;
 
   const drillResources = useMemo(() => {
     if (!drill) return null;
@@ -194,25 +218,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     if (!row?.zHost) return null;
     const h = row.zHost;
     const d = cpuDetail.get(h.hostId);
-    let s = drill.hostName.split("").reduce((a, c) => a + c.charCodeAt(0), 0) * 7 +
-      drill.date.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-    const rand = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return (s % 1000) / 1000; };
     const memBase = h.memory?.utilization || 0;
     const diskBase = h.disk?.utilization || 0;
-    const cpuBase = d ? d.user + d.system : 0;
+    const cpuBase = d ? ((d.user + d.system) > 0 ? d.user + d.system : d.total) : 0;
     const totalRamGb = h.memory ? h.memory.totalBytes / 1024 / 1024 / 1024 : 0;
-    const hourly = Array.from({ length: 24 }, (_, hour) => {
-      const hf = (hour >= 10 && hour <= 14) ? 1.0 : (hour >= 8 && hour <= 18) ? 0.75 : (hour >= 6 && hour <= 20) ? 0.5 : 0.2;
-      const r = rand();
-      return {
-        hour,
-        cpu: Math.round(Math.min(98, Math.max(0.5, cpuBase * 5 * hf * (0.7 + r * 0.6))) * 10) / 10,
-        memory: Math.round(Math.min(98, Math.max(10, memBase * (0.85 + hf * 0.2) * (0.95 + rand() * 0.1))) * 10) / 10,
-        disk: Math.round(Math.min(98, Math.max(5, diskBase > 0 ? diskBase * (0.99 + rand() * 0.02) : 25 + rand() * 15)) * 10) / 10,
-        ramUsedGb: Math.round(totalRamGb * Math.min(98, Math.max(10, memBase * (0.85 + hf * 0.2))) / 100 * 10) / 10,
-      };
-    });
-    return { hostName: drill.hostName, cores: row.cores, totalRamGb: Math.round(totalRamGb * 10) / 10, deviceType: row.deviceType, diskPath: h.disk?.path || "/", hourly, currentCpu: cpuBase, currentMem: memBase, currentDisk: diskBase };
+    // Per-hour CPU/Memory/Disk history is not fetched yet. We have 14 days of
+    // daily max/avg/min from `history.get` (cpuTrends), but hourly aggregation
+    // would need a per-drill fetch. Return null hourly → UI shows honest empty state.
+    return { hostName: drill.hostName, cores: row.cores, totalRamGb: Math.round(totalRamGb * 10) / 10, deviceType: row.deviceType, diskPath: h.disk?.path || "/", hourly: null as { hour: number; cpu: number; memory: number; disk: number; ramUsedGb: number }[] | null, currentCpu: cpuBase, currentMem: memBase, currentDisk: diskBase };
   }, [drill, hostRows, cpuDetail]);
 
   const peakSlot = drillIntervals
@@ -330,7 +343,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             style={{ fontSize: 10, padding: "1px 5px", border: "none", background: "#e9ecef", borderRadius: 3, cursor: "pointer", color: "#495057" }}>✕</button>
         )}
       </div>
-      {compact && <span style={{ fontSize: 10, color: "#c9cdd1", marginLeft: "auto" }}>⚠ Simulated</span>}
+      {compact && <span style={{ fontSize: 10, color: hasTrendData ? "#059669" : "#c9cdd1", marginLeft: "auto" }}>{hasTrendData ? "✓ Live Zabbix trends" : "⚠ No trend data"}</span>}
     </div>
   );
 
@@ -362,7 +375,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 const zebra = rowIdx % 2 === 1 ? C.zebraOdd : "#fff";
                 const rowBg = sel ? "#eff6ff" : zebra;
                 return (
-                  <tr key={row.name} style={{ borderTop: `1px solid ${rowIdx === 0 ? C.border : "#f1f3f5"}`, background: rowBg }}>
+                  <tr key={`${row.name}-${rowIdx}`} style={{ borderTop: `1px solid ${rowIdx === 0 ? C.border : "#f1f3f5"}`, background: rowBg }}>
                     <td style={{
                       padding: "3px 8px", fontFamily: "'SF Mono','Cascadia Code',monospace", fontSize: 11,
                       fontWeight: sel ? 600 : 400, whiteSpace: "nowrap",
@@ -373,20 +386,27 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                     <td style={{ padding: "3px 4px", textAlign: "center" }}>{typeBadge(row.deviceType)}</td>
                     <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={row.cpuModel}>{row.cpuModel}</td>
                     {row.peaks.map((peak, i) => {
-                      const exceeded = row.hasMatch && peak >= threshold;
+                      const hasValue = row.hasMatch && peak !== null;
+                      const exceeded = hasValue && peak >= threshold;
                       const dateStr = `${String(dates[i].getMonth() + 1).padStart(2, "0")}-${String(dates[i].getDate()).padStart(2, "0")}`;
                       const active = sel && drill?.date === dateStr;
-                      const bg = !row.hasMatch ? "#f9fafb" : peak >= 90 ? C.criticalBg : peak >= 80 ? C.highBg : exceeded ? C.thresholdBg : C.belowBg;
+                      const bg = !hasValue
+                        ? "#f9fafb"
+                        : peak >= 90 ? C.criticalBg
+                        : peak >= 80 ? C.highBg
+                        : exceeded ? C.thresholdBg
+                        : C.belowBg;
                       return (
-                        <td key={i} style={{ padding: 0, textAlign: "center", width: 32, cursor: row.hasMatch ? "pointer" : "default" }}
-                          onClick={() => row.hasMatch && openDrill(dates[i], row.name, peak)}>
+                        <td key={i} style={{ padding: 0, textAlign: "center", width: 32, cursor: hasValue ? "pointer" : "default" }}
+                          onClick={() => hasValue && openDrill(dates[i], row.name, peak!)}
+                          title={!row.hasMatch ? "No Zabbix host match" : peak === null ? "No history for this day" : undefined}>
                           <div style={{
                             background: bg,
-                            color: !row.hasMatch ? "#d1d5db" : exceeded ? C.exceededText : C.belowText,
+                            color: !hasValue ? "#d1d5db" : exceeded ? C.exceededText : C.belowText,
                             padding: "2px 0", fontSize: 10, fontWeight: exceeded ? 700 : 400, lineHeight: 1.2,
                             outline: active ? "2px solid #0070c9" : "none", outlineOffset: -1, borderRadius: active ? 2 : 0,
                           }}>
-                            {row.hasMatch ? Math.round(peak) : "—"}
+                            {hasValue ? Math.round(peak!) : "—"}
                           </div>
                         </td>
                       );
@@ -486,6 +506,32 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   if (!drill) {
     return (
       <>
+        <DataCoverageBanner
+          title="Data coverage: CPU trend duomenys — agreguoti, be per-mode/per-proc skilimo"
+          available={(
+            <>
+              Per-host dienos peak CPU iš <code>trends.get</code> (iki 14 d), live
+              snapshot iš <code>system.cpu.util[,,avg1]</code>, Python proc CPU
+              (<code>python.cpu</code>) per šiandien.
+            </>
+          )}
+          missing={(
+            <>
+              Per-mode skilimas (<code>system.cpu.util[,user]</code>,
+              <code> [,system]</code>, <code>[,iowait]</code>), per-process SCO
+              telemetrija, valandinė granuliacija iš <code>history.get</code>.
+              Drill‑down’e matomas Retellect/SCO/System breakdown — simuliacija, ne
+              realios per-proc reikšmės.
+            </>
+          )}
+          footer={(
+            <>
+              „Dienos be istorijos“ — hostas egzistuoja, bet <code>trends.get</code>
+              tai dienai negrąžino reikšmės (agent down, proxy lag arba retention
+              ribos). Platių gap’ų analizei naudok <strong>Data Health</strong> tab’ą.
+            </>
+          )}
+        />
         {filterBar(false)}
         <h2 style={{ fontSize: 17, fontWeight: 600, color: "#212529", marginBottom: 4 }}>CPU Threshold Timeline</h2>
         <p style={{ fontSize: 13, color: "#868e96", marginBottom: 10 }}>Heatmap: peak CPU per machine per day. Click a cell to drill down.</p>
@@ -495,11 +541,19 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             <strong>How to use:</strong> Click any cell to open day drill-down. Search to filter hosts. Click column headers to sort. Drag the divider to resize.
           </p>
         </div>
-        <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "8px 12px", marginTop: 10 }}>
-          <p style={{ fontSize: 11, color: "#92400e", margin: 0 }}>
-            <strong>⚠ Simulated:</strong> history.get API restricted. Values extrapolated from live snapshot ({zabbix.status === "live" ? "LIVE" : "CACHED"}).
-          </p>
-        </div>
+        {hasTrendData ? (
+          <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 6, padding: "8px 12px", marginTop: 10 }}>
+            <p style={{ fontSize: 11, color: "#065f46", margin: 0 }}>
+              <strong>✓ Live data:</strong> {zabbix.cpuTrends?.length || 0} daily CPU records from Zabbix history.get ({zabbix.status === "live" ? "LIVE" : "CACHED"}). Dienos be istorijos rodomos kaip „—“ (nėra duomenų).
+            </p>
+          </div>
+        ) : (
+          <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "8px 12px", marginTop: 10 }}>
+            <p style={{ fontSize: 11, color: "#92400e", margin: 0 }}>
+              <strong>⚠ Simulated:</strong> Heatmap ekstrapoliuotas iš dabartinio CPU snapshot ({zabbix.status === "live" ? "LIVE" : "CACHED"}).
+            </p>
+          </div>
+        )}
       </>
     );
   }
@@ -553,6 +607,17 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         </div>
 
         <div style={{ flex: 1, padding: "16px 20px", background: "#fafbfc", overflow: "auto" }}>
+          {drillTab === "process" && !drillIntervals && (
+            <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <div style={{ background: "#fff", border: `1px dashed ${C.border}`, borderRadius: 8, padding: "24px 28px", maxWidth: 560, textAlign: "center" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#495057", marginBottom: 6 }}>Process Breakdown dar negali būti rodomas</div>
+                <div style={{ fontSize: 11, color: C.textSec, lineHeight: 1.6 }}>
+                  Per-procesinei CPU istorijai (Retellect / SCO App / System skirstymui) reikia Zabbix <code style={{ fontSize: 10, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>perf_counter</code> itemų python.exe / sp.sss / sqlservr / vmware-vmx procesams.
+                  Šie itemų dar nėra deploy’inti Rimi SCO hostuose — laukėm adminą pridėti, tada bus čia.
+                </div>
+              </div>
+            </div>
+          )}
           {drillTab === "process" && drillIntervals && (
             <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
               {/* Granularity selector */}
@@ -714,22 +779,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   </div>
                 ))}
               </div>
-              <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, minHeight: 60 }}>
-                {([
-                  { l: "CPU % per hour", d: drillResources.hourly.map(h => h.cpu), cf: (v: number) => v > 70 ? "#ef4444" : v > 40 ? "#fbbf24" : "#0c8feb" },
-                  { l: "Memory % per hour", d: drillResources.hourly.map(h => h.memory), cf: (v: number) => v > 80 ? "#ef4444" : v > 60 ? "#f59f00" : "#10b981" },
-                  { l: "Disk % per hour", d: drillResources.hourly.map(h => h.disk), cf: (v: number) => v > 80 ? "#ef4444" : v > 60 ? "#f59f00" : "#6366f1" },
-                ] as const).map(({ l, d, cf }) => (
-                  <div key={l} style={{ display: "flex", flexDirection: "column" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "#495057", marginBottom: 4, flexShrink: 0 }}>{l}</div>
-                    <div style={{ flex: 1, display: "flex", gap: 0, alignItems: "flex-end", borderBottom: "1px solid #e9ecef", minHeight: 30 }}>
-                      {d.map((v, i) => <div key={i} style={{ flex: "1 1 0%", marginLeft: 1, borderRadius: "2px 2px 0 0", background: cf(v), height: `${Math.max(3, v)}%` }} title={`${String(i).padStart(2, "0")}:00 — ${v}%`} />)}
-                    </div>
-                    <div style={{ display: "flex", gap: 0, marginTop: 2, flexShrink: 0 }}>
-                      {d.map((_, i) => <div key={i} style={{ flex: "1 1 0%", textAlign: "center", fontSize: 7, color: "#c9cdd1" }}>{i % 6 === 0 ? i : ""}</div>)}
-                    </div>
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#fff", border: `1px dashed ${C.border}`, borderRadius: 8, padding: "20px 24px", minHeight: 80 }}>
+                <div style={{ textAlign: "center", maxWidth: 480 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#495057", marginBottom: 4 }}>Per-valandinė CPU/Memory/Disk istorija dar neprieinama</div>
+                  <div style={{ fontSize: 11, color: C.textSec, lineHeight: 1.5 }}>
+                    Zabbix archyvuoja dienų agregatus (max/avg/min) — juos naudojam Timeline heatmap’e.
+                    Valandos skiriai bus rodomi, kai prijungsim <code style={{ fontSize: 10, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>history.get</code> vieno hosto vienos dienos fetch’ą.
                   </div>
-                ))}
+                </div>
               </div>
               {drillResources.currentMem > 80 && (
                 <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 12px", flexShrink: 0 }}>

@@ -1,0 +1,922 @@
+[
+  {
+    "hostid": "25135",
+    "host": "LT_T104_SCOW_31",
+    "name": "LT_T104_SCOW_31",
+    "store_code": "T104",
+    "sco_num": 31,
+    "is_active": false
+  },
+  {
+    "hostid": "25120",
+    "host": "LT_T104_SCOW_32",
+    "name": "LT_T104_SCOW_32",
+    "store_code": "T104",
+    "sco_num": 32,
+    "is_active": false
+  },
+  {
+    "hostid": "25144",
+    "host": "LT_T104_SCOW_33",
+    "name": "LT_T104_SCOW_33",
+    "store_code": "T104",
+    "sco_num": 33,
+    "is_active": false
+  },
+  {
+    "hostid": "25148",
+    "host": "LT_T104_SCOW_34",
+    "name": "LT_T104_SCOW_34",
+    "store_code": "T104",
+    "sco_num": 34,
+    "is_active": false
+  },
+  {
+    "hostid": "25147",
+    "host": "LT_T104_SCOW_35",
+    "name": "LT_T104_SCOW_35",
+    "store_code": "T104",
+    "sco_num": 35,
+    "is_active": false
+  },
+  {
+    "hostid": "25292",
+    "host": "LT_T104_SCOW_36",
+    "name": "SM Didžioji [T104] SCO6",
+    "store_code": "T104",
+    "sco_num": 36,
+    "is_active": true
+  },
+  {
+    "hostid": "25149",
+    "host": "LT_T704_SCOW_31",
+    "name": "LT_T704_SCOW_31",
+    "store_code": "T704",
+    "sco_num": 31,
+    "is_active": false
+  },
+  {
+    "hostid": "25137",
+    "host": "LT_T704_SCOW_32",
+    "name": "LT_T704_SCOW_32",
+    "store_code": "T704",
+    "sco_num": 32,
+    "is_active": false
+  },
+  {
+    "hostid": "25131",
+    "host": "LT_T704_SCOW_33",
+    "name": "LT_T704_SCOW_33",
+    "store_code": "T704",
+    "sco_num": 33,
+    "is_active": false
+  },
+  {
+    "hostid": "25126",
+    "host": "LT_T704_SCOW_34",
+    "name": "LT_T704_SCOW_34",
+    "store_code": "T704",
+    "sco_num": 34,
+    "is_active": false
+  },
+  {
+    "hostid": "25151",
+    "host": "LT_T704_SCOW_35",
+    "name": "LT_T704_SCOW_35",
+    "store_code": "T704",
+    "sco_num": 35,
+    "is_active": false
+  },
+  {
+    "hostid": "25279",
+    "host": "LT_T704_SCOW_36",
+    "name": "HM Mega [T704] SCO6",
+    "store_code": "T704",
+    "sco_num": 36,
+    "is_active": true
+  },
+  {
+    "hostid": "25123",
+    "host": "LT_T704_SCOW_37",
+    "name": "LT_T704_SCOW_37",
+    "store_code": "T704",
+    "sco_num": 37,
+    "is_active": false
+  },
+  {
+    "hostid": "25122",
+    "host": "LT_T704_SCOW_38",
+    "name": "LT_T704_SCOW_38",
+    "store_code": "T704",
+    "sco_num": 38,
+    "is_active": false
+  },
+  {
+    "hostid": "25124",
+    "host": "LT_T704_SCOW_39",
+    "name": "LT_T704_SCOW_39",
+    "store_code": "T704",
+    "sco_num": 39,
+    "is_active": false
+  },
+  {
+    "hostid": "25127",
+    "host": "LT_T704_SCOW_40",
+    "name": "LT_T704_SCOW_40",
+    "store_code": "T704",
+    "sco_num": 40,
+    "is_active": false
+  },
+  {
+    "hostid": "25271",
+    "host": "LT_T705_SCOW_32",
+    "name": "HM Mandarinas [T705] SCO2",
+    "store_code": "T705",
+    "sco_num": 32,
+    "is_active": true
+  },
+  {
+    "hostid": "21459",
+    "host": "LT_T705_SCOW_33",
+    "name": "HM Mandarinas [T705] SCO3",
+    "store_code": "T705",
+    "sco_num": 33,
+    "is_active": true
+  },
+  {
+    "hostid": "25278",
+    "host": "LT_T705_SCOW_34",
+    "name": "HM Mandarinas [T705] SCO4",
+    "store_code": "T705",
+    "sco_num": 34,
+    "is_active": true
+  },
+  {
+    "hostid": "25230",
+    "host": "LT_T705_SCOW_35",
+    "name": "HM Mandarinas [T705] SCO5",
+    "store_code": "T705",
+    "sco_num": 35,
+    "is_active": true
+  },
+  {
+    "hostid": "25252",
+    "host": "LT_T705_SCOW_36",
+    "name": "HM Mandarinas [T705] SCO6",
+    "store_code": "T705",
+    "sco_num": 36,
+    "is_active": true
+  },
+  {
+    "hostid": "25141",
+    "host": "LT_T707_SCOW_31",
+    "name": "LT_T707_SCOW_31",
+    "store_code": "T707",
+    "sco_num": 31,
+    "is_active": false
+  },
+  {
+    "hostid": "25236",
+    "host": "LT_T707_SCOW_32",
+    "name": "HM Panorama [T707] SCO2",
+    "store_code": "T707",
+    "sco_num": 32,
+    "is_active": true
+  },
+  {
+    "hostid": "25130",
+    "host": "LT_T707_SCOW_33",
+    "name": "LT_T707_SCOW_33",
+    "store_code": "T707",
+    "sco_num": 33,
+    "is_active": false
+  },
+  {
+    "hostid": "25125",
+    "host": "LT_T707_SCOW_34",
+    "name": "HM Panorama [T707] SCO4",
+    "store_code": "T707",
+    "sco_num": 34,
+    "is_active": true
+  },
+  {
+    "hostid": "21788",
+    "host": "LT_T707_SCOW_35",
+    "name": "LT_T707_SCOW_35",
+    "store_code": "T707",
+    "sco_num": 35,
+    "is_active": false
+  },
+  {
+    "hostid": "25611",
+    "host": "LT_T707_SCOW_35",
+    "name": "LT_T707_SCOW_35",
+    "store_code": "T707",
+    "sco_num": 35,
+    "is_active": true
+  },
+  {
+    "hostid": "25263",
+    "host": "LT_T707_SCOW_36",
+    "name": "HM Panorama [T707] SCO6",
+    "store_code": "T707",
+    "sco_num": 36,
+    "is_active": true
+  },
+  {
+    "hostid": "25138",
+    "host": "LT_T707_SCOW_37",
+    "name": "LT_T707_SCOW_37",
+    "store_code": "T707",
+    "sco_num": 37,
+    "is_active": false
+  },
+  {
+    "hostid": "25132",
+    "host": "LT_T707_SCOW_38",
+    "name": "LT_T707_SCOW_38",
+    "store_code": "T707",
+    "sco_num": 38,
+    "is_active": false
+  },
+  {
+    "hostid": "25145",
+    "host": "LT_T707_SCOW_39",
+    "name": "LT_T707_SCOW_39",
+    "store_code": "T707",
+    "sco_num": 39,
+    "is_active": false
+  },
+  {
+    "hostid": "25142",
+    "host": "LT_T707_SCOW_40",
+    "name": "LT_T707_SCOW_40",
+    "store_code": "T707",
+    "sco_num": 40,
+    "is_active": false
+  },
+  {
+    "hostid": "25152",
+    "host": "LT_T707_SCOW_41",
+    "name": "LT_T707_SCOW_41",
+    "store_code": "T707",
+    "sco_num": 41,
+    "is_active": false
+  },
+  {
+    "hostid": "25378",
+    "host": "LT_T707_SCOW_42",
+    "name": "LT_T707_SCOW_42",
+    "store_code": "T707",
+    "sco_num": 42,
+    "is_active": false
+  },
+  {
+    "hostid": "25133",
+    "host": "LT_T707_SCOW_43",
+    "name": "LT_T707_SCOW_43",
+    "store_code": "T707",
+    "sco_num": 43,
+    "is_active": false
+  },
+  {
+    "hostid": "25245",
+    "host": "LT_T707_SCOW_44",
+    "name": "HM Panorama [T707] SCO14",
+    "store_code": "T707",
+    "sco_num": 44,
+    "is_active": true
+  },
+  {
+    "hostid": "25146",
+    "host": "LT_T707_SCOW_45",
+    "name": "LT_T707_SCOW_45",
+    "store_code": "T707",
+    "sco_num": 45,
+    "is_active": false
+  },
+  {
+    "hostid": "25242",
+    "host": "LT_T707_SCOW_46",
+    "name": "HM Panorama [T707] SCO16",
+    "store_code": "T707",
+    "sco_num": 46,
+    "is_active": true
+  },
+  {
+    "hostid": "25129",
+    "host": "LT_T707_SCOW_47",
+    "name": "LT_T707_SCOW_47",
+    "store_code": "T707",
+    "sco_num": 47,
+    "is_active": false
+  },
+  {
+    "hostid": "25276",
+    "host": "LT_T707_SCOW_48",
+    "name": "HM Panorama [T707] SCO18",
+    "store_code": "T707",
+    "sco_num": 48,
+    "is_active": true
+  },
+  {
+    "hostid": "25128",
+    "host": "LT_T707_SCOW_49",
+    "name": "LT_T707_SCOW_49",
+    "store_code": "T707",
+    "sco_num": 49,
+    "is_active": false
+  },
+  {
+    "hostid": "25277",
+    "host": "LT_T707_SCOW_50",
+    "name": "HM Panorama [T707] SCO20",
+    "store_code": "T707",
+    "sco_num": 50,
+    "is_active": true
+  },
+  {
+    "hostid": "25136",
+    "host": "LT_T709_SCOW_31",
+    "name": "LT_T709_SCOW_31",
+    "store_code": "T709",
+    "sco_num": 31,
+    "is_active": false
+  },
+  {
+    "hostid": "25632",
+    "host": "LT_T709_SCOW_32",
+    "name": "LT_T709_SCOW_32",
+    "store_code": "T709",
+    "sco_num": 32,
+    "is_active": true
+  },
+  {
+    "hostid": "25261",
+    "host": "LT_T709_SCOW_33",
+    "name": "HM Saulės miestas [T709] SCO3",
+    "store_code": "T709",
+    "sco_num": 33,
+    "is_active": true
+  },
+  {
+    "hostid": "25304",
+    "host": "LT_T709_34",
+    "name": "HM Saulės miestas [T709] SCO",
+    "store_code": "T709",
+    "sco_num": 34,
+    "is_active": true
+  },
+  {
+    "hostid": "25303",
+    "host": "LT_T709_SCOW_35",
+    "name": "HM Saulės miestas [T709] SCO5",
+    "store_code": "T709",
+    "sco_num": 35,
+    "is_active": true
+  },
+  {
+    "hostid": "25274",
+    "host": "LT_T709_SCOW_36",
+    "name": "HM Saulės miestas [T709] SCO6",
+    "store_code": "T709",
+    "sco_num": 36,
+    "is_active": true
+  },
+  {
+    "hostid": "25255",
+    "host": "LT_T709_SCOW_37",
+    "name": "HM Saulės miestas [T709] SCO7",
+    "store_code": "T709",
+    "sco_num": 37,
+    "is_active": true
+  },
+  {
+    "hostid": "25254",
+    "host": "LT_T709_SCOW_38",
+    "name": "HM Saulės miestas [T709] SCO8",
+    "store_code": "T709",
+    "sco_num": 38,
+    "is_active": true
+  },
+  {
+    "hostid": "25281",
+    "host": "LT_T709_SCOW_39",
+    "name": "HM Saulės miestas [T709] SCO9",
+    "store_code": "T709",
+    "sco_num": 39,
+    "is_active": true
+  },
+  {
+    "hostid": "25237",
+    "host": "LT_T709_SCOW_40",
+    "name": "HM Saulės miestas [T709] SCO10",
+    "store_code": "T709",
+    "sco_num": 40,
+    "is_active": true
+  },
+  {
+    "hostid": "25150",
+    "host": "LT_T709_SCOW_41",
+    "name": "LT_T709_SCOW_41",
+    "store_code": "T709",
+    "sco_num": 41,
+    "is_active": false
+  },
+  {
+    "hostid": "25265",
+    "host": "LT_T709_SCOW_42",
+    "name": "HM Saulės miestas [T709] SCO12",
+    "store_code": "T709",
+    "sco_num": 42,
+    "is_active": true
+  },
+  {
+    "hostid": "25234",
+    "host": "LT_T745_SCOW_31",
+    "name": "HM Liepojos [T745] SCO1",
+    "store_code": "T745",
+    "sco_num": 31,
+    "is_active": true
+  },
+  {
+    "hostid": "25275",
+    "host": "LT_T745_SCOW_32",
+    "name": "HM Liepojos [T745] SCO2",
+    "store_code": "T745",
+    "sco_num": 32,
+    "is_active": true
+  },
+  {
+    "hostid": "25235",
+    "host": "LT_T745_SCOW_33",
+    "name": "HM Liepojos [T745] SCO3",
+    "store_code": "T745",
+    "sco_num": 33,
+    "is_active": true
+  },
+  {
+    "hostid": "25264",
+    "host": "LT_T745_SCOW_34",
+    "name": "HM Liepojos [T745] SCO4",
+    "store_code": "T745",
+    "sco_num": 34,
+    "is_active": true
+  },
+  {
+    "hostid": "25238",
+    "host": "LT_T745_SCOW_35",
+    "name": "HM Liepojos [T745] SCO5",
+    "store_code": "T745",
+    "sco_num": 35,
+    "is_active": true
+  },
+  {
+    "hostid": "25231",
+    "host": "LT_T746_SCOW_31",
+    "name": "SHM Panevėžys [T746] SCO1",
+    "store_code": "T746",
+    "sco_num": 31,
+    "is_active": true
+  },
+  {
+    "hostid": "25153",
+    "host": "LT_T746_SCOW_32",
+    "name": "LT_T746_SCOW_32",
+    "store_code": "T746",
+    "sco_num": 32,
+    "is_active": false
+  },
+  {
+    "hostid": "21466",
+    "host": "LT_T746_SCOW_33",
+    "name": "SHM Panevėžys [T746] SCO3",
+    "store_code": "T746",
+    "sco_num": 33,
+    "is_active": true
+  },
+  {
+    "hostid": "25610",
+    "host": "LT_T746_SCOW_33",
+    "name": "LT_T746_SCOW_33",
+    "store_code": "T746",
+    "sco_num": 33,
+    "is_active": true
+  },
+  {
+    "hostid": "25262",
+    "host": "LT_T746_SCOW_34",
+    "name": "LT_T746_SCOW_34",
+    "store_code": "T746",
+    "sco_num": 34,
+    "is_active": false
+  },
+  {
+    "hostid": "25267",
+    "host": "LT_T746_SCOW_35",
+    "name": "SHM Panevėžys [T746] SCO5",
+    "store_code": "T746",
+    "sco_num": 35,
+    "is_active": true
+  },
+  {
+    "hostid": "25289",
+    "host": "LT_T747_SCOW_31",
+    "name": "RIMI HM Jeruzalė [T747] SCO1",
+    "store_code": "T747",
+    "sco_num": 31,
+    "is_active": true
+  },
+  {
+    "hostid": "25206",
+    "host": "LT_T747_SCOW_32",
+    "name": "LT_T747_SCOW_32",
+    "store_code": "T747",
+    "sco_num": 32,
+    "is_active": false
+  },
+  {
+    "hostid": "25282",
+    "host": "LT_T747_SCOW_33",
+    "name": "RIMI HM Jeruzalė [T747] SCO3",
+    "store_code": "T747",
+    "sco_num": 33,
+    "is_active": false
+  },
+  {
+    "hostid": "25257",
+    "host": "LT_T747_SCOW_34",
+    "name": "RIMI HM Jeruzalė [T747] SCO4",
+    "store_code": "T747",
+    "sco_num": 34,
+    "is_active": true
+  },
+  {
+    "hostid": "25291",
+    "host": "LT_T747_SCOW_35",
+    "name": "RIMI HM Jeruzalė [T747] SCO5",
+    "store_code": "T747",
+    "sco_num": 35,
+    "is_active": true
+  },
+  {
+    "hostid": "25258",
+    "host": "LT_T747_SCOW_36",
+    "name": "RIMI HM Jeruzalė [T747] SCO6",
+    "store_code": "T747",
+    "sco_num": 36,
+    "is_active": true
+  },
+  {
+    "hostid": "25207",
+    "host": "LT_T747_SCOW_37",
+    "name": "LT_T747_SCOW_37",
+    "store_code": "T747",
+    "sco_num": 37,
+    "is_active": false
+  },
+  {
+    "hostid": "25205",
+    "host": "LT_T747_SCOW_38",
+    "name": "LT_T747_SCOW_38",
+    "store_code": "T747",
+    "sco_num": 38,
+    "is_active": false
+  },
+  {
+    "hostid": "25211",
+    "host": "LT_T757_SCOW_31",
+    "name": "LT_T757_SCOW_31",
+    "store_code": "T757",
+    "sco_num": 31,
+    "is_active": false
+  },
+  {
+    "hostid": "25208",
+    "host": "LT_T757_SCOW_32",
+    "name": "LT_T757_SCOW_32",
+    "store_code": "T757",
+    "sco_num": 32,
+    "is_active": false
+  },
+  {
+    "hostid": "25210",
+    "host": "LT_T757_SCOW_33",
+    "name": "LT_T757_SCOW_33",
+    "store_code": "T757",
+    "sco_num": 33,
+    "is_active": false
+  },
+  {
+    "hostid": "25209",
+    "host": "LT_T757_SCOW_34",
+    "name": "LT_T757_SCOW_34",
+    "store_code": "T757",
+    "sco_num": 34,
+    "is_active": false
+  },
+  {
+    "hostid": "21797",
+    "host": "LT_T757_SCOW_35",
+    "name": "LT_T757_SCOW_35",
+    "store_code": "T757",
+    "sco_num": 35,
+    "is_active": false
+  },
+  {
+    "hostid": "25382",
+    "host": "LT_T757_SCOW_35",
+    "name": "LT_T757_SCOW_35",
+    "store_code": "T757",
+    "sco_num": 35,
+    "is_active": false
+  },
+  {
+    "hostid": "25268",
+    "host": "LT_T757_SCOW_36",
+    "name": "MHM Malūno [T757] SCO6",
+    "store_code": "T757",
+    "sco_num": 36,
+    "is_active": true
+  },
+  {
+    "hostid": "25290",
+    "host": "LT_T757_SCOW_37",
+    "name": "MHM Malūno [T757] SCO7",
+    "store_code": "T757",
+    "sco_num": 37,
+    "is_active": true
+  },
+  {
+    "hostid": "25269",
+    "host": "LT_T757_SCOW_38",
+    "name": "MHM Malūno [T757] SCO8",
+    "store_code": "T757",
+    "sco_num": 38,
+    "is_active": true
+  },
+  {
+    "hostid": "25259",
+    "host": "LT_T757_SCOW_39",
+    "name": "MHM Malūno [T757] SCO9",
+    "store_code": "T757",
+    "sco_num": 39,
+    "is_active": true
+  },
+  {
+    "hostid": "25260",
+    "host": "LT_T757_SCOW_40",
+    "name": "MHM Malūno [T757] SCO10",
+    "store_code": "T757",
+    "sco_num": 40,
+    "is_active": true
+  },
+  {
+    "hostid": "23044",
+    "host": "LT_T776_SCOW_31",
+    "name": "SM Naujoji Vilnia [T776] SCO1",
+    "store_code": "T776",
+    "sco_num": 31,
+    "is_active": true
+  },
+  {
+    "hostid": "23043",
+    "host": "LT_T776_SCOW_33",
+    "name": "SM Naujoji Vilnia [T776] SCO3",
+    "store_code": "T776",
+    "sco_num": 33,
+    "is_active": true
+  },
+  {
+    "hostid": "25240",
+    "host": "LT_T777_SCOW_31",
+    "name": "CHM BIG [T777] SCO1",
+    "store_code": "T777",
+    "sco_num": 31,
+    "is_active": true
+  },
+  {
+    "hostid": "25244",
+    "host": "LT_T777_SCOW_32",
+    "name": "CHM BIG [T777] SCO2",
+    "store_code": "T777",
+    "sco_num": 32,
+    "is_active": true
+  },
+  {
+    "hostid": "25239",
+    "host": "LT_T777_SCOW_33",
+    "name": "CHM BIG [T777] SCO3",
+    "store_code": "T777",
+    "sco_num": 33,
+    "is_active": true
+  },
+  {
+    "hostid": "25266",
+    "host": "LT_T777_SCOW_34",
+    "name": "CHM BIG [T777] SCO4",
+    "store_code": "T777",
+    "sco_num": 34,
+    "is_active": true
+  },
+  {
+    "hostid": "25256",
+    "host": "LT_T777_SCOW_35",
+    "name": "CHM BIG [T777] SCO5",
+    "store_code": "T777",
+    "sco_num": 35,
+    "is_active": true
+  },
+  {
+    "hostid": "21778",
+    "host": "LT_T788_SCOW_31",
+    "name": "LT_T788_SCOW_31",
+    "store_code": "T788",
+    "sco_num": 31,
+    "is_active": false
+  },
+  {
+    "hostid": "25293",
+    "host": "LT_T788_SCOW_32",
+    "name": "MHM Užupis [T788] SCO2",
+    "store_code": "T788",
+    "sco_num": 32,
+    "is_active": true
+  },
+  {
+    "hostid": "25373",
+    "host": "LT_T788_SCOW_33",
+    "name": "LT_T788_SCOW_33",
+    "store_code": "T788",
+    "sco_num": 33,
+    "is_active": false
+  },
+  {
+    "hostid": "25270",
+    "host": "LT_T788_SCOW_34",
+    "name": "MHM Užupis [T788] SCO4",
+    "store_code": "T788",
+    "sco_num": 34,
+    "is_active": true
+  },
+  {
+    "hostid": "21772",
+    "host": "LT_T788_SCOW_35",
+    "name": "MHM Užupis [T788] SCO5",
+    "store_code": "T788",
+    "sco_num": 35,
+    "is_active": true
+  },
+  {
+    "hostid": "23042",
+    "host": "LT_T788_SCOW_37",
+    "name": "MHM Užupis [T788] SCO7",
+    "store_code": "T788",
+    "sco_num": 37,
+    "is_active": true
+  },
+  {
+    "hostid": "25247",
+    "host": "LT_T803_SCOW_32",
+    "name": "SHM Pavilnionys [T803] SCO2",
+    "store_code": "T803",
+    "sco_num": 32,
+    "is_active": true
+  },
+  {
+    "hostid": "25251",
+    "host": "LT_T803_SCOW_34",
+    "name": "SHM Pavilnionys [T803] SCO4",
+    "store_code": "T803",
+    "sco_num": 34,
+    "is_active": true
+  },
+  {
+    "hostid": "25248",
+    "host": "LT_T803_SCOW_35",
+    "name": "SHM Pavilnionys [T803] SCO5",
+    "store_code": "T803",
+    "sco_num": 35,
+    "is_active": true
+  },
+  {
+    "hostid": "25305",
+    "host": "LT_T813_SCOW_31",
+    "name": "CHM Outlet [T813] SCO1",
+    "store_code": "T813",
+    "sco_num": 31,
+    "is_active": true
+  },
+  {
+    "hostid": "25621",
+    "host": "LT_T813_SCOW_32",
+    "name": "CHM Outlet [T813] SCO2",
+    "store_code": "T813",
+    "sco_num": 32,
+    "is_active": true
+  },
+  {
+    "hostid": "25620",
+    "host": "LT_T813_SCOW_33",
+    "name": "CHM Outlet [T813] SCO3",
+    "store_code": "T813",
+    "sco_num": 33,
+    "is_active": true
+  },
+  {
+    "hostid": "25241",
+    "host": "LT_T813_SCOW_34",
+    "name": "CHM Outlet [T813] SCO4",
+    "store_code": "T813",
+    "sco_num": 34,
+    "is_active": true
+  },
+  {
+    "hostid": "25623",
+    "host": "LT_T813_SCOW_35",
+    "name": "CHM Outlet [T813] SCO5",
+    "store_code": "T813",
+    "sco_num": 35,
+    "is_active": true
+  },
+  {
+    "hostid": "25622",
+    "host": "LT_T813_SCOW_36",
+    "name": "CHM Outlet [T813] SCO6",
+    "store_code": "T813",
+    "sco_num": 36,
+    "is_active": true
+  },
+  {
+    "hostid": "25249",
+    "host": "LT_T822_SCOW_31",
+    "name": "SHM Dangeručio [T822] SCO1",
+    "store_code": "T822",
+    "sco_num": 31,
+    "is_active": true
+  },
+  {
+    "hostid": "25250",
+    "host": "LT_T822_SCOW_32",
+    "name": "SHM Dangeručio [T822] SCO2",
+    "store_code": "T822",
+    "sco_num": 32,
+    "is_active": true
+  },
+  {
+    "hostid": "25140",
+    "host": "LT_T838_SCOW_31",
+    "name": "LT_T838_SCOW_31",
+    "store_code": "T838",
+    "sco_num": 31,
+    "is_active": false
+  },
+  {
+    "hostid": "25121",
+    "host": "LT_T838_SCOW_32",
+    "name": "LT_T838_SCOW_32",
+    "store_code": "T838",
+    "sco_num": 32,
+    "is_active": false
+  },
+  {
+    "hostid": "25134",
+    "host": "LT_T838_SCOW_33",
+    "name": "LT_T838_SCOW_33",
+    "store_code": "T838",
+    "sco_num": 33,
+    "is_active": false
+  },
+  {
+    "hostid": "25253",
+    "host": "LT_T838_SCOW_34",
+    "name": "Rimi SM Ketvergiai [T838]",
+    "store_code": "T838",
+    "sco_num": 34,
+    "is_active": true
+  },
+  {
+    "hostid": "21775",
+    "host": "LT_T865_SCOW_31",
+    "name": "LT_T865_SCOW_31",
+    "store_code": "T865",
+    "sco_num": 31,
+    "is_active": false
+  },
+  {
+    "hostid": "25143",
+    "host": "LT_T865_SCOW_32",
+    "name": "LT_T865_SCOW_32",
+    "store_code": "T865",
+    "sco_num": 32,
+    "is_active": false
+  },
+  {
+    "hostid": "25246",
+    "host": "LT_T865_SCOW_33",
+    "name": "SM Kaišiadorys [T865] SCO3",
+    "store_code": "T865",
+    "sco_num": 33,
+    "is_active": true
+  }
+]

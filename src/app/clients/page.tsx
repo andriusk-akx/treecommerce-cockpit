@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/db";
 import Link from "next/link";
 
-export const dynamic = "force-dynamic";
+// Client list is DB-only; ISR with 5-min revalidation is sufficient.
+export const revalidate = 300;
 
 export default async function ClientsPage() {
   let clients: any[] = [];

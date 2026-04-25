@@ -9,6 +9,7 @@ import { RtCpuComparison } from "./tabs/RtCpuComparison";
 import { RtReference } from "./tabs/RtReference";
 import { RtCapacityRisk } from "./tabs/RtCapacityRisk";
 import { RtHypotheses } from "./tabs/RtHypotheses";
+import { RtDataHealth } from "./tabs/RtDataHealth";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ export interface RtPilotData {
     cpuModel: string;
     ramGb: number;
     retellectEnabled: boolean;
+    retellectConfidence: string | null;
     status: string;
     deviceType: string;
     os: string | null;
@@ -66,6 +68,33 @@ export interface ZabbixProcItem {
   lastClock: string | null;
 }
 
+/** Per-process CPU % sample from custom `<proc>.cpu` Zabbix items (1-min average). */
+export interface ZabbixProcCpuItem {
+  hostId: string;
+  key: string;
+  name: string;
+  procName: string;
+  category: "retellect" | "sco" | "db" | "hw" | "sys" | "other";
+  cpuValue: number;
+  lastClock: string | null;
+  lastClockUnix: number;
+  units: string;
+}
+
+export interface ZabbixProcCpuMeta {
+  status: "live" | "cached" | "unavailable";
+  fetchMs: number;
+  error: string | null;
+}
+
+export interface ZabbixCpuTrend {
+  hostId: string;
+  date: string; // ISO date "YYYY-MM-DD"
+  max: number;
+  avg: number;
+  min: number;
+}
+
 export interface ZabbixData {
   status: "live" | "cached" | "unavailable";
   fetchMs: number;
@@ -74,6 +103,10 @@ export interface ZabbixData {
   hosts: ZabbixHostData[];
   cpuDetail: ZabbixCpuDetailItem[];
   procItems?: ZabbixProcItem[];
+  /** Per-process CPU % (python, spss, sqlservr, ...) — authoritative RT liveness signal */
+  procCpu?: ZabbixProcCpuItem[];
+  procCpuMeta?: ZabbixProcCpuMeta;
+  cpuTrends?: ZabbixCpuTrend[];
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
@@ -81,9 +114,10 @@ export interface ZabbixData {
 const tabs = [
   { id: "overview", label: "Overview" },
   { id: "inventory", label: "Host Inventory" },
+  { id: "health", label: "Data Health" },
   { id: "timeline", label: "CPU Timeline" },
   { id: "cpu", label: "CPU Comparison" },
-  { id: "reference", label: "Reference Store" },
+  { id: "reference", label: "Resource Overview" },
   { id: "risk", label: "Capacity Risk" },
   { id: "hypotheses", label: "Hypotheses & Recs" },
 ];
@@ -199,6 +233,7 @@ export function RtPilotWorkspace({
       <div className="max-w-6xl mx-auto px-6 py-6">
         {activeTab === "overview" && <RtOverview pilot={pilot} zabbix={zabbix} />}
         {activeTab === "inventory" && <RtInventory pilot={pilot} zabbix={zabbix} />}
+        {activeTab === "health" && <RtDataHealth pilot={pilot} zabbix={zabbix} />}
         {activeTab === "timeline" && <RtTimeline pilot={pilot} zabbix={zabbix} />}
         {activeTab === "cpu" && <RtCpuComparison pilot={pilot} zabbix={zabbix} />}
         {activeTab === "reference" && <RtReference pilot={pilot} zabbix={zabbix} />}

@@ -2,7 +2,8 @@ import { prisma } from "@/lib/db";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-export const dynamic = "force-dynamic";
+// Client details are DB-only; ISR with 5-min revalidation is sufficient.
+export const revalidate = 300;
 
 interface PageProps {
   params: Promise<{ clientId: string }>;

@@ -5,7 +5,9 @@ import NavLinks from "./components/NavLinks";
 import { Suspense } from "react";
 import "./globals.css";
 
-export const dynamic = "force-dynamic";
+// Navigation shell: only reads active pilots from DB. ISR with 5-min
+// revalidation is plenty — new pilots don't appear on the order of seconds.
+export const revalidate = 300;
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -45,7 +47,7 @@ export default async function RootLayout({
                   AKpilot
                 </h1>
                 <p className="text-[10px] text-gray-400 -mt-0.5">
-                  Pilotų valdymo sistema
+                  Pilot management system
                 </p>
               </div>
               {activePilots.length > 0 && (
@@ -75,7 +77,7 @@ export default async function RootLayout({
           {children}
         </main>
         <footer className="border-t border-gray-200 px-6 py-3 text-center text-[10px] text-gray-400">
-          AKpilot &mdash; Konsultanto pilotų valdymo įrankis
+          AKpilot &mdash; Consultant&rsquo;s pilot management tool
         </footer>
       </body>
     </html>

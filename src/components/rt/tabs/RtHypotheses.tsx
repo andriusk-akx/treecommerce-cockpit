@@ -34,13 +34,29 @@ export function RtHypotheses({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Za
 
     const matchedDevices = hostCpu.filter((h) => h.hasMatch);
     const highCpu = matchedDevices.filter((h) => h.total > 50);
-    const lowRam = matchedDevices.filter((h) => h.ramGb > 0 && h.ramGb < 5);
-    const highMem = matchedDevices.filter((h) => h.memUtil > 80);
+    // Only consider hosts with a known RAM value for RAM hypotheses; unknown ≠ sufficient
+    const hostsWithRam = matchedDevices.filter((h) => h.ramGb > 0);
+    const hostsWithoutRam = matchedDevices.filter((h) => h.ramGb <= 0);
+    const lowRam = hostsWithRam.filter((h) => h.ramGb < 5);
+    // Memory utilization is only valid when Zabbix reports a value (>0 means we have it)
+    const hostsWithMem = matchedDevices.filter((h) => h.memUtil > 0);
+    const highMem = hostsWithMem.filter((h) => h.memUtil > 80);
     const lowCoreHosts = matchedDevices.filter((h) => h.cores > 0 && h.cores <= 4);
     const retellectDevices = pilot.devices.filter((d) => d.retellectEnabled);
     const nonRetellect = pilot.devices.filter((d) => !d.retellectEnabled);
 
-    return { highCpu, lowRam, highMem, lowCoreHosts, retellectDevices, nonRetellect, matchedCount: matchedDevices.length };
+    return {
+      highCpu,
+      lowRam,
+      hostsWithRam,
+      hostsWithoutRam,
+      highMem,
+      hostsWithMem,
+      lowCoreHosts,
+      retellectDevices,
+      nonRetellect,
+      matchedCount: matchedDevices.length,
+    };
   }, [pilot, zabbix]);
 
   const hypotheses = [
@@ -58,24 +74,41 @@ export function RtHypotheses({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Za
     {
       id: "H2",
       title: "Memory-constrained hosts risk swap pressure with Retellect",
-      confidence: insights.lowRam.length > 0 ? "medium" : "low",
+      // Cannot claim "sufficient RAM" when we have no RAM data for most hosts
+      confidence: insights.lowRam.length > 0
+        ? "medium"
+        : insights.hostsWithRam.length === 0
+        ? "unknown"
+        : "low",
       evidence: insights.lowRam.length > 0
         ? `${insights.lowRam.length} hosts with <5 GB RAM: ${insights.lowRam.map((h) => `${h.name} (${h.ramGb.toFixed(1)} GB)`).join(", ")}`
-        : "All matched hosts have ≥5 GB RAM",
+        : insights.hostsWithRam.length === 0
+        ? `No RAM data available — ${insights.hostsWithoutRam.length} matched hosts lack vm.memory.size in Zabbix and ramGb in DB`
+        : `${insights.hostsWithRam.length}/${insights.matchedCount} matched hosts have RAM data, all ≥5 GB; remaining ${insights.hostsWithoutRam.length} unknown`,
       recommendation: insights.lowRam.length > 0
         ? "Upgrade RAM on these hosts before enabling Retellect. Minimum 8 GB recommended."
-        : "RAM capacity appears sufficient across matched hosts.",
+        : insights.hostsWithRam.length === 0
+        ? "Collect RAM specs before making capacity claims: enable vm.memory.size in Zabbix or populate Device.ramGb in DB."
+        : "RAM capacity appears sufficient across hosts with known specs; verify unknowns before rollout.",
     },
     {
       id: "H3",
       title: "High memory utilization may indicate resource pressure",
-      confidence: insights.highMem.length > 0 ? "high" : "low",
+      confidence: insights.highMem.length > 0
+        ? "high"
+        : insights.hostsWithMem.length === 0
+        ? "unknown"
+        : "low",
       evidence: insights.highMem.length > 0
         ? `${insights.highMem.length} hosts with memory >80%: ${insights.highMem.map((h) => `${h.name} (${Math.round(h.memUtil)}%)`).join(", ")}`
-        : "No hosts currently above 80% memory utilization",
+        : insights.hostsWithMem.length === 0
+        ? "No memory utilization data — vm.memory items not configured on matched hosts"
+        : `${insights.hostsWithMem.length}/${insights.matchedCount} matched hosts report memory utilization, none above 80%`,
       recommendation: insights.highMem.length > 0
         ? "Investigate memory-heavy processes. Adding Retellect to these hosts may cause OOM issues."
-        : "Memory headroom is adequate for Retellect deployment.",
+        : insights.hostsWithMem.length === 0
+        ? "Enable vm.memory.size and vm.memory.utilization in Zabbix to assess memory headroom."
+        : "Memory headroom appears adequate for Retellect on hosts that report utilization.",
     },
     {
       id: "H4",
@@ -89,9 +122,9 @@ export function RtHypotheses({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Za
   const recommendations = [
     {
       priority: "high",
-      title: "Enable Zabbix history.get API access",
-      description: "Current API token lacks history.get/trend.get permissions. This blocks: CPU timeline heatmaps, peak vs average analysis over time, reference store workload patterns, and accurate capacity projections.",
-      action: "Contact Zabbix admin to add history.get permission to the API token.",
+      title: "Configure proc.num[retellect] items on Rimi SCO WIN hosts",
+      description: "Retellect process monitoring items (proc.num[retellect] or proc.num[rtagent]) are not yet present on the 109 Rimi SCO WIN hosts in Zabbix. Without them, RT Status shows 'Unknown' for every RT-enabled device because we have no evidence the process is actually running.",
+      action: "StrongPoint / Rimi Zabbix admin to add proc.num[retellect] (or proc.num[rtagent]) to the Rimi SCO WIN host template.",
     },
     {
       priority: "high",
@@ -101,9 +134,9 @@ export function RtHypotheses({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Za
     },
     {
       priority: "medium",
-      title: "Establish baseline monitoring period",
-      description: "At least 2 weeks of CPU/memory history needed for reliable capacity analysis. Current data is snapshot-only.",
-      action: "Enable history collection and wait for 2-week baseline before making hardware decisions.",
+      title: "Establish 2-week CPU history baseline",
+      description: "Capacity projections and peak-vs-average analysis require sustained history. Current views use live item snapshots; heatmap and capacity tabs will only be fully accurate once history.get returns at least 2 weeks of system.cpu.util samples.",
+      action: "Enable Zabbix history collection on CPU items and revisit capacity analysis after a 2-week baseline.",
     },
   ];
 
@@ -127,9 +160,11 @@ export function RtHypotheses({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Za
               </div>
               <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
                 h.confidence === "high" ? "bg-red-50 text-red-700" :
-                h.confidence === "medium" ? "bg-amber-50 text-amber-700" : "bg-gray-100 text-gray-500"
+                h.confidence === "medium" ? "bg-amber-50 text-amber-700" :
+                h.confidence === "unknown" ? "bg-gray-100 text-gray-600" :
+                "bg-gray-100 text-gray-500"
               }`}>
-                {h.confidence} confidence
+                {h.confidence === "unknown" ? "insufficient data" : `${h.confidence} confidence`}
               </span>
             </div>
             <div className="text-sm text-gray-600 mb-2">

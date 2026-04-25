@@ -3,6 +3,20 @@ import { notFound } from "next/navigation";
 import { RtPilotWorkspace } from "@/components/rt/RtPilotWorkspace";
 import { getZabbixClient } from "@/lib/zabbix/client";
 import { fetchSource } from "@/lib/data-source";
+import type { ProcessCategory } from "@/lib/zabbix/types";
+
+type ProcCpuPayload = {
+  itemId: string;
+  hostId: string;
+  name: string;
+  key: string;
+  procName: string;
+  category: ProcessCategory;
+  cpuValue: number;
+  lastClock: string | null;
+  lastClockUnix: number;
+  units: string;
+};
 
 export const dynamic = "force-dynamic";
 
@@ -30,82 +44,139 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
 
   if (!pilot || pilot.productType !== "RETELLECT") return notFound();
 
-  // Fetch live Zabbix resource metrics
-  const zabbixResult = await fetchSource(`zabbix-rt-resources-${pilotId}`, {
-    source: "zabbix",
-    label: "Zabbix CPU/RAM Metrikos",
-    env: "prod",
-    fetcher: async () => {
-      const client = getZabbixClient();
-      const [resources, hosts] = await Promise.all([
-        client.getResourceMetrics(),
-        client.getHosts(),
-      ]);
-      // Enrich resources with host metadata
-      const hostMap = new Map(hosts.map((h: any) => [h.hostid, h]));
-      return resources.map((r: any) => {
-        const hostMeta = hostMap.get(r.hostId);
-        return {
-          ...r,
-          groups: hostMeta?.groups?.map((g: any) => g.name) || [],
-          interfaces: hostMeta?.interfaces || [],
-          maintenanceStatus: hostMeta?.maintenance_status,
-        };
-      });
-    },
-  });
+  // Fetch all 4 independent Zabbix payloads in parallel.
+  // The client caches getHosts() in-process + dedupes in-flight, so these four
+  // fetchers effectively share a single host.get round-trip instead of four.
+  const [
+    zabbixResult,
+    zabbixCpuDetailResult,
+    zabbixProcResult,
+    zabbixProcCpuResult,
+  ] = await Promise.all([
+    fetchSource(`zabbix-rt-resources-${pilotId}`, {
+      source: "zabbix",
+      label: "Zabbix CPU/RAM Metrikos",
+      env: "prod",
+      fetcher: async () => {
+        const client = getZabbixClient();
+        const [resources, hosts] = await Promise.all([
+          client.getResourceMetrics(),
+          client.getHosts(),
+        ]);
+        const hostMap = new Map(hosts.map((h: any) => [h.hostid, h]));
+        return resources.map((r: any) => {
+          const hostMeta = hostMap.get(r.hostId);
+          return {
+            ...r,
+            groups: hostMeta?.groups?.map((g: any) => g.name) || [],
+            interfaces: hostMeta?.interfaces || [],
+            maintenanceStatus: hostMeta?.maintenance_status,
+          };
+        });
+      },
+    }),
+    fetchSource(`zabbix-rt-cpu-detail-${pilotId}`, {
+      source: "zabbix",
+      label: "Zabbix CPU Detail",
+      env: "prod",
+      fetcher: async () => {
+        const client = getZabbixClient();
+        const allHosts = await client.getHosts();
+        const hostIds = allHosts.map((h: any) => h.hostid);
+        if (hostIds.length === 0) return [];
+        const items = await client.getItems(hostIds, "system.cpu");
+        return items.map((item: any) => ({
+          itemId: item.itemid,
+          hostId: item.hostid,
+          key: item.key_,
+          name: item.name,
+          lastValue: parseFloat(item.lastvalue) || 0,
+          lastClock: item.lastclock ? new Date(parseInt(item.lastclock) * 1000).toISOString() : null,
+          units: item.units,
+        }));
+      },
+    }),
+    fetchSource(`zabbix-rt-proc-${pilotId}`, {
+      source: "zabbix",
+      label: "Zabbix Process Items",
+      env: "prod",
+      fetcher: async () => {
+        const client = getZabbixClient();
+        const allHosts = await client.getHosts();
+        const hostIds = allHosts.map((h: any) => h.hostid);
+        if (hostIds.length === 0) return [];
+        const items = await client.getItems(hostIds, "proc");
+        return items.map((item: any) => ({
+          itemId: item.itemid,
+          hostId: item.hostid,
+          key: item.key_,
+          name: item.name,
+          lastValue: parseFloat(item.lastvalue) || 0,
+          lastClock: item.lastclock ? new Date(parseInt(item.lastclock) * 1000).toISOString() : null,
+          units: item.units,
+        }));
+      },
+    }),
+    fetchSource(`zabbix-rt-proc-cpu-${pilotId}`, {
+      source: "zabbix",
+      label: "Zabbix Process CPU",
+      env: "prod",
+      fetcher: async () => {
+        const client = getZabbixClient();
+        const allHosts = (await client.getHosts()) as Array<{ hostid: string }>;
+        const hostIds = allHosts.map((h) => h.hostid);
+        if (hostIds.length === 0) return [];
+        const items = await client.getProcessCpuItems(hostIds);
+        return items.map((it) => ({
+          itemId: it.itemId,
+          hostId: it.hostId,
+          name: it.name,
+          key: it.key,
+          procName: it.procName,
+          category: it.category,
+          cpuValue: it.cpuValue,
+          lastClock: it.lastClock ? new Date(it.lastClock * 1000).toISOString() : null,
+          lastClockUnix: it.lastClock,
+          units: it.units,
+        }));
+      },
+    }),
+  ]);
 
   const zabbixHosts = zabbixResult.data || [];
-
-  // Fetch Zabbix CPU detail items per host for user/system breakdown
-  const zabbixCpuDetailResult = await fetchSource(`zabbix-rt-cpu-detail-${pilotId}`, {
-    source: "zabbix",
-    label: "Zabbix CPU Detail",
-    env: "prod",
-    fetcher: async () => {
-      const client = getZabbixClient();
-      const allHosts = await client.getHosts();
-      const hostIds = allHosts.map((h: any) => h.hostid);
-      if (hostIds.length === 0) return [];
-      const items = await client.getItems(hostIds, "system.cpu");
-      return items.map((item: any) => ({
-        itemId: item.itemid,
-        hostId: item.hostid,
-        key: item.key_,
-        name: item.name,
-        lastValue: parseFloat(item.lastvalue) || 0,
-        lastClock: item.lastclock ? new Date(parseInt(item.lastclock) * 1000).toISOString() : null,
-        units: item.units,
-      }));
-    },
-  });
-
   const cpuDetailItems = zabbixCpuDetailResult.data || [];
+  const procItems = zabbixProcResult.data || [];
+  const procCpuItems = zabbixProcCpuResult.data || [];
 
-  // Fetch Zabbix process items (proc.num) to detect running Retellect
-  const zabbixProcResult = await fetchSource(`zabbix-rt-proc-${pilotId}`, {
+  // Fetch CPU history for timeline heatmap — real historical data via history.get
+  // Only fetch for hosts that match DB devices (not all 100 Zabbix hosts)
+  const matchedHostIds = new Set<string>();
+  const zabbixHostByName = new Map(zabbixHosts.map((h: any) => [h.hostName, h]));
+  for (const device of pilot.devices) {
+    const zHost = zabbixHostByName.get(device.sourceHostKey ?? "");
+    if (zHost) matchedHostIds.add(zHost.hostId);
+  }
+
+  const zabbixHistoryResult = await fetchSource(`zabbix-rt-cpu-history-${pilotId}`, {
     source: "zabbix",
-    label: "Zabbix Process Items",
+    label: "Zabbix CPU History",
     env: "prod",
     fetcher: async () => {
       const client = getZabbixClient();
-      const allHosts = await client.getHosts();
-      const hostIds = allHosts.map((h: any) => h.hostid);
-      if (hostIds.length === 0) return [];
-      const items = await client.getItems(hostIds, "proc");
-      return items.map((item: any) => ({
-        itemId: item.itemid,
-        hostId: item.hostid,
-        key: item.key_,
-        name: item.name,
-        lastValue: parseFloat(item.lastvalue) || 0,
-        lastClock: item.lastclock ? new Date(parseInt(item.lastclock) * 1000).toISOString() : null,
-        units: item.units,
-      }));
+      // Only cpu.util items for matched DB devices
+      const cpuUtilItems = cpuDetailItems.filter((i: any) =>
+        (i.key === "system.cpu.util[,,avg1]" || i.key === "system.cpu.util") &&
+        matchedHostIds.has(i.hostId)
+      );
+      if (cpuUtilItems.length === 0) return [];
+      const itemIds = cpuUtilItems.map((i: any) => i.itemId);
+      const itemHostMap = new Map(cpuUtilItems.map((i: any) => [i.itemId, i.hostId]));
+      const result = await client.getCpuHistoryDaily(itemIds, itemHostMap, 14);
+      return result;
     },
   });
 
-  const procItems = zabbixProcResult.data || [];
+  const cpuHistory = zabbixHistoryResult.data || [];
 
   // Serialize pilot data for client component
   const pilotData = {
@@ -132,6 +203,7 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
       cpuModel: d.cpuModel ?? "—",
       ramGb: d.ramGb ?? 0,
       retellectEnabled: d.retellectEnabled,
+      retellectConfidence: d.retellectConfidence,
       status: d.status,
       deviceType: d.deviceType,
       os: d.os,
@@ -179,6 +251,23 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
       value: item.lastValue,
       lastClock: item.lastClock,
     })),
+    procCpu: (procCpuItems as ProcCpuPayload[]).map((item) => ({
+      hostId: item.hostId,
+      key: item.key,
+      name: item.name,
+      procName: item.procName,
+      category: item.category,
+      cpuValue: item.cpuValue,
+      lastClock: item.lastClock,
+      lastClockUnix: item.lastClockUnix,
+      units: item.units,
+    })),
+    procCpuMeta: {
+      status: zabbixProcCpuResult.status,
+      fetchMs: zabbixProcCpuResult.fetchMs,
+      error: zabbixProcCpuResult.error,
+    },
+    cpuTrends: cpuHistory,
   };
 
   return <RtPilotWorkspace pilot={pilotData} zabbix={zabbixData} initialTab={tab || "overview"} />;

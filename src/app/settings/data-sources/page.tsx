@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 
-export const dynamic = "force-dynamic";
+// Data source config is DB-only; 5-min ISR is sufficient.
+export const revalidate = 300;
 
 export default async function DataSourcesSettingsPage() {
   let dataSources: any[] = [];

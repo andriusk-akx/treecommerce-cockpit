@@ -187,6 +187,7 @@ model Device {
   os               String?
   status           String     @default("active")
   retellectEnabled Boolean    @default(false)
+  retellectConfidence String? // "high" | "low" — null when not installed
   notes            String?    @db.Text
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt

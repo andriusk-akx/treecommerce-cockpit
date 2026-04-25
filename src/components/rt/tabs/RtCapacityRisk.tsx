@@ -122,26 +122,41 @@ export function RtCapacityRisk({ pilot, zabbix }: { pilot: RtPilotData; zabbix: 
         <h3 className="font-semibold text-gray-900 mb-3">Risk Summary</h3>
         <div className="space-y-2 text-sm">
           {analysis.map((g) => {
+            const hasData = g.currentPeak > 0;
             const at150 = g.currentPeak * 1.5;
-            const risk = at150 > 100 ? "critical" : at150 > 80 ? "high" : at150 > 60 ? "medium" : "low";
+            // Only compute risk when we actually have peak CPU data. Without a peak value
+            // the math collapses to zero and would falsely show "low" — show "insufficient
+            // data" instead so demo viewers don't mistake missing data for a clean bill of health.
+            const risk = !hasData
+              ? "insufficient-data"
+              : at150 > 100 ? "critical"
+              : at150 > 80 ? "high"
+              : at150 > 60 ? "medium"
+              : "low";
             return (
               <div key={g.name} className="flex items-center gap-3">
                 <span className={`w-2 h-2 rounded-full ${
                   risk === "critical" ? "bg-red-500" :
                   risk === "high" ? "bg-amber-500" :
-                  risk === "medium" ? "bg-yellow-500" : "bg-emerald-500"
+                  risk === "medium" ? "bg-yellow-500" :
+                  risk === "low" ? "bg-emerald-500" :
+                  "bg-gray-300"
                 }`} />
                 <span className="font-medium text-gray-700 w-48">{g.name}</span>
                 <span className="text-gray-500">
-                  Current: {g.currentCpu}% avg, {g.currentPeak}% peak
-                  {g.currentPeak > 0 && ` — at +50% volume: ${Math.round(at150)}%`}
+                  {hasData
+                    ? <>Current: {g.currentCpu}% avg, {g.currentPeak}% peak — at +50% volume: {Math.round(at150)}%</>
+                    : <>No peak CPU data — needs Zabbix history/trends</>
+                  }
                 </span>
                 <span className={`ml-auto text-xs font-medium px-2 py-0.5 rounded ${
                   risk === "critical" ? "bg-red-50 text-red-700" :
                   risk === "high" ? "bg-amber-50 text-amber-700" :
-                  risk === "medium" ? "bg-yellow-50 text-yellow-700" : "bg-emerald-50 text-emerald-700"
+                  risk === "medium" ? "bg-yellow-50 text-yellow-700" :
+                  risk === "low" ? "bg-emerald-50 text-emerald-700" :
+                  "bg-gray-100 text-gray-600"
                 }`}>
-                  {risk}
+                  {risk === "insufficient-data" ? "insufficient data" : risk}
                 </span>
               </div>
             );

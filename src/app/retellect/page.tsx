@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/db";
 import Link from "next/link";
 
-export const dynamic = "force-dynamic";
+// RT hub lists pilots from DB (no live Zabbix); ISR 5-min is sufficient.
+export const revalidate = 300;
 
 export default async function RetellectHubPage() {
   let pilots: any[] = [];
