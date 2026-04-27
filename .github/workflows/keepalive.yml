@@ -1,0 +1,29 @@
+name: keep-alive
+
+# Pings the production /api/version every 5 minutes to prevent Railway
+# Hobby-plan idle sleep. Lightweight: 1 HTTP request, no auth, no cost.
+#
+# When we move to Railway Pro (or another host with always-on), this
+# workflow can be deleted — its only purpose is keeping the container warm.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: # manual trigger from GitHub UI
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/version
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 30 \
+              https://akpilot-production.up.railway.app/api/version)
+            echo "Attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 10
+          done
+          echo "Service didn't respond after 3 attempts"
+          exit 1
