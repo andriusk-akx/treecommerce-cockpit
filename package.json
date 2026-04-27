@@ -2,6 +2,9 @@
   "name": "app",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "version:generate": "tsx scripts/generate-version.ts",
     "auth:unlock": "tsx scripts/unlock-user.ts",
