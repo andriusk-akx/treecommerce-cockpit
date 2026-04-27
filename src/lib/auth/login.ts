@@ -19,6 +19,16 @@ import { verifyPassword } from "./passwords";
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
 
+// Pre-computed bcrypt hash of the string "dummy-password-for-timing-defence"
+// at cost 12 — used to simulate a real bcrypt comparison when the lookup
+// returns no user. Without this, "user not found" returns in ~5ms while
+// "user found, wrong password" takes ~250ms — the timing leak alone lets
+// an attacker enumerate valid usernames.
+//
+// The hash was generated once at build time. It's not a secret (it's a
+// hash of a known string); regenerating it doesn't change behaviour.
+const DUMMY_HASH = "$2b$12$zst.jphxSctQHSMDp.AnXe0Mp4oXK060SLfvNHm6a1vS9pvNAFnsO";
+
 export type LoginResult =
   | { ok: true; userId: string }
   | { ok: false; reason: "invalid_credentials" | "locked" | "disabled" };
@@ -36,7 +46,7 @@ export async function attemptLogin(username: string, password: string): Promise<
   // time roughly constant whether or not the username exists. (Side-channel
   // protection for username enumeration.)
   if (!user) {
-    await verifyPassword(password, "$2a$12$abcdefghijklmnopqrstuv");
+    await verifyPassword(password, DUMMY_HASH);
     return { ok: false, reason: "invalid_credentials" };
   }
 
