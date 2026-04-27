@@ -6,6 +6,7 @@ import UserMenu from "./components/UserMenu";
 import { Suspense } from "react";
 import { getCurrentUser } from "@/lib/auth/sessions";
 import { filterAccessiblePilots } from "@/lib/auth/permissions";
+import { VERSION, COMMIT, DIRTY } from "@/generated/version";
 import "./globals.css";
 
 // Layout depends on the current user's permissions — must be per-request.
@@ -92,6 +93,13 @@ export default async function RootLayout({
         </main>
         <footer className="border-t border-gray-200 px-6 py-3 text-center text-[10px] text-gray-400">
           AKpilot &mdash; Consultant&rsquo;s pilot management tool
+          <span className="mx-2 text-gray-300">·</span>
+          {/* Version string is concatenated server-side so it ends up as a
+              single text node in the DOM (no React comment markers between
+              "v" and the number) — easier to grep, easier to read. */}
+          <span title={`build ${COMMIT}${DIRTY ? "+dirty" : ""}`}>
+            {`v${VERSION} (${COMMIT}${DIRTY ? "+" : ""})`}
+          </span>
         </footer>
       </body>
     </html>

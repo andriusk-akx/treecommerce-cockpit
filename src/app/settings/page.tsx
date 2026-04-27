@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { versionInfo } from "@/generated/version";
 
 export default function SettingsPage() {
   const [autostart, setAutostart] = useState<boolean | null>(null);
@@ -45,21 +46,43 @@ export default function SettingsPage() {
       </div>
 
       <div className="space-y-4 max-w-lg">
-        {/* App Info */}
+        {/* App Info — version + build identity */}
         <div className="bg-white rounded-lg border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-800 mb-3">Apie AKpilot</h3>
-          <dl className="space-y-2 text-sm">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-800">About AKpilot</h3>
+            {versionInfo.dirty && (
+              <span
+                className="text-[9px] uppercase tracking-wide bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded"
+                title="Built from a working tree with uncommitted changes — should not happen in production."
+              >
+                dirty build
+              </span>
+            )}
+          </div>
+          <dl className="space-y-2 text-xs">
             <div className="flex justify-between">
-              <dt className="text-gray-500">Versija</dt>
-              <dd className="text-gray-900 font-mono">1.0.0-alpha</dd>
+              <dt className="text-gray-500">Version</dt>
+              <dd className="text-gray-900 font-mono">{versionInfo.version}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-gray-500">Stekas</dt>
-              <dd className="text-gray-900">Next.js 16 + Prisma 7 + PostgreSQL</dd>
+              <dt className="text-gray-500">Commit</dt>
+              <dd className="text-gray-900 font-mono" title={versionInfo.commitFull}>
+                {versionInfo.commit}
+              </dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-gray-500">Portas</dt>
-              <dd className="text-gray-900 font-mono">3001</dd>
+              <dt className="text-gray-500">Branch</dt>
+              <dd className="text-gray-900 font-mono">{versionInfo.branch}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-gray-500">Built</dt>
+              <dd className="text-gray-900 font-mono">
+                {new Date(versionInfo.buildTime).toLocaleString("lt-LT")}
+              </dd>
+            </div>
+            <div className="flex justify-between border-t border-gray-100 pt-2">
+              <dt className="text-gray-500">Stack</dt>
+              <dd className="text-gray-700">Next.js 16 · Prisma 7 · PostgreSQL 16</dd>
             </div>
           </dl>
         </div>

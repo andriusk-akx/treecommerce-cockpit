@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "version:generate": "tsx scripts/generate-version.ts",
+    "predev": "npm run version:generate",
+    "prebuild": "npm run version:generate",
     "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",

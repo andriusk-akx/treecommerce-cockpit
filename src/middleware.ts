@@ -22,6 +22,8 @@ const PUBLIC_PREFIXES = [
   "/login",
   "/api/auth/login",
   "/api/auth/logout",
+  // Build identity — used by ops/monitoring; safe to expose.
+  "/api/version",
   "/_next",
   "/favicon.ico",
 ];
