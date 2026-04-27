@@ -7,6 +7,7 @@ import {
   filterAccessiblePilots,
   allowedTabsFor,
   requireAdmin,
+  landingPath,
   type UserAuthState,
   type TabKey,
 } from "./permissions";
@@ -126,5 +127,26 @@ describe("requireAdmin", () => {
     expect(requireAdmin(null)).toBe(false);
     expect(requireAdmin(makeUser({}))).toBe(false);
     expect(requireAdmin(makeUser({ isAdmin: true }))).toBe(true);
+  });
+});
+
+describe("landingPath", () => {
+  it("anonymous → /login", () => {
+    expect(landingPath(null, [])).toBe("/login");
+  });
+  it("admin → / (regardless of pilot count)", () => {
+    expect(landingPath(makeUser({ isAdmin: true }), [])).toBe("/");
+    expect(landingPath(makeUser({ isAdmin: true }), ["a"])).toBe("/");
+    expect(landingPath(makeUser({ isAdmin: true }), ["a", "b"])).toBe("/");
+  });
+  it("non-admin with exactly one pilot → that pilot's URL", () => {
+    expect(landingPath(makeUser({}), ["pilot-x"])).toBe("/retellect/pilot-x");
+  });
+  it("non-admin with multiple pilots → /retellect hub", () => {
+    expect(landingPath(makeUser({}), ["a", "b"])).toBe("/retellect");
+    expect(landingPath(makeUser({}), ["a", "b", "c"])).toBe("/retellect");
+  });
+  it("non-admin with no pilots → /no-access", () => {
+    expect(landingPath(makeUser({}), [])).toBe("/no-access");
   });
 });

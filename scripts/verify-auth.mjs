@@ -77,11 +77,36 @@ t("Admin sees pilot card",
   adminBody.includes("Retellect SCO CPU Analysis"),
   "page didn't contain pilot name");
 
-const sprimiRetellect = await get("/retellect", sprimiCookie);
-t("Sprimi1 /retellect → 200", sprimiRetellect.status === 200);
+// Single-pilot non-admin should be REDIRECTED away from the hub straight
+// to their pilot. We follow the redirect manually so we can inspect both.
+const sprimiHub = await get("/retellect", sprimiCookie);
+t("Sprimi1 /retellect → 307/308 redirect (skip the hub picker)",
+  sprimiHub.status === 307 || sprimiHub.status === 308,
+  `got ${sprimiHub.status}`);
+const sprimiHubLocation = sprimiHub.headers.get("location") ?? "";
+t("Sprimi1 hub redirect → /retellect/<pilotId>",
+  /\/retellect\/[a-z0-9]+$/.test(sprimiHubLocation),
+  `location: ${sprimiHubLocation}`);
+// Now follow the redirect.
+const pilotPath = sprimiHubLocation.replace(/^https?:\/\/[^/]+/, "");
+const sprimiRetellect = await get(pilotPath, sprimiCookie);
+t("Sprimi1 follows redirect → 200", sprimiRetellect.status === 200);
 const sprimiBody = await sprimiRetellect.text();
-t("Sprimi1 sees their one pilot",
+t("Sprimi1 lands on their one pilot",
   sprimiBody.includes("Retellect SCO CPU Analysis"));
+
+// Same behaviour from the home page: non-admin → bounce to landing.
+const sprimiHome = await get("/", sprimiCookie);
+t("Sprimi1 / → redirect (admin-flavoured dashboard hidden)",
+  sprimiHome.status === 307 || sprimiHome.status === 308,
+  `got ${sprimiHome.status}`);
+
+// Admin sees full dashboard at /, no redirect.
+const adminHome = await get("/", adminCookie);
+t("Admin / → 200 (no redirect)", adminHome.status === 200, `got ${adminHome.status}`);
+const adminHub = await get("/retellect", adminCookie);
+t("Admin /retellect → 200 (sees the hub picker)",
+  adminHub.status === 200, `got ${adminHub.status}`);
 
 console.log("\nC. Settings admin gate");
 const adminSettings = await get("/settings/users", adminCookie);
@@ -92,15 +117,10 @@ t("Sprimi1 /settings/users → 404 (admin-only)",
   `got ${sprimiSettings.status}`);
 
 console.log("\nD. Pilot tab scoping (Sprimi1)");
-// Look at the rendered HTML of the pilot page — only the tabs with permKey
-// in [overview, timeline] should appear.
-const pilotIdMatch = sprimiBody.match(/href="\/retellect\/([a-z0-9]+)"/);
-const pilotId = pilotIdMatch?.[1];
-t("found pilot id in hub", !!pilotId);
-if (pilotId) {
-  const pilotPage = await get(`/retellect/${pilotId}`, sprimiCookie);
-  t("Sprimi1 pilot detail → 200", pilotPage.status === 200);
-  const html = await pilotPage.text();
+// sprimiBody is already the pilot detail HTML (we followed the hub redirect
+// above). Check that ONLY allowed tabs are present.
+{
+  const html = sprimiBody;
   // Tabs that SHOULD be present:
   t("tab: Overview visible", html.includes(">Overview<"));
   t("tab: CPU Timeline visible", html.includes(">CPU Timeline<"));

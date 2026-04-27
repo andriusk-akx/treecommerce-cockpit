@@ -24,6 +24,12 @@ export default async function RetellectHubPage() {
   } catch {
     // DB not ready
   }
+  // Skip the hub for non-admins with exactly one pilot — picking from a list
+  // of one is a dead click. Admins always see the hub even if there's only
+  // one pilot (they manage pilots from here).
+  if (!user.isAdmin && pilots.length === 1) {
+    redirect(`/retellect/${pilots[0].id}`);
+  }
 
   // Mock enrichment for MVP (will come from real metrics later)
   const pilotEnrichment: Record<string, { hosts: number; cpuClasses: number; highRisk: number; refStore: string; finding: string; lastSync: string }> = {

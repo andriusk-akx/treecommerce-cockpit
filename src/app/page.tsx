@@ -1,13 +1,26 @@
 import { prisma } from "@/lib/db";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getZabbixClient } from "@/lib/zabbix/client";
 import { generateInsights, type Insight } from "@/lib/zabbix/insights";
 import { fetchSource } from "@/lib/data-source";
 import DataSourceStatus from "@/app/components/DataSourceStatus";
+import { getCurrentUser } from "@/lib/auth/sessions";
+import { landingPath, visiblePilotIds } from "@/lib/auth/permissions";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  // The home dashboard is admin-flavoured (cross-pilot stats). Non-admins
+  // get bounced to their pilot directly — no point showing them aggregate
+  // numbers for clients/pilots they can't even see.
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (!user.isAdmin) {
+    const ids = visiblePilotIds(user);
+    const list = ids === "all" ? [] : Array.from(ids);
+    redirect(landingPath(user, list));
+  }
   // Fetch pilots, clients, and core stats
   let pilots: any[] = [];
   let clients: any[] = [];

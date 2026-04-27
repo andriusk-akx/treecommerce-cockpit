@@ -103,3 +103,29 @@ export function allowedTabsFor(
 export function requireAdmin(user: UserAuthState | null): user is UserAuthState {
   return !!user && user.isAdmin;
 }
+
+/**
+ * Where should a freshly-authenticated user land?
+ *
+ *   • Admin                          → "/" (the cross-pilot dashboard)
+ *   • Non-admin with exactly 1 pilot → "/retellect/<id>" (skip the hub —
+ *                                      a one-row picker is a dead click)
+ *   • Non-admin with several pilots  → "/retellect" (hub picker)
+ *   • Non-admin with zero pilots     → "/no-access" (handled by login page;
+ *                                      we never grant a session that lands
+ *                                      here in practice, but be explicit)
+ *
+ * The actual product type isn't checked yet because Retellect is the only
+ * shipped pilot category. When TC pilots come back online, this function
+ * gets a small lookup; the call sites stay the same.
+ */
+export function landingPath(
+  user: UserAuthState | null,
+  accessiblePilotIds: readonly string[],
+): string {
+  if (!user) return "/login";
+  if (user.isAdmin) return "/";
+  if (accessiblePilotIds.length === 1) return `/retellect/${accessiblePilotIds[0]}`;
+  if (accessiblePilotIds.length > 1) return "/retellect";
+  return "/no-access";
+}
