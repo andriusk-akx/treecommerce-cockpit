@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { RtPilotWorkspace } from "@/components/rt/RtPilotWorkspace";
 import { getZabbixClient } from "@/lib/zabbix/client";
 import { fetchSource } from "@/lib/data-source";
 import type { ProcessCategory } from "@/lib/zabbix/types";
+import { getCurrentUser } from "@/lib/auth/sessions";
+import { canAccessPilot, allowedTabsFor } from "@/lib/auth/permissions";
 
 type ProcCpuPayload = {
   itemId: string;
@@ -28,6 +30,13 @@ interface Props {
 export default async function RetellectPilotPage({ params, searchParams }: Props) {
   const { pilotId } = await params;
   const { tab } = await searchParams;
+
+  const user = await getCurrentUser();
+  if (!user) redirect(`/login?next=/retellect/${pilotId}`);
+  // 404 (not 403) for pilots the user can't see — avoids confirming the
+  // pilot exists. Same rationale as the username-enumeration defence on login.
+  if (!canAccessPilot(user, pilotId)) return notFound();
+  const allowedTabs = allowedTabsFor(user, pilotId);
 
   const pilot = await prisma.pilot.findUnique({
     where: { id: pilotId },
@@ -277,5 +286,12 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
     cpuTrends: cpuHistory,
   };
 
-  return <RtPilotWorkspace pilot={pilotData} zabbix={zabbixData} initialTab={tab || "overview"} />;
+  return (
+    <RtPilotWorkspace
+      pilot={pilotData}
+      zabbix={zabbixData}
+      initialTab={tab || "overview"}
+      allowedTabs={Array.from(allowedTabs)}
+    />
+  );
 }

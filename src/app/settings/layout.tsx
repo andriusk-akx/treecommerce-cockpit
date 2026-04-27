@@ -1,39 +1,23 @@
-"use client";
+/**
+ * Settings layout — admin-only.
+ *
+ * Server-side guard: non-admins see notFound(). The client middleware can't
+ * check isAdmin (Edge runtime, no DB), so this is the actual enforcement
+ * point. Admin bypass is single-source-of-truth via getCurrentUser().isAdmin.
+ */
+import { notFound } from "next/navigation";
+import { getCurrentUser } from "@/lib/auth/sessions";
+import { requireAdmin } from "@/lib/auth/permissions";
+import { SettingsNav } from "./SettingsNav";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+export const dynamic = "force-dynamic";
 
-const SETTINGS_NAV = [
-  { href: "/settings", label: "Bendri", exact: true },
-  { href: "/settings/data-sources", label: "Duomenų šaltiniai" },
-  { href: "/settings/zabbix", label: "Zabbix" },
-  { href: "/settings/treecommerce-api", label: "TreeCommerce API" },
-  { href: "/settings/retellect", label: "Retellect" },
-];
-
-export default function SettingsLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-
+export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
+  const user = await getCurrentUser();
+  if (!requireAdmin(user)) return notFound();
   return (
     <div>
-      <div className="flex items-center gap-1 mb-6 border-b border-gray-200 pb-3 overflow-x-auto">
-        {SETTINGS_NAV.map(({ href, label, exact }) => {
-          const isActive = exact ? pathname === href : pathname.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={`whitespace-nowrap px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                isActive
-                  ? "bg-gray-900 text-white"
-                  : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-              }`}
-            >
-              {label}
-            </Link>
-          );
-        })}
-      </div>
+      <SettingsNav />
       {children}
     </div>
   );

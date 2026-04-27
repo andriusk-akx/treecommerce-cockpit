@@ -3,20 +3,29 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const NAV_ITEMS = [
+interface NavItem {
+  href: string;
+  label: string;
+  exact?: boolean;
+  /** Hide from non-admin users. */
+  adminOnly?: boolean;
+}
+
+const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Home", exact: true },
   { href: "/retellect", label: "Retellect" },
-  { href: "/pilots", label: "Pilotai" },
-  { href: "/clients", label: "Klientai" },
-  { href: "/settings", label: "Settings" },
+  { href: "/pilots", label: "Pilotai", adminOnly: true },
+  { href: "/clients", label: "Klientai", adminOnly: true },
+  { href: "/settings", label: "Settings", adminOnly: true },
 ];
 
-export default function NavLinks() {
+export default function NavLinks({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
+  const items = NAV_ITEMS.filter((it) => !it.adminOnly || isAdmin);
 
   return (
     <nav className="flex gap-5 text-sm font-medium">
-      {NAV_ITEMS.map(({ href, label, exact }) => {
+      {items.map(({ href, label, exact }) => {
         const isActive = exact
           ? pathname === href
           : pathname.startsWith(href);

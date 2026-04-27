@@ -133,6 +133,7 @@ model Pilot {
   incidents      Incident[]
   noteEntries    Note[]
   views          View[]
+  userAccess     UserPilotAccess[]
 }
 
 model DataSource {
@@ -250,4 +251,99 @@ model View {
   pilot Pilot @relation(fields: [pilotId], references: [id])
 
   @@unique([pilotId, slug])
+}
+
+// ─── Authentication & Authorization ──────────────────────────────
+//
+// Authorization model (intentionally simple, designed to grow):
+//
+//   • User.isAdmin = bypass switch. Admins can do anything.
+//   • Non-admins access pilots ONLY through UserPilotAccess records.
+//   • Role.allowedTabs is a TEMPLATE — when an admin grants a user access to a
+//     pilot, they pick a role and the role's allowedTabs become the default
+//     for that grant. Per-pilot overrides live on UserPilotAccess itself.
+//
+// This deliberately avoids a generic permission-string table. We can graduate
+// to one when we have more than ~10 actions to gate. For now ("which tabs in
+// which pilot"), allowedTabs as a string array is the simplest thing that
+// could possibly work.
+
+model User {
+  id                  String   @id @default(cuid())
+  username            String   @unique
+  passwordHash        String
+  // Top-level admin flag. Bypasses all per-pilot checks.
+  isAdmin             Boolean  @default(false)
+  // Optional template role for non-admins. Admins typically have null.
+  roleId              String?
+  // Account lockout fields — enterprise baseline.
+  failedLoginAttempts Int      @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  role        Role?             @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  pilotAccess UserPilotAccess[]
+  sessions    UserSession[]
+
+  @@index([username])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  // Built-in roles can't be deleted (admin protection).
+  isBuiltIn   Boolean  @default(false)
+  // Default tabs granted when an admin assigns this role to a pilot.
+  // Tab keys: overview | inventory | timeline | comparison | reference |
+  //           capacity | hypotheses | datahealth
+  allowedTabs String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
+}
+
+model UserPilotAccess {
+  id          String   @id @default(cuid())
+  userId      String
+  pilotId     String
+  // Per-pilot tab override. Empty array = denied even though grant exists.
+  // null (default empty array via Postgres) = inherit from user's role.
+  // For MVP we store the resolved allowedTabs explicitly to keep enforcement
+  // straightforward — copy from role.allowedTabs at creation, edit per pilot.
+  allowedTabs String[]
+  grantedAt   DateTime @default(now())
+  grantedBy   String?  // userId of the admin who granted
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pilot Pilot @relation(fields: [pilotId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, pilotId])
+  @@index([userId])
+  @@index([pilotId])
+}
+
+// Session table — backs cookie-based auth. JWT cookies sign-only, the row
+// here is the source of truth for "is this session still valid" so that
+// logout / kick-user actions take effect immediately (signed JWTs alone
+// can't be revoked until they expire).
+model UserSession {
+  id         String   @id @default(cuid())
+  userId     String
+  // Session token stored in cookie, hashed at rest (sha256 of cookie value).
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  userAgent  String?
+  ipAddress  String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }

@@ -128,15 +128,17 @@ export interface ZabbixData {
 
 // ─── Constants ──────────────────────────────────────────────────────
 
+// `permKey` maps each tab to the permission key in Role.allowedTabs /
+// UserPilotAccess.allowedTabs. Keep in sync with src/lib/auth/permissions.ts.
 const tabs = [
-  { id: "overview", label: "Overview" },
-  { id: "timeline", label: "CPU Timeline" },
-  { id: "inventory", label: "Host Inventory" },
-  { id: "health", label: "Data Health" },
-  { id: "cpu", label: "CPU Comparison" },
-  { id: "reference", label: "Resource Overview" },
-  { id: "risk", label: "Capacity Risk" },
-  { id: "hypotheses", label: "Hypotheses & Recs" },
+  { id: "overview",    label: "Overview",                  permKey: "overview" },
+  { id: "timeline",    label: "CPU Timeline",              permKey: "timeline" },
+  { id: "inventory",   label: "Host Inventory",            permKey: "inventory" },
+  { id: "health",      label: "Data Health",               permKey: "datahealth" },
+  { id: "cpu",         label: "CPU Comparison",            permKey: "comparison" },
+  { id: "reference",   label: "Resource Overview",         permKey: "reference" },
+  { id: "risk",        label: "Capacity Risk",             permKey: "capacity" },
+  { id: "hypotheses",  label: "Hypotheses & Recs",         permKey: "hypotheses" },
 ];
 
 const statusStyles: Record<string, string> = {
@@ -152,12 +154,24 @@ export function RtPilotWorkspace({
   pilot,
   zabbix,
   initialTab,
+  allowedTabs,
 }: {
   pilot: RtPilotData;
   zabbix: ZabbixData;
   initialTab: string;
+  /** Permission keys the current user is allowed to see in this pilot. */
+  allowedTabs: string[];
 }) {
-  const [activeTab, setActiveTab] = useState(initialTab);
+  // Filter the tab list to what the user can see. Admin gets the full list
+  // (page passes ALL_TABS). Non-admin sees only their granted tabs.
+  // If the user landed on a forbidden tab via URL, fall back to the first
+  // allowed tab so the UI doesn't render an empty workspace.
+  const allowedSet = new Set(allowedTabs);
+  const visibleTabs = tabs.filter((t) => allowedSet.has(t.permKey));
+  const safeInitial = visibleTabs.find((t) => t.id === initialTab)
+    ? initialTab
+    : visibleTabs[0]?.id ?? "overview";
+  const [activeTab, setActiveTab] = useState(safeInitial);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
   function handleSync() {
@@ -231,7 +245,7 @@ export function RtPilotWorkspace({
       {/* Tabs */}
       <div className="bg-white border-b border-gray-200 px-6">
         <div className="max-w-6xl mx-auto flex gap-0 overflow-x-auto">
-          {tabs.map((t) => (
+          {visibleTabs.map((t) => (
             <button
               key={t.id}
               className={`py-3 px-4 text-sm whitespace-nowrap border-b-2 transition ${
@@ -247,16 +261,19 @@ export function RtPilotWorkspace({
         </div>
       </div>
 
-      {/* Content */}
+      {/* Content — defence in depth: only render the panel if its permKey
+          is in allowedTabs. The page-level check + visibleTabs filter above
+          should already make this redundant, but a forbidden activeTab
+          (e.g. via stale localStorage) would still render an empty panel. */}
       <div className="max-w-6xl mx-auto px-6 py-6">
-        {activeTab === "overview" && <RtOverview pilot={pilot} zabbix={zabbix} />}
-        {activeTab === "inventory" && <RtInventory pilot={pilot} zabbix={zabbix} />}
-        {activeTab === "health" && <RtDataHealth pilot={pilot} zabbix={zabbix} />}
-        {activeTab === "timeline" && <RtTimeline pilot={pilot} zabbix={zabbix} />}
-        {activeTab === "cpu" && <RtCpuComparison pilot={pilot} zabbix={zabbix} />}
-        {activeTab === "reference" && <RtReference pilot={pilot} zabbix={zabbix} />}
-        {activeTab === "risk" && <RtCapacityRisk pilot={pilot} zabbix={zabbix} />}
-        {activeTab === "hypotheses" && <RtHypotheses pilot={pilot} zabbix={zabbix} />}
+        {activeTab === "overview"   && allowedSet.has("overview")   && <RtOverview pilot={pilot} zabbix={zabbix} />}
+        {activeTab === "inventory"  && allowedSet.has("inventory")  && <RtInventory pilot={pilot} zabbix={zabbix} />}
+        {activeTab === "health"     && allowedSet.has("datahealth") && <RtDataHealth pilot={pilot} zabbix={zabbix} />}
+        {activeTab === "timeline"   && allowedSet.has("timeline")   && <RtTimeline pilot={pilot} zabbix={zabbix} />}
+        {activeTab === "cpu"        && allowedSet.has("comparison") && <RtCpuComparison pilot={pilot} zabbix={zabbix} />}
+        {activeTab === "reference"  && allowedSet.has("reference")  && <RtReference pilot={pilot} zabbix={zabbix} />}
+        {activeTab === "risk"       && allowedSet.has("capacity")   && <RtCapacityRisk pilot={pilot} zabbix={zabbix} />}
+        {activeTab === "hypotheses" && allowedSet.has("hypotheses") && <RtHypotheses pilot={pilot} zabbix={zabbix} />}
       </div>
     </div>
     </RtFiltersProvider>

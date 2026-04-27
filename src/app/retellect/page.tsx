@@ -1,13 +1,18 @@
 import { prisma } from "@/lib/db";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getCurrentUser } from "@/lib/auth/sessions";
+import { filterAccessiblePilots } from "@/lib/auth/permissions";
 
-// RT hub lists pilots from DB (no live Zabbix); ISR 5-min is sufficient.
-export const revalidate = 300;
+// Hub depends on the user's pilot access — must be per-request, not cached.
+export const dynamic = "force-dynamic";
 
 export default async function RetellectHubPage() {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login?next=/retellect");
   let pilots: any[] = [];
   try {
-    pilots = await prisma.pilot.findMany({
+    const allPilots = await prisma.pilot.findMany({
       where: { productType: "RETELLECT" },
       orderBy: { name: "asc" },
       include: {
@@ -15,6 +20,7 @@ export default async function RetellectHubPage() {
         _count: { select: { devices: true, stores: true } },
       },
     });
+    pilots = filterAccessiblePilots(user, allPilots);
   } catch {
     // DB not ready
   }
