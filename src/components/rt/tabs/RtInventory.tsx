@@ -470,12 +470,12 @@ function PythonProcessDrilldown({
   } else if (host.rtProcessStatus === "unknown") {
     banner = {
       tone: "warn",
-      text: "DB žymi `retellectEnabled = true`, bet Zabbix nepublikuoja python.cpu — patikrinkite template'ą.",
+      text: "DB has `retellectEnabled = true` for this host, but Zabbix is not publishing python.cpu — check the monitoring template.",
     };
   } else if (host.rtProcessStatus === "stopped" && host.freshestAgeSec !== null) {
     banner = {
       tone: "warn",
-      text: `Naujausias python.cpu mėginys — prieš ${formatAgeShort(host.freshestAgeSec)}. Procesas nešiunčia duomenų ≥ 5 min.`,
+      text: `Latest python.cpu sample is ${formatAgeShort(host.freshestAgeSec)} old. Process has not been reporting for ≥ 5 min.`,
     };
   }
 
@@ -612,7 +612,7 @@ function SortableTh({
  */
 // Host-Inventory-specific copy for the shared DataCoverageBanner.
 const INVENTORY_COVERAGE = {
-  title: "Data coverage: Rimi Zabbix šiuo metu publikuoja tik agreguotą CPU",
+  title: "Data coverage: Rimi Zabbix only publishes aggregated CPU at the moment",
   available: (
     <>
       CPU Cores (system.cpu.num), CPU Load (system.cpu.load[,avg1]), CPU Total %
@@ -622,14 +622,14 @@ const INVENTORY_COVERAGE = {
   missing: (
     <>
       CPU Model, RAM (total + utilization), CPU User %, CPU Sys %, disk usage,
-      per-process SCO CPU/RAM. Šituose stulpeliuose rodoma „—“.
+      per-process SCO CPU/RAM. These columns show &ldquo;—&rdquo;.
     </>
   ),
   footer: (
     <>
-      Todėl TOTAL % rodo duomenis, bet User/Sys stulpeliai tušti — ne bug&apos;as,
-      o template-level trukumas. Kai Rimi atnaujins monitoring template&apos;ą,
-      stulpeliai užsipildys automatiškai.
+      That&apos;s why TOTAL % has data while User/Sys columns are empty —
+      not a bug, a template-level gap. Once Rimi updates the monitoring
+      template, the columns will populate automatically.
     </>
   ),
 };

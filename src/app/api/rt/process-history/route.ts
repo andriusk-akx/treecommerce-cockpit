@@ -7,6 +7,13 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getZabbixClient } from "@/lib/zabbix/client";
+import { cached } from "@/lib/zabbix/cache";
+import {
+  chooseTelemetrySources,
+  averageSlot,
+  normaliseValue,
+  summariseDay,
+} from "./math";
 
 export const dynamic = "force-dynamic";
 
@@ -38,37 +45,48 @@ export async function GET(req: NextRequest) {
 
   const client = getZabbixClient();
   // Per-host process CPU items + system.cpu.util[,,avg1] (overall host CPU)
-  const allItems = (await client.request("item.get", {
-    output: ["itemid", "key_"],
-    hostids: [hostId],
-    filter: { status: 0, state: 0 },
-  })) as Array<{ itemid: string; key_: string }>;
+  // + system.cpu.num (cores). Cached per-host for 60s — item lists for a host
+  // change only when SP redeploys the template, far less often than the user
+  // clicks drill-down on different days.
+  const allItems = (await cached(
+    `zabbix:procHistItems:${hostId}`,
+    () => client.request("item.get", {
+      output: ["itemid", "key_", "lastvalue"],
+      hostids: [hostId],
+      filter: { status: 0, state: 0 },
+    }) as Promise<Array<{ itemid: string; key_: string; lastvalue: string }>>,
+    60_000,
+  )) as Array<{ itemid: string; key_: string; lastvalue: string }>;
 
-  const isProcessKey = (k: string) =>
-    k.endsWith(".cpu") &&
-    !k.startsWith("perf_counter") &&
-    !k.startsWith("system.cpu");
-  const procs = allItems.filter((it) => isProcessKey(it.key_));
+  // Two parallel telemetry sources for per-process CPU on the same host:
+  //   *.cpu items  → 1-min sliding average, "% of host" (already normalised)
+  //   perf_counter[\Process(<name>)\% Processor Time]
+  //                → instantaneous, "% of one core" (needs / cores)
+  // The perf_counter family captures spikes the *.cpu averages smooth out,
+  // so we treat it as primary and use *.cpu only as a fallback when the
+  // host doesn't publish a perf_counter for that process.
   const sysCpuItem = allItems.find(
     (it) => it.key_ === "system.cpu.util[,,avg1]" || it.key_ === "system.cpu.util"
   );
-  if (procs.length === 0) return NextResponse.json({ slots: [], hasSysCpu: !!sysCpuItem });
+  const numCpuItem = allItems.find((it) => it.key_ === "system.cpu.num");
+  // Cores known? Default to 1 so we never divide by zero. Modern SCO hosts
+  // are 4-core; older ones may be 2.
+  const cores = Math.max(1, parseInt(numCpuItem?.lastvalue || "1") || 1);
 
-  // Categorize each itemid
-  const categoryById = new Map<string, "retellect" | "scoApp" | "db" | "system">();
-  for (const it of procs) {
-    const base = it.key_.replace(/\.cpu$/, "").toLowerCase();
-    if (/^python\d*$/.test(base)) categoryById.set(it.itemid, "retellect");
-    else if (base === "spss" || base === "sp.sss" || base === "sp") categoryById.set(it.itemid, "scoApp");
-    else if (base === "sql" || base === "sqlservr") categoryById.set(it.itemid, "db");
-    else if (base === "vm" || base === "vmware-vmx") categoryById.set(it.itemid, "system");
-    // others (cs300sd, NHSTW32, udm) ignored — too niche
+  // Pure helper computes the chosen item set: perf_counter wins per process,
+  // *.cpu fills the gap for processes without a perf_counter equivalent.
+  const { categoryById, needsCoresDivision } = chooseTelemetrySources(
+    allItems.map((it) => ({ itemid: it.itemid, key_: it.key_ })),
+  );
+
+  if (categoryById.size === 0) {
+    return NextResponse.json({ slots: [], hasSysCpu: !!sysCpuItem });
   }
 
   // Date range: if `date` (YYYY-MM-DD) is given, fetch 00:00 → 23:59:59 of that
   // calendar day; otherwise fall back to last `days` days (default 1 day).
   const itemIds = Array.from(categoryById.keys());
-  if (itemIds.length === 0) return NextResponse.json({ slots: [] });
+  if (itemIds.length === 0) return NextResponse.json({ slots: [], hasSysCpu: !!sysCpuItem });
   const dateStr = req.nextUrl.searchParams.get("date"); // YYYY-MM-DD
   let timeFrom: number;
   let timeTill: number;
@@ -85,11 +103,16 @@ export async function GET(req: NextRequest) {
   }
 
   const buckets = new Map<string, HourlyBucket>();
-  // Batch in 20s to avoid Zabbix HTTP 500
+  // Fetch process batches AND the sysCpu reference series in parallel.
+  // Previously each batch waited for the previous one to resolve, plus
+  // sysCpu was a separate sequential call after the loop — so a host with
+  // 20 items + sysCpu took 3 round-trips serially (~600 ms). Batching them
+  // via Promise.all reduces this to a single round-trip wall time.
+  const batchPromises: Promise<Array<{ itemid: string; clock: string; value: string }>>[] = [];
   for (let i = 0; i < itemIds.length; i += 20) {
     const batch = itemIds.slice(i, i + 20);
-    try {
-      const records = (await client.request("history.get", {
+    batchPromises.push(
+      client.request("history.get", {
         output: ["itemid", "clock", "value"],
         itemids: batch,
         history: 0,
@@ -98,8 +121,29 @@ export async function GET(req: NextRequest) {
         sortfield: "clock",
         sortorder: "ASC",
         limit: 50000,
-      })) as Array<{ itemid: string; clock: string; value: string }>;
+      }) as Promise<Array<{ itemid: string; clock: string; value: string }>>
+    );
+  }
+  // System CPU reference fetched in parallel with process fetches.
+  const sysCpuPromise: Promise<Array<{ clock: string; value: string }>> | null = sysCpuItem
+    ? (client.request("history.get", {
+        output: ["itemid", "clock", "value"],
+        itemids: [sysCpuItem.itemid],
+        history: 0,
+        time_from: String(timeFrom),
+        time_till: String(timeTill),
+        sortfield: "clock",
+        sortorder: "ASC",
+        limit: 50000,
+      }) as Promise<Array<{ clock: string; value: string }>>)
+    : null;
 
+  const batchResults = await Promise.all(batchPromises.map((p) => p.catch((e) => {
+    console.warn("[rt-process-history] batch failed:", e);
+    return [] as Array<{ itemid: string; clock: string; value: string }>;
+  })));
+  for (const records of batchResults) {
+    {
       for (const r of records) {
         const cat = categoryById.get(r.itemid);
         if (!cat) continue;
@@ -117,38 +161,25 @@ export async function GET(req: NextRequest) {
           b = { retellect: 0, scoApp: 0, db: 0, system: 0, countR: 0, countS: 0, countD: 0, countSys: 0, sysCpuValues: [] };
           buckets.set(slotKey, b);
         }
-        const v = parseFloat(r.value) || 0;
+        // perf_counter values are "% of one core" — convert to "% of host".
+        // *.cpu values are already in host units; pass through.
+        const raw = parseFloat(r.value) || 0;
+        const v = normaliseValue(raw, needsCoresDivision.has(r.itemid), cores);
         b[cat] += v;
         if (cat === "retellect") b.countR++;
         else if (cat === "scoApp") b.countS++;
         else if (cat === "db") b.countD++;
         else if (cat === "system") b.countSys++;
       }
-    } catch (e) {
-      console.warn("[rt-process-history] batch failed:", e);
     }
   }
 
-  // Fetch overall system.cpu.util history for the same window — used as
-  // a reference line in the chart (per-process sum ignores untracked
-  // processes and is hourly-averaged, while system.cpu.util captures
-  // every CPU consumer including kernel work).
-  // Also: keep the raw 1-min sample list so we can answer the user's
-  // direct question "where exactly did the 100% spike happen?".
+  // Process the sysCpu series fetched in parallel above (no extra round trip).
   type SysSample = { clock: number; value: number };
   const sysAllSamples: SysSample[] = [];
-  if (sysCpuItem) {
+  if (sysCpuPromise) {
     try {
-      const sysRecords = (await client.request("history.get", {
-        output: ["itemid", "clock", "value"],
-        itemids: [sysCpuItem.itemid],
-        history: 0,
-        time_from: String(timeFrom),
-        time_till: String(timeTill),
-        sortfield: "clock",
-        sortorder: "ASC",
-        limit: 50000,
-      })) as Array<{ clock: string; value: string }>;
+      const sysRecords = await sysCpuPromise;
       for (const r of sysRecords) {
         const tsSec = parseInt(r.clock);
         const value = parseFloat(r.value) || 0;
@@ -177,32 +208,20 @@ export async function GET(req: NextRequest) {
   // the user an exact answer to "when did the 100% spike happen, how long did
   // it last, how many minutes were above each threshold". This is independent
   // of the slot/granularity choice for the chart.
-  let daySummary: {
-    samples: number;
-    maxValue: number;
-    maxAtClock: number; // unix seconds
-    maxLabel: string;   // local HH:MM:SS
-    avgValue: number;
-    minutesAbove: { t50: number; t70: number; t90: number; t95: number };
-    raw: Array<{ clock: number; value: number }>; // for line chart at 1-min granularity
-  } | null = null;
-  if (sysAllSamples.length > 0) {
-    const peak = sysAllSamples.reduce((m, s) => (s.value > m.value ? s : m), sysAllSamples[0]);
-    const peakLocal = new Date(peak.clock * 1000).toLocaleTimeString("lt-LT", {
-      timeZone: "Europe/Vilnius", hour12: false,
-    });
-    const sum = sysAllSamples.reduce((acc, s) => acc + s.value, 0);
-    const above = (t: number) => sysAllSamples.filter((s) => s.value >= t).length;
-    daySummary = {
-      samples: sysAllSamples.length,
-      maxValue: Math.round(peak.value * 10) / 10,
-      maxAtClock: peak.clock,
-      maxLabel: peakLocal,
-      avgValue: Math.round((sum / sysAllSamples.length) * 10) / 10,
-      minutesAbove: { t50: above(50), t70: above(70), t90: above(90), t95: above(95) },
-      raw: sysAllSamples.map((s) => ({ clock: s.clock, value: Math.round(s.value * 10) / 10 })),
-    };
-  }
+  const daySummaryBase = summariseDay(sysAllSamples);
+  const daySummary: (typeof daySummaryBase & {
+    maxLabel: string;
+    raw: Array<{ clock: number; value: number }>;
+  }) | null = daySummaryBase
+    ? {
+        ...daySummaryBase,
+        maxLabel: new Date(daySummaryBase.maxAtClock * 1000).toLocaleTimeString("lt-LT", {
+          timeZone: "Europe/Vilnius",
+          hour12: false,
+        }),
+        raw: sysAllSamples.map((s) => ({ clock: s.clock, value: Math.round(s.value * 10) / 10 })),
+      }
+    : null;
 
   // Emit slots for the entire calendar day at the requested granularity.
   // 60min → 24 slots, 15min → 96 slots, 5min → 288 slots, etc.
@@ -235,10 +254,19 @@ export async function GET(req: NextRequest) {
     // would inflate transient spikes). Items inside a category that fire at
     // separate timestamps inside one slot still average correctly because
     // their per-item contributions all land in the same accumulator.
-    const r = b && b.countR > 0 ? Math.round((b.retellect / b.countR) * 10) / 10 : 0;
-    const sa = b && b.countS > 0 ? Math.round((b.scoApp / b.countS) * 10) / 10 : 0;
-    const dbv = b && b.countD > 0 ? Math.round((b.db / b.countD) * 10) / 10 : 0;
-    const sys = b && b.countSys > 0 ? Math.round((b.system / b.countSys) * 10) / 10 : 0;
+    const avg = b
+      ? averageSlot({
+          retellect: b.retellect,
+          scoApp: b.scoApp,
+          db: b.db,
+          system: b.system,
+          countR: b.countR,
+          countS: b.countS,
+          countD: b.countD,
+          countSys: b.countSys,
+        })
+      : { retellect: 0, scoApp: 0, db: 0, system: 0, free: 100 };
+    const { retellect: r, scoApp: sa, db: dbv, system: sys } = avg;
     const sysCpuVals = b?.sysCpuValues ?? [];
     const sysCpuAvg = sysCpuVals.length
       ? Math.round((sysCpuVals.reduce((acc, v) => acc + v, 0) / sysCpuVals.length) * 10) / 10

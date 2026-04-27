@@ -18,6 +18,9 @@ import type { ReactNode } from "react";
 export interface DashboardFilters {
   /** Store name filter ("all" = no filter). Applied across Overview, Timeline, Inventory. */
   store: string;
+  /** CPU model filter ("all" = no filter). Lets the user narrow the heatmap
+   * to one hardware class — useful when comparing same-spec hosts. */
+  cpuModel: string;
   /** Free-text search over host name / device type / CPU model. */
   search: string;
   /** Retellect-installed filter. null = no filter, true = only installed, false = only not installed. */
@@ -34,6 +37,7 @@ export interface DashboardFilters {
 
 export const defaultFilters: DashboardFilters = {
   store: "all",
+  cpuModel: "all",
   search: "",
   retellectInstalled: null,
   period: "14d",
@@ -49,6 +53,7 @@ const FILTER_LABELS: Array<{
   format: (v: DashboardFilters[keyof DashboardFilters]) => string;
 }> = [
   { key: "store", label: "Store", format: (v) => String(v) },
+  { key: "cpuModel", label: "CPU", format: (v) => String(v) },
   { key: "search", label: "Search", format: (v) => `"${String(v)}"` },
   { key: "retellectInstalled", label: "Retellect", format: (v) => v === true ? "installed" : v === false ? "not installed" : "" },
   { key: "period", label: "Period", format: (v) => /^\d+$/.test(String(v)) ? `${v}d` : String(v) },

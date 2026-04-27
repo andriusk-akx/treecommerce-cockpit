@@ -161,31 +161,32 @@ export function RtReference({
   return (
     <>
       <DataCoverageBanner
-        title={`Data coverage: ${summary.freshCount}/${matchedCount} hostų turi fresh (<30 min) CPU/mem sample`}
+        title={`Data coverage: ${summary.freshCount}/${matchedCount} hosts have fresh (<30 min) CPU/mem samples`}
         defaultOpen={summary.freshCount < matchedCount / 2}
         available={
           <>
             Matched hosts: <strong>{matchedCount}</strong>/
-            {hostResources.length}. Aktyviai reportuojančių (&lt; 30 min):{" "}
-            <strong>{summary.freshCount}</strong>. Rodom live CPU user/system
-            split (jei Zabbix publikuoja atskirai), memory utilization, disk
-            utilization, RAM total.
+            {hostResources.length}. Actively reporting (&lt; 30 min):{" "}
+            <strong>{summary.freshCount}</strong>. We show live CPU user/system
+            split (if Zabbix publishes them separately), memory utilization,
+            disk utilization, RAM total.
           </>
         }
         missing={
           <>
-            Daugumoje Rimi hostų <code>system.cpu.util[,user]</code> ir{" "}
-            <code>[,system]</code> dar nepublikuojami — tada stulpelis rodo tik
-            agreguotą total iš <code>[,,avg1]</code>. <code>vm.memory.size</code>{" "}
-            → RAM GB tušti, kur inventorius dar neužpildytas. Hourly history
-            (24h pattern, weekday/weekend split) reikalauja <code>history.get</code>.
+            On most Rimi hosts <code>system.cpu.util[,user]</code> and{" "}
+            <code>[,system]</code> are not yet published — the column then
+            shows only the aggregate total from <code>[,,avg1]</code>.
+            <code>vm.memory.size</code> → RAM GB is empty wherever
+            inventory hasn&apos;t been filled. Hourly history (24h pattern,
+            weekday/weekend split) requires <code>history.get</code>.
           </>
         }
         footer={
           <>
-            Suvestinė (Avg / Peak / Avg Mem) ignoruoja hostus, kurių sample{" "}
-            &gt; 30 min senumo arba kurie niekada nereportavo, kad nepateko į
-            skaičiavimą nulis reikšmės.
+            The summary (Avg / Peak / Avg Mem) ignores hosts whose latest
+            sample is &gt; 30 min old or that never reported, so they
+            don&apos;t fold into the calculation as a zero.
           </>
         }
       />
@@ -370,9 +371,9 @@ export function RtReference({
           </>
         ) : (
           <div className="col-span-3 bg-gray-50 border border-dashed border-gray-200 rounded-lg p-6 text-center text-sm text-gray-500">
-            Nėra fresh hostų, iš kurių galima skaičiuoti agregatus. Patikrinkit{" "}
-            <strong>Data Health</strong> tab&apos;ą — tikriausiai dauguma hostų
-            silent arba stale.
+            No fresh hosts to compute aggregates from. Check the{" "}
+            <strong>Data Health</strong> tab — most hosts are likely silent
+            or stale.
           </div>
         )}
       </div>

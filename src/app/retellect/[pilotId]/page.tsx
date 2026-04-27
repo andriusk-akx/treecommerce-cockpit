@@ -44,14 +44,21 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
 
   if (!pilot || pilot.productType !== "RETELLECT") return notFound();
 
-  // Fetch all 4 independent Zabbix payloads in parallel.
-  // The client caches getHosts() in-process + dedupes in-flight, so these four
-  // fetchers effectively share a single host.get round-trip instead of four.
+  // Fetch all 5 independent Zabbix payloads in parallel.
+  // The client caches getHosts() in-process + dedupes in-flight, so these
+  // fetchers effectively share a single host.get round-trip instead of five.
+  // History was previously sequential after Phase 1 — moving it into the
+  // parallel group saves ~400ms on cold load (history wall is ~1800ms with
+  // concurrency=24, Phase 1 wall is ~450ms; before it was 1800+450, now max).
+  const expectedHostKeys = new Set(
+    pilot.devices.map((d) => d.sourceHostKey).filter((k): k is string => !!k),
+  );
   const [
     zabbixResult,
     zabbixCpuDetailResult,
     zabbixProcResult,
     zabbixProcCpuResult,
+    zabbixHistoryResult,
   ] = await Promise.all([
     fetchSource(`zabbix-rt-resources-${pilotId}`, {
       source: "zabbix",
@@ -141,41 +148,42 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
         }));
       },
     }),
+    fetchSource(`zabbix-rt-cpu-history-${pilotId}`, {
+      source: "zabbix",
+      label: "Zabbix CPU History",
+      env: "prod",
+      fetcher: async () => {
+        const client = getZabbixClient();
+        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
+        // Restrict to hosts that match DB devices, by sourceHostKey == hostName.
+        const matchedHostIds = new Set<string>();
+        for (const h of allHosts) {
+          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
+        }
+        if (matchedHostIds.size === 0) return [];
+        // Narrow item.get for system.cpu.util only — small payload (~108 items
+        // for Rimi vs 333 for the broader system.cpu search). This lets the
+        // history fetch run in parallel with Phase 1 instead of waiting for
+        // it.
+        const items = (await client.getItems(Array.from(matchedHostIds), "system.cpu.util")) as Array<{
+          itemid: string; hostid: string; key_: string;
+        }>;
+        const cpuUtilItems = items.filter(
+          (i) => i.key_ === "system.cpu.util[,,avg1]" || i.key_ === "system.cpu.util"
+        );
+        if (cpuUtilItems.length === 0) return [];
+        const itemIds = cpuUtilItems.map((i) => i.itemid);
+        const itemHostMap = new Map(cpuUtilItems.map((i) => [i.itemid, i.hostid]));
+        const result = await client.getCpuHistoryDaily(itemIds, itemHostMap, 14);
+        return result;
+      },
+    }),
   ]);
 
   const zabbixHosts = zabbixResult.data || [];
   const cpuDetailItems = zabbixCpuDetailResult.data || [];
   const procItems = zabbixProcResult.data || [];
   const procCpuItems = zabbixProcCpuResult.data || [];
-
-  // Fetch CPU history for timeline heatmap — real historical data via history.get
-  // Only fetch for hosts that match DB devices (not all 100 Zabbix hosts)
-  const matchedHostIds = new Set<string>();
-  const zabbixHostByName = new Map(zabbixHosts.map((h: any) => [h.hostName, h]));
-  for (const device of pilot.devices) {
-    const zHost = zabbixHostByName.get(device.sourceHostKey ?? "");
-    if (zHost) matchedHostIds.add(zHost.hostId);
-  }
-
-  const zabbixHistoryResult = await fetchSource(`zabbix-rt-cpu-history-${pilotId}`, {
-    source: "zabbix",
-    label: "Zabbix CPU History",
-    env: "prod",
-    fetcher: async () => {
-      const client = getZabbixClient();
-      // Only cpu.util items for matched DB devices
-      const cpuUtilItems = cpuDetailItems.filter((i: any) =>
-        (i.key === "system.cpu.util[,,avg1]" || i.key === "system.cpu.util") &&
-        matchedHostIds.has(i.hostId)
-      );
-      if (cpuUtilItems.length === 0) return [];
-      const itemIds = cpuUtilItems.map((i: any) => i.itemId);
-      const itemHostMap = new Map(cpuUtilItems.map((i: any) => [i.itemId, i.hostId]));
-      const result = await client.getCpuHistoryDaily(itemIds, itemHostMap, 14);
-      return result;
-    },
-  });
-
   const cpuHistory = zabbixHistoryResult.data || [];
 
   // Serialize pilot data for client component

@@ -99,6 +99,17 @@ export interface ZabbixCpuTrend {
   max: number;
   avg: number;
   min: number;
+  /**
+   * Number of raw 1-min samples that day where CPU was at-or-above the
+   * named threshold. Computed only from `history.get` samples, so days
+   * covered exclusively by `trend.get` aggregates have these as 0.
+   */
+  minutesAbove?: { 50: number; 60: number; 70: number; 80: number; 90: number };
+  /**
+   * Total number of raw samples (i.e. minutes with data) ingested for
+   * this (host, date). Denominator for "X minutes above / Y total" UI.
+   */
+  totalSamples?: number;
 }
 
 export interface ZabbixData {

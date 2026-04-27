@@ -223,3 +223,170 @@ describe("ZabbixClient.getProcessCpuItems", () => {
     await expect(client.getProcessCpuItems(["h1"])).rejects.toThrow(/Invalid params/);
   });
 });
+
+// ─── getCpuHistoryDaily — trend.get + history.get aggregation ─────
+
+describe("ZabbixClient.getCpuHistoryDaily", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    invalidateCache();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /**
+   * Stub fetch to dispatch by JSON-RPC method. Each subsequent call hits a
+   * different mock so tests can vary trend.get vs history.get responses.
+   */
+  function mockByMethod(handlers: { trend?: () => any[]; history?: (itemId: string) => any[] }) {
+    return vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      if (body.method === "trend.get") {
+        return { ok: true, json: async () => ({ jsonrpc: "2.0", result: handlers.trend ? handlers.trend() : [], id: body.id }) };
+      }
+      if (body.method === "history.get") {
+        const itemId = body.params.itemids[0];
+        return { ok: true, json: async () => ({ jsonrpc: "2.0", result: handlers.history ? handlers.history(itemId) : [], id: body.id }) };
+      }
+      return { ok: true, json: async () => ({ jsonrpc: "2.0", result: [], id: body.id }) };
+    });
+  }
+
+  it("returns empty array when no item ids", async () => {
+    const client = new ZabbixClient("https://zbx.example/api", "tok");
+    const r = await client.getCpuHistoryDaily([], new Map(), 14);
+    expect(r).toEqual([]);
+  });
+
+  it("aggregates per (host, date) with max/avg/min from raw 1-min samples", async () => {
+    // Three samples on the same Vilnius local day for one host.
+    const day0 = Math.floor(new Date("2026-04-20T10:00:00+03:00").getTime() / 1000);
+    globalThis.fetch = mockByMethod({
+      trend: () => [],
+      history: () => [
+        { itemid: "i1", clock: String(day0), value: "30" },
+        { itemid: "i1", clock: String(day0 + 60), value: "60" },
+        { itemid: "i1", clock: String(day0 + 120), value: "90" },
+      ],
+    }) as unknown as typeof fetch;
+    const client = new ZabbixClient("https://zbx.example/api", "tok");
+    const r = await client.getCpuHistoryDaily(["i1"], new Map([["i1", "h1"]]), 14);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({
+      hostId: "h1",
+      max: 90,
+      min: 30,
+      avg: 60, // (30+60+90)/3 = 60.0
+    });
+    // Per-threshold counters reflect the three samples.
+    expect(r[0].minutesAbove[50]).toBe(2); // 60, 90
+    expect(r[0].minutesAbove[60]).toBe(2); // 60, 90 (>=60)
+    expect(r[0].minutesAbove[70]).toBe(1); // 90
+    expect(r[0].minutesAbove[80]).toBe(1); // 90
+    expect(r[0].minutesAbove[90]).toBe(1); // 90
+    expect(r[0].totalSamples).toBe(3);
+  });
+
+  it("trend.get aggregates feed max/avg/min but NOT minutesAbove counters", async () => {
+    // Trend.get exposes min/avg/max per HOUR — trying to count "minutes above
+    // threshold" from these would over- or under-count by an order of magnitude.
+    // The aggregator must skip the per-threshold counters for trend rows.
+    const dayClock = Math.floor(new Date("2026-04-20T10:00:00+03:00").getTime() / 1000);
+    globalThis.fetch = mockByMethod({
+      trend: () => [
+        { itemid: "i1", clock: String(dayClock), value_min: "20", value_avg: "50", value_max: "80" },
+      ],
+      history: () => [], // no raw samples
+    }) as unknown as typeof fetch;
+    const client = new ZabbixClient("https://zbx.example/api", "tok");
+    const r = await client.getCpuHistoryDaily(["i1"], new Map([["i1", "h1"]]), 14);
+    expect(r).toHaveLength(1);
+    expect(r[0].max).toBe(80);
+    expect(r[0].min).toBe(20);
+    expect(r[0].avg).toBe(50);
+    // No raw samples → counters all zero.
+    expect(r[0].totalSamples).toBe(0);
+    expect(r[0].minutesAbove[50]).toBe(0);
+    expect(r[0].minutesAbove[70]).toBe(0);
+    expect(r[0].minutesAbove[90]).toBe(0);
+  });
+
+  it("unions trend + history: max takes the higher of the two", async () => {
+    // Real-world case: history.get returns 25k recent samples but the OLDER
+    // edge of the 14-day window is only covered by trend.get. The function
+    // must keep both contributions on the same per-(host,date) bucket.
+    const day = Math.floor(new Date("2026-04-15T12:00:00+03:00").getTime() / 1000);
+    globalThis.fetch = mockByMethod({
+      trend: () => [
+        { itemid: "i1", clock: String(day), value_min: "10", value_avg: "30", value_max: "55" },
+      ],
+      history: () => [
+        // Same calendar day, but a higher 1-min spike not represented by trend.
+        { itemid: "i1", clock: String(day + 600), value: "85" },
+      ],
+    }) as unknown as typeof fetch;
+    const client = new ZabbixClient("https://zbx.example/api", "tok");
+    const r = await client.getCpuHistoryDaily(["i1"], new Map([["i1", "h1"]]), 14);
+    expect(r[0].max).toBe(85); // history max wins over trend max
+    expect(r[0].min).toBe(10); // trend min wins (smaller)
+    expect(r[0].minutesAbove[80]).toBe(1); // raw sample above 80
+    expect(r[0].totalSamples).toBe(1);
+  });
+
+  it("produces one entry per (host, date) — multi-host, multi-day", async () => {
+    const day1 = Math.floor(new Date("2026-04-19T08:00:00+03:00").getTime() / 1000);
+    const day2 = Math.floor(new Date("2026-04-20T08:00:00+03:00").getTime() / 1000);
+    globalThis.fetch = mockByMethod({
+      trend: () => [],
+      history: (itemId: string) => itemId === "i1"
+        ? [{ itemid: "i1", clock: String(day1), value: "50" }, { itemid: "i1", clock: String(day2), value: "60" }]
+        : [{ itemid: "i2", clock: String(day1), value: "10" }],
+    }) as unknown as typeof fetch;
+    const client = new ZabbixClient("https://zbx.example/api", "tok");
+    const r = await client.getCpuHistoryDaily(
+      ["i1", "i2"],
+      new Map([["i1", "h1"], ["i2", "h2"]]),
+      14,
+    );
+    expect(r).toHaveLength(3); // h1×2 dates + h2×1 date
+    const keys = r.map((x) => `${x.hostId}|${x.date}`).sort();
+    expect(keys[0].startsWith("h1|")).toBe(true);
+    expect(keys[1].startsWith("h1|")).toBe(true);
+    expect(keys[2].startsWith("h2|")).toBe(true);
+  });
+
+  it("skips items not in itemHostMap (defensive)", async () => {
+    // If the client somehow gets an itemid back without a known host (Zabbix
+    // hot-deleted an item between calls, or a typo in the map), it should
+    // silently drop those samples rather than throwing or attributing them
+    // to the wrong host.
+    globalThis.fetch = mockByMethod({
+      trend: () => [{ itemid: "stranger", clock: "1700000000", value_min: "1", value_avg: "1", value_max: "1" }],
+      history: () => [{ itemid: "stranger", clock: "1700000000", value: "50" }],
+    }) as unknown as typeof fetch;
+    const client = new ZabbixClient("https://zbx.example/api", "tok");
+    const r = await client.getCpuHistoryDaily(["stranger"], new Map(), 14);
+    expect(r).toEqual([]);
+  });
+
+  it("rounds returned max/avg/min to 1 decimal", async () => {
+    const day = Math.floor(new Date("2026-04-20T08:00:00+03:00").getTime() / 1000);
+    globalThis.fetch = mockByMethod({
+      trend: () => [],
+      history: () => [
+        { itemid: "i1", clock: String(day), value: "12.345" },
+        { itemid: "i1", clock: String(day + 60), value: "23.456" },
+        { itemid: "i1", clock: String(day + 120), value: "34.567" },
+      ],
+    }) as unknown as typeof fetch;
+    const client = new ZabbixClient("https://zbx.example/api", "tok");
+    const r = await client.getCpuHistoryDaily(["i1"], new Map([["i1", "h1"]]), 14);
+    // (12.345+23.456+34.567)/3 = 23.456 → rounded to 23.5
+    expect(r[0].avg).toBeCloseTo(23.5, 5);
+    expect(r[0].max).toBeCloseTo(34.6, 5);
+    expect(r[0].min).toBeCloseTo(12.3, 5);
+  });
+});

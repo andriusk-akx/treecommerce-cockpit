@@ -1,19 +1,19 @@
 "use client";
 
+import type { ReactElement } from "react";
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
 import { generateIntervalData, type IntervalSlot } from "./rt-timeline-math";
 import { DataCoverageBanner } from "./DataCoverageBanner";
+import { ProcessCategoryReference } from "./ProcessCategoryReference";
 import { useRtFilters } from "../RtFiltersContext";
 
 // Heatmap is a per-DAY peak view, so periods shorter than 1 day make no sense.
-// Trend retention on this Zabbix is also limited (~5–7 days for trend.get,
-// 14 days for raw history.get), so we don't expose 30d/90d either until the
-// data layer can backfill from a rollup table.
+// Trend retention on this Zabbix is ~5–7 days for trend.get and 14 days for
+// raw history.get — anything longer would be empty cells, so we cap at 14d.
+// Custom is kept for ad-hoc shorter windows (e.g. last 3 d).
 const PERIODS = [
   { id: "14d", label: "14d", days: 14 },
-  { id: "30d", label: "30d", days: 30 },
-  { id: "90d", label: "90d", days: 90 },
 ] as const;
 
 // 1m default — agent already samples every minute, so no info loss.
@@ -65,7 +65,10 @@ interface DrillState {
   peak: number;
 }
 
-type SortKey = "name" | "type" | "exceed" | "cpu";
+// "exceed" sorts by absolute minutes-above-threshold; "exceedPct" sorts by
+// (minutesAbove / totalMinutes) — more meaningful when hosts have different
+// sample coverage (e.g. one with 18k samples vs another with 2k).
+type SortKey = "name" | "store" | "rt" | "type" | "exceed" | "exceedPct" | "cpu";
 type SortDir = "asc" | "desc";
 
 // ─── Resizable Split Pane ───────────────────────────────────────────
@@ -123,10 +126,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   const setPeriod = (v: string) => setFilter("period", v);
   const storeFilter = filters.store;
   const setStoreFilter = (v: string) => setFilter("store", v);
+  const cpuModelFilter = filters.cpuModel;
+  const setCpuModelFilter = (v: string) => setFilter("cpuModel", v);
   const search = filters.search;
   const setSearch = (v: string) => setFilter("search", v);
   const granularity = filters.granularity;
   const setGranularity = (v: number) => setFilter("granularity", v);
+  const retellectInstalled = filters.retellectInstalled;
+  const setRetellectInstalled = (v: boolean | null) => setFilter("retellectInstalled", v);
   // chartMode kept in filter context for backwards-compat with stored prefs;
   // chart now has a single visualisation (line) so we don't read it.
 
@@ -134,6 +141,22 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   const [drillTab, setDrillTab] = useState<"process" | "resources">("process");
   const [sortKey, setSortKey] = useState<SortKey>("exceed");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  // Tab-local: collapse the flat host list into hardware-class or per-store
+  // buckets so the user can spot patterns at a glance (e.g. "all WN Beetle M3
+  // hosts run hot from hour 18", or "Pavilnionys store hosts spike together").
+  // Stays local — not in RtFiltersContext — because it only applies to this view.
+  const [groupBy, setGroupBy] = useState<"host" | "cpu" | "store">("host");
+  // Which CPU-model groups are currently expanded. Empty set = all collapsed,
+  // showing only headers (per-class summary row with day-by-day MAX). Click
+  // a header to drop in / out.
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = useCallback((cpuModel: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(cpuModel)) next.delete(cpuModel); else next.add(cpuModel);
+      return next;
+    });
+  }, []);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   // (custom-granularity state removed — only fixed presets are exposed now.)
   const [customPeriodDays, setCustomPeriodDays] = useState<string>("");
@@ -233,10 +256,31 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           peaks = Array<number | null>(days).fill(null);
           dayTrends = Array<ZabbixCpuTrend | null>(days).fill(null);
         }
-        const exceedCount = peaks.filter((p): p is number => p !== null && p >= threshold).length;
-        return { name: device.name, cpuModel: device.cpuModel || "—", deviceType: device.deviceType || "—", currentCpu: Math.round(cpuTotal * 10) / 10, cores: detail?.numCpus || 0, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedCount };
+        // Aggregate sample-level minute counts across the visible period.
+        // `minutesAbove` and `totalMinutes` are the new exceedance metric:
+        // they tell the user "of N minutes we have data for, X were above
+        // the threshold". `exceedDays` is kept as a fallback for hosts that
+        // only have trend.get coverage (no raw 1-min samples available).
+        const thKey = (threshold >= 90 ? 90 : threshold >= 80 ? 80 : threshold >= 70 ? 70 : threshold >= 60 ? 60 : 50) as 50 | 60 | 70 | 80 | 90;
+        let minutesAbove = 0;
+        let totalMinutes = 0;
+        for (const t of dayTrends) {
+          if (!t) continue;
+          if (t.minutesAbove) minutesAbove += t.minutesAbove[thKey] ?? 0;
+          if (typeof t.totalSamples === "number") totalMinutes += t.totalSamples;
+        }
+        const exceedDays = peaks.filter((p): p is number => p !== null && p >= threshold).length;
+        return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: device.cpuModel || "—", deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, currentCpu: Math.round(cpuTotal * 10) / 10, cores: detail?.numCpus || 0, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedDays, minutesAbove, totalMinutes };
       });
   }, [pilot, zabbixByName, cpuDetail, trendByHostDate, storeFilter, threshold, periodDays, dates, hasTrendData]);
+
+  // Unique CPU model list for the dropdown — derived from currently visible
+  // (post-store-filter) rows so we don't offer models that aren't applicable.
+  const cpuModelOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of allHostRows) set.add(r.cpuModel);
+    return [...set].sort();
+  }, [allHostRows]);
 
   const hostRows = useMemo(() => {
     let rows = allHostRows;
@@ -244,23 +288,57 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       const q = search.toLowerCase();
       rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.deviceType.toLowerCase().includes(q) || r.cpuModel.toLowerCase().includes(q));
     }
+    if (retellectInstalled !== null) {
+      rows = rows.filter((r) => r.retellectEnabled === retellectInstalled);
+    }
+    if (cpuModelFilter !== "all") {
+      rows = rows.filter((r) => r.cpuModel === cpuModelFilter);
+    }
     return [...rows].sort((a, b) => {
       let cmp = 0;
       if (sortKey === "name") cmp = a.name.localeCompare(b.name);
+      else if (sortKey === "store") cmp = a.storeName.localeCompare(b.storeName);
+      else if (sortKey === "rt") cmp = (a.retellectEnabled ? 1 : 0) - (b.retellectEnabled ? 1 : 0);
       else if (sortKey === "type") cmp = a.deviceType.localeCompare(b.deviceType);
-      else if (sortKey === "exceed") cmp = a.exceedCount - b.exceedCount;
+      else if (sortKey === "exceed") cmp = a.minutesAbove - b.minutesAbove;
+      else if (sortKey === "exceedPct") {
+        const pa = a.totalMinutes > 0 ? a.minutesAbove / a.totalMinutes : 0;
+        const pb = b.totalMinutes > 0 ? b.minutesAbove / b.totalMinutes : 0;
+        cmp = pa - pb;
+      }
       else if (sortKey === "cpu") cmp = a.currentCpu - b.currentCpu;
       return sortDir === "desc" ? -cmp : cmp;
     });
-  }, [allHostRows, search, sortKey, sortDir]);
+  }, [allHostRows, search, retellectInstalled, cpuModelFilter, sortKey, sortDir]);
 
   const stats = useMemo(() => {
-    const critical = allHostRows.filter((r) => r.hasMatch && r.exceedCount > 10).length;
-    const warning = allHostRows.filter((r) => r.hasMatch && r.exceedCount > 0 && r.exceedCount <= 10).length;
-    const ok = allHostRows.filter((r) => r.hasMatch && r.exceedCount === 0).length;
+    // Stats now use minutesAbove instead of exceedDays. Thresholds: > 60 min
+    // cumulative above the chosen threshold = critical (a meaningful chunk of
+    // time spent stressed); 1–60 min = warning (intermittent spikes); 0 = ok.
+    const critical = allHostRows.filter((r) => r.hasMatch && r.minutesAbove > 60).length;
+    const warning = allHostRows.filter((r) => r.hasMatch && r.minutesAbove > 0 && r.minutesAbove <= 60).length;
+    const ok = allHostRows.filter((r) => r.hasMatch && r.minutesAbove === 0).length;
     const noData = allHostRows.filter((r) => !r.hasMatch).length;
     return { total: allHostRows.length, critical, warning, ok, noData };
   }, [allHostRows]);
+
+  // Aggregate across CURRENTLY VISIBLE rows (after every filter is applied).
+  // Sums minutes above the chosen threshold across the selection so the user
+  // sees, in one number, how much of their filtered fleet time was hot.
+  const filteredAggregate = useMemo(() => {
+    let totalAbove = 0;
+    let totalSampled = 0;
+    let hostsWithData = 0;
+    for (const r of hostRows) {
+      if (r.totalMinutes > 0) {
+        totalAbove += r.minutesAbove;
+        totalSampled += r.totalMinutes;
+        hostsWithData += 1;
+      }
+    }
+    const pct = totalSampled > 0 ? (totalAbove / totalSampled) * 100 : 0;
+    return { totalAbove, totalSampled, hostsWithData, pct };
+  }, [hostRows]);
 
   const toggleSort = useCallback((key: SortKey) => {
     if (sortKey === key) setSortDir((d) => d === "asc" ? "desc" : "asc");
@@ -395,24 +473,64 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     );
   };
 
-  const statsBar = (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: C.textSec, padding: "4px 0" }}>
-      <span style={{ fontWeight: 600, color: "#212529" }}>{stats.total} hosts</span>
-      {stats.critical > 0 && <span style={{ color: C.riskRedText }}>● {stats.critical} critical</span>}
-      {stats.warning > 0 && <span style={{ color: C.riskAmberText }}>● {stats.warning} warning</span>}
-      <span style={{ color: C.okGreen }}>● {stats.ok} OK</span>
-      {stats.noData > 0 && <span style={{ color: "#adb5bd" }}>● {stats.noData} no data</span>}
-      {search && <span style={{ color: C.pillActive }}>→ {hostRows.length} shown</span>}
-    </div>
-  );
+  const statsBar = (() => {
+    // "Selection filtered" = at least one filter is non-default; in that case
+    // we surface a separate aggregate showing the chosen subset's combined
+    // minute count and percentage, so the user immediately sees how the slice
+    // they picked behaved.
+    const filtered = storeFilter !== "all" || cpuModelFilter !== "all" || retellectInstalled !== null || search !== "";
+    const aggFmt = (n: number) => n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+    const aggPctText = filteredAggregate.pct >= 10
+      ? `${Math.round(filteredAggregate.pct)}%`
+      : filteredAggregate.pct >= 1
+        ? `${filteredAggregate.pct.toFixed(1)}%`
+        : filteredAggregate.pct > 0
+          ? `${filteredAggregate.pct.toFixed(2)}%`
+          : "0%";
+    const aggColor = filteredAggregate.pct >= 5 ? C.riskRedText
+      : filteredAggregate.pct >= 1 ? C.riskAmberText
+      : "#475569";
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: C.textSec, padding: "4px 0", flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 600, color: "#212529" }}>{stats.total} hosts</span>
+        {stats.critical > 0 && <span style={{ color: C.riskRedText }}>● {stats.critical} critical</span>}
+        {stats.warning > 0 && <span style={{ color: C.riskAmberText }}>● {stats.warning} warning</span>}
+        <span style={{ color: C.okGreen }}>● {stats.ok} OK</span>
+        {stats.noData > 0 && <span style={{ color: "#adb5bd" }}>● {stats.noData} no data</span>}
+        {filtered && <span style={{ color: C.pillActive }}>→ {hostRows.length} shown</span>}
+        {filteredAggregate.totalSampled > 0 && (
+          <span
+            style={{
+              marginLeft: "auto",
+              padding: "2px 10px", borderRadius: 12,
+              background: filteredAggregate.pct >= 5 ? C.riskRedBg : filteredAggregate.pct >= 1 ? C.riskAmberBg : "#f1f5f9",
+              color: aggColor, fontWeight: 600, fontVariantNumeric: "tabular-nums",
+            }}
+            title={`Across ${filteredAggregate.hostsWithData} reporting host${filteredAggregate.hostsWithData === 1 ? "" : "s"} in the current selection: ${filteredAggregate.totalAbove} of ${filteredAggregate.totalSampled} sampled minutes were ≥ ${threshold}% (${filteredAggregate.pct.toFixed(2)}% of total period).`}
+          >
+            ≥ {threshold}% across selection: <strong>{aggFmt(filteredAggregate.totalAbove)}</strong>
+            <span style={{ opacity: 0.6 }}>/{aggFmt(filteredAggregate.totalSampled)} min</span>
+            <span style={{ marginLeft: 6, fontWeight: 700 }}>· {aggPctText}</span>
+          </span>
+        )}
+      </div>
+    );
+  })();
 
   const filterBar = (compact: boolean) => (
     <div style={{ display: "flex", alignItems: "center", gap: compact ? 8 : 12, flexWrap: "wrap", padding: compact ? "5px 10px" : "8px 14px", background: "#fff", border: `1px solid ${C.border}`, borderRadius: compact ? 6 : 8, marginBottom: compact ? 6 : 12 }}>
       <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }}>Store</span>
       <select value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)}
-        style={{ fontSize: 12, padding: "3px 6px", border: "1px solid #dee2e6", borderRadius: 4 }}>
+        style={{ fontSize: 12, padding: "3px 6px", border: "1px solid #dee2e6", borderRadius: 4, maxWidth: 200 }}>
         <option value="all">All</option>
         {pilot.stores.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+      </select>
+      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }}>CPU</span>
+      <select value={cpuModelFilter} onChange={(e) => setCpuModelFilter(e.target.value)}
+        style={{ fontSize: 12, padding: "3px 6px", border: "1px solid #dee2e6", borderRadius: 4, maxWidth: 180 }}
+        title="Narrow the heatmap to one hardware class">
+        <option value="all">All</option>
+        {cpuModelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
       </select>
       <div style={{ width: 1, height: 16, background: C.border }} />
       <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
@@ -471,6 +589,56 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         {[50, 60, 70, 80, 90].map((v) => <option key={v} value={v}>{v}%</option>)}
       </select>
       <div style={{ width: 1, height: 16, background: C.border }} />
+      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }}>Group</span>
+      <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
+        {([
+          { id: "host" as const, label: "Host" },
+          { id: "cpu" as const, label: "CPU model" },
+          { id: "store" as const, label: "Store" },
+        ]).map((g) => (
+          <button key={g.id} onClick={() => setGroupBy(g.id)} style={{
+            padding: "2px 8px", borderRadius: 12, fontSize: 11, cursor: "pointer",
+            border: groupBy === g.id ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
+            background: groupBy === g.id ? C.pillActive : "#fff",
+            color: groupBy === g.id ? "#fff" : "#495057",
+            fontWeight: groupBy === g.id ? 600 : 400,
+          }}>{g.label}</button>
+        ))}
+      </div>
+      <div style={{ width: 1, height: 16, background: C.border }} />
+      {/* Tri-state Retellect filter pill: off → installed → not installed → off.
+          Mirrors the Overview tab's chip style so the user recognises it. */}
+      {(() => {
+        const next = retellectInstalled === null ? true : retellectInstalled === true ? false : null;
+        const label = retellectInstalled === true ? "Retellect installed"
+          : retellectInstalled === false ? "Retellect not installed"
+          : "Retellect: any";
+        const dot = retellectInstalled === true ? "#10b981"
+          : retellectInstalled === false ? "#94a3b8"
+          : "transparent";
+        const active = retellectInstalled !== null;
+        return (
+          <button
+            type="button"
+            onClick={() => setRetellectInstalled(next)}
+            title="Click to cycle: any → installed → not installed → any"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "2px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer",
+              border: active ? "1px solid #a7f3d0" : "1px solid #dee2e6",
+              background: active ? "#ecfdf5" : "#fff",
+              color: active ? "#065f46" : "#495057",
+              fontWeight: active ? 600 : 400,
+            }}
+          >
+            <span style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: dot, border: dot === "transparent" ? "1px solid #cbd5e1" : "none",
+            }} />
+            {label}
+          </button>
+        );
+      })()}
       <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: compact ? 0 : "auto" }}>
         <span style={{ fontSize: 12, color: "#adb5bd" }}>⌕</span>
         <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
@@ -485,6 +653,124 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     </div>
   );
 
+  // ─── Heatmap row renderer (extracted so grouped + flat views share it) ─
+  // Renders one <tr> for a host. `rowIdx` controls zebra striping; the row
+  // looks the same in flat and grouped modes — group headers are injected
+  // separately around these rows by the table body.
+  const renderHostRow = (row: typeof hostRows[number], rowIdx: number) => {
+    const rowHostId = row.zHost?.hostId;
+    const sel = !!rowHostId && drill?.hostId === rowHostId;
+    const zebra = rowIdx % 2 === 1 ? C.zebraOdd : "#fff";
+    const rowBg = sel ? "#eff6ff" : zebra;
+    const rowTitle = row.zHost?.hostName ? `${row.name} — ${row.zHost.hostName}` : row.name;
+    return (
+      <tr key={`${row.name}-${rowIdx}`} style={{ borderTop: `1px solid ${rowIdx === 0 ? C.border : "#f1f3f5"}`, background: rowBg }}>
+        <td style={{
+          padding: "3px 8px", fontSize: 11, fontWeight: sel ? 600 : 400, whiteSpace: "nowrap",
+          position: "sticky", left: 0, background: rowBg, zIndex: 10,
+          color: sel ? C.pillActive : "#343a40",
+          maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis",
+        }} title={row.storeName}>{row.storeName}</td>
+        <td style={{
+          padding: "3px 6px", fontFamily: "'SF Mono','Cascadia Code',monospace", fontSize: 11,
+          fontWeight: sel ? 600 : 400, whiteSpace: "nowrap",
+          color: sel ? C.pillActive : "#343a40",
+          maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis",
+        }} title={rowTitle}>{row.name}</td>
+        <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={row.cpuModel}>{row.cpuModel}</td>
+        <td style={{ padding: "3px 6px", textAlign: "center" }} title={row.retellectEnabled ? "Retellect installed" : "Retellect not installed"}>
+          <span style={{
+            display: "inline-block", width: 8, height: 8, borderRadius: "50%",
+            background: row.retellectEnabled ? "#10b981" : "transparent",
+            border: row.retellectEnabled ? "none" : "1px solid #cbd5e1",
+            verticalAlign: "middle",
+          }} />
+        </td>
+        {row.peaks.map((peak, i) => {
+          const hasValue = row.hasMatch && peak !== null;
+          const exceeded = hasValue && peak >= threshold;
+          const dateStr = `${String(dates[i].getMonth() + 1).padStart(2, "0")}-${String(dates[i].getDate()).padStart(2, "0")}`;
+          const active = sel && drill?.date === dateStr;
+          const bg = !hasValue
+            ? "#f9fafb"
+            : peak >= 90 ? C.criticalBg
+            : peak >= 80 ? C.highBg
+            : exceeded ? C.thresholdBg
+            : C.belowBg;
+          const trend = row.dayTrends[i];
+          const cellTitle = !row.hasMatch
+            ? "No Zabbix host match"
+            : peak === null
+              ? "No history for this day"
+              : trend
+                ? `${row.name} · ${dateStr}\nDay max:  ${trend.max}%\nDay avg:  ${trend.avg}%\nDay min:  ${trend.min}%\nClick to open drill-down (per-minute breakdown)`
+                : `Day max ${Math.round(peak!)}% — click to drill down`;
+          return (
+            <td key={i} style={{ padding: 0, textAlign: "center", width: 32, cursor: hasValue ? "pointer" : "default" }}
+              onClick={() => hasValue && rowHostId && openDrill(dates[i], rowHostId, row.name, row.zHost?.hostName || row.name, peak!)}
+              title={cellTitle}>
+              <div style={{
+                background: bg,
+                color: !hasValue ? "#d1d5db" : exceeded ? C.exceededText : C.belowText,
+                padding: "2px 0", fontSize: 10, fontWeight: exceeded ? 700 : 400, lineHeight: 1.2,
+                outline: active ? "2px solid #0070c9" : "none", outlineOffset: -1, borderRadius: active ? 2 : 0,
+              }}>
+                {hasValue ? Math.round(peak!) : "—"}
+              </div>
+            </td>
+          );
+        })}
+        {(() => {
+          // Two cells: absolute minutes count and the same value as a % of
+          // the sampled period. Both share the same risk colour so the eye
+          // groups them visually even though they're separate columns.
+          if (!row.hasMatch) {
+            return (
+              <>
+                <td style={{ padding: "3px 6px", textAlign: "center" }}><span style={{ fontSize: 10, color: "#d1d5db" }}>—</span></td>
+                <td style={{ padding: "3px 6px", textAlign: "center" }}><span style={{ fontSize: 10, color: "#d1d5db" }}>—</span></td>
+              </>
+            );
+          }
+          if (row.totalMinutes <= 0) {
+            return (
+              <>
+                <td style={{ padding: "3px 6px", textAlign: "center" }}><span style={{ fontSize: 10, fontWeight: 500, color: C.okGreen }}>OK</span></td>
+                <td style={{ padding: "3px 6px", textAlign: "center" }}><span style={{ fontSize: 10, color: "#d1d5db" }}>—</span></td>
+              </>
+            );
+          }
+          const pct = (row.minutesAbove / row.totalMinutes) * 100;
+          const fmt = (n: number) => n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+          const isHigh = row.minutesAbove > 60;
+          const isMed = row.minutesAbove > 0 && row.minutesAbove <= 60;
+          const bg = isHigh ? C.riskRedBg : isMed ? C.riskAmberBg : C.riskGrayBg;
+          const fg = isHigh ? C.riskRedText : isMed ? C.riskAmberText : C.textSec;
+          const pctText = pct >= 10 ? `${Math.round(pct)}%` : pct >= 1 ? `${pct.toFixed(1)}%` : pct > 0 ? `${pct.toFixed(2)}%` : "0%";
+          const tooltip = `${row.minutesAbove} of ${row.totalMinutes} sampled minutes were ≥ ${threshold}% (${pct.toFixed(2)}% of the period)`;
+          return (
+            <>
+              <td style={{ padding: "3px 6px", textAlign: "center" }}>
+                <span style={{
+                  padding: "1px 6px", borderRadius: 8, fontSize: 10, fontWeight: 600,
+                  background: bg, color: fg, fontVariantNumeric: "tabular-nums",
+                }} title={tooltip}>
+                  {fmt(row.minutesAbove)}<span style={{ opacity: 0.6 }}>/{fmt(row.totalMinutes)}</span>
+                </span>
+              </td>
+              <td style={{ padding: "3px 6px", textAlign: "center" }}>
+                <span style={{
+                  padding: "1px 6px", borderRadius: 8, fontSize: 10, fontWeight: 700,
+                  background: bg, color: fg, fontVariantNumeric: "tabular-nums",
+                }} title={tooltip}>{pctText}</span>
+              </td>
+            </>
+          );
+        })()}
+      </tr>
+    );
+  };
+
   // ─── Heatmap table ────────────────────────────────────────────────
   const heatmapTable = (
     <>
@@ -494,88 +780,149 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: C.headerBg }}>
-                <th onClick={() => toggleSort("name")} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 0, background: C.headerBg, zIndex: 10, cursor: "pointer", userSelect: "none" }}>
+                {/* New ordering per user feedback: Store → Host → CPU → Retellect.
+                    Type column dropped — every host in this pilot is the same
+                    type (SCO), the badge added noise without information. */}
+                <th onClick={() => toggleSort("store")} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 0, background: C.headerBg, zIndex: 10, cursor: "pointer", userSelect: "none" }}>
+                  Store{sortArrow("store")}
+                </th>
+                <th onClick={() => toggleSort("name")} style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
                   Host{sortArrow("name")}
                 </th>
-                <th onClick={() => toggleSort("type")} style={{ textAlign: "center", padding: "4px 4px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none" }}>
-                  Type{sortArrow("type")}
-                </th>
                 <th style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap" }}>CPU</th>
+                <th onClick={() => toggleSort("rt")} style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none" }} title="Whether Retellect is installed on this host (DB flag)">
+                  Retellect{sortArrow("rt")}
+                </th>
                 {dates.map((d, i) => <th key={i} style={{ textAlign: "center", padding: "4px 0", fontSize: 8, fontWeight: 400, color: C.headerText, width: 32, minWidth: 32 }}>{String(d.getDate()).padStart(2, "0")}</th>)}
-                <th onClick={() => toggleSort("exceed")} style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
-                  &gt;{threshold}%{sortArrow("exceed")}
+                <th onClick={() => toggleSort("exceed")} title={`Minutes ≥ ${threshold}% out of total sampled minutes`} style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
+                  &gt;{threshold}% MIN{sortArrow("exceed")}
+                </th>
+                <th onClick={() => toggleSort("exceedPct")} title={`Percentage of period spent ≥ ${threshold}%`} style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
+                  &gt;{threshold}% %{sortArrow("exceedPct")}
                 </th>
               </tr>
             </thead>
             <tbody>
-              {hostRows.map((row, rowIdx) => {
-                const rowHostId = row.zHost?.hostId;
-                const sel = !!rowHostId && drill?.hostId === rowHostId;
-                const zebra = rowIdx % 2 === 1 ? C.zebraOdd : "#fff";
-                const rowBg = sel ? "#eff6ff" : zebra;
-                // Show store name in tooltip so duplicate device names ("SCO2"
-                // in 8 stores) are disambiguated for the user.
-                const rowTitle = row.zHost?.hostName ? `${row.name} — ${row.zHost.hostName}` : row.name;
-                return (
-                  <tr key={`${row.name}-${rowIdx}`} style={{ borderTop: `1px solid ${rowIdx === 0 ? C.border : "#f1f3f5"}`, background: rowBg }}>
-                    <td style={{
-                      padding: "3px 8px", fontFamily: "'SF Mono','Cascadia Code',monospace", fontSize: 11,
-                      fontWeight: sel ? 600 : 400, whiteSpace: "nowrap",
-                      position: "sticky", left: 0, background: rowBg, zIndex: 10,
-                      color: sel ? C.pillActive : "#343a40",
-                      maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis",
-                    }} title={rowTitle}>{row.name}</td>
-                    <td style={{ padding: "3px 4px", textAlign: "center" }}>{typeBadge(row.deviceType)}</td>
-                    <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={row.cpuModel}>{row.cpuModel}</td>
-                    {row.peaks.map((peak, i) => {
-                      const hasValue = row.hasMatch && peak !== null;
-                      const exceeded = hasValue && peak >= threshold;
-                      const dateStr = `${String(dates[i].getMonth() + 1).padStart(2, "0")}-${String(dates[i].getDate()).padStart(2, "0")}`;
-                      const active = sel && drill?.date === dateStr;
-                      const bg = !hasValue
-                        ? "#f9fafb"
-                        : peak >= 90 ? C.criticalBg
-                        : peak >= 80 ? C.highBg
-                        : exceeded ? C.thresholdBg
-                        : C.belowBg;
-                      // Tooltip: explain that the cell value is the day MAX, plus
-                      // show day avg/min so user can see the spike was a spike.
-                      const trend = row.dayTrends[i];
-                      const cellTitle = !row.hasMatch
-                        ? "No Zabbix host match"
-                        : peak === null
-                          ? "No history for this day"
-                          : trend
-                            ? `${row.name} · ${dateStr}\nDay max:  ${trend.max}%\nDay avg:  ${trend.avg}%\nDay min:  ${trend.min}%\nClick to open drill-down (per-minute breakdown)`
-                            : `Day max ${Math.round(peak!)}% — click to drill down`;
-                      return (
-                        <td key={i} style={{ padding: 0, textAlign: "center", width: 32, cursor: hasValue ? "pointer" : "default" }}
-                          onClick={() => hasValue && rowHostId && openDrill(dates[i], rowHostId, row.name, row.zHost?.hostName || row.name, peak!)}
-                          title={cellTitle}>
-                          <div style={{
-                            background: bg,
-                            color: !hasValue ? "#d1d5db" : exceeded ? C.exceededText : C.belowText,
-                            padding: "2px 0", fontSize: 10, fontWeight: exceeded ? 700 : 400, lineHeight: 1.2,
-                            outline: active ? "2px solid #0070c9" : "none", outlineOffset: -1, borderRadius: active ? 2 : 0,
-                          }}>
-                            {hasValue ? Math.round(peak!) : "—"}
-                          </div>
-                        </td>
-                      );
-                    })}
-                    <td style={{ padding: "3px 6px", textAlign: "center" }}>
-                      {row.hasMatch ? (row.exceedCount > 0 ? (
-                        <span style={{
-                          padding: "1px 6px", borderRadius: 8, fontSize: 10, fontWeight: 600,
-                          background: row.exceedCount > 10 ? C.riskRedBg : row.exceedCount > 5 ? C.riskAmberBg : C.riskGrayBg,
-                          color: row.exceedCount > 10 ? C.riskRedText : row.exceedCount > 5 ? C.riskAmberText : C.textSec,
-                        }}>{row.exceedCount}/{periodDays || 1}</span>
-                      ) : <span style={{ fontSize: 10, fontWeight: 500, color: C.okGreen }}>OK</span>
-                      ) : <span style={{ fontSize: 10, color: "#d1d5db" }}>—</span>}
-                    </td>
-                  </tr>
-                );
-              })}
+              {(() => {
+                // Flat (host) mode: render every row in the existing sort order.
+                if (groupBy === "host") {
+                  return hostRows.map((row, rowIdx) => renderHostRow(row, rowIdx));
+                }
+
+                // Grouped mode: cluster by CPU model OR store. Each header row
+                // is collapsible; collapsed groups show one summary row with
+                // per-day MAX across the group's hosts. Expanded groups also
+                // render the individual host rows below the header.
+                const groupKey = (r: typeof hostRows[number]): string =>
+                  groupBy === "cpu" ? r.cpuModel : r.storeName;
+                const sorted = [...hostRows].sort((a, b) => groupKey(a).localeCompare(groupKey(b)) || a.name.localeCompare(b.name));
+                const groups = new Map<string, typeof hostRows>();
+                for (const r of sorted) {
+                  const k = groupKey(r);
+                  if (!groups.has(k)) groups.set(k, []);
+                  groups.get(k)!.push(r);
+                }
+
+                const elements: ReactElement[] = [];
+                let runningIdx = 0;
+                for (const [groupName, members] of groups) {
+                  const isExpanded = expandedGroups.has(groupName);
+                  const matchedHosts = members.filter((r) => r.hasMatch).length;
+                  const totalExceed = members.reduce((s, r) => s + r.minutesAbove, 0);
+                  const totalSampled = members.reduce((s, r) => s + r.totalMinutes, 0);
+                  // Per-day MAX peak across the group — gives an at-a-glance
+                  // heatmap row even when the group is collapsed.
+                  const dayMaxes: (number | null)[] = dates.map((_, i) => {
+                    let max: number | null = null;
+                    for (const r of members) {
+                      const v = r.peaks[i];
+                      if (v !== null && (max === null || v > max)) max = v;
+                    }
+                    return max;
+                  });
+
+                  elements.push(
+                    <tr key={`grp-${groupName}`} style={{
+                      borderTop: `1px solid ${C.border}`,
+                      background: "#f1f5f9",
+                      cursor: "pointer",
+                    }} onClick={() => toggleGroup(groupName)}>
+                      <td colSpan={4} style={{
+                        padding: "6px 10px",
+                        position: "sticky", left: 0, background: "#f1f5f9", zIndex: 10,
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "#0f172a" }}>
+                          <span style={{ fontSize: 10, color: "#64748b", width: 10, display: "inline-block", transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s ease" }}>▶</span>
+                          <span style={{ fontWeight: 700, letterSpacing: 0.2 }} title={groupName}>{groupName}</span>
+                          <span style={{ color: "#64748b", fontSize: 10 }}>{members.length} host{members.length === 1 ? "" : "s"}</span>
+                          <span style={{ color: "#64748b", fontSize: 10 }}>· {matchedHosts} reporting</span>
+                        </div>
+                      </td>
+                      {dayMaxes.map((peak, i) => {
+                        const hasValue = peak !== null;
+                        const exceeded = hasValue && peak >= threshold;
+                        const bg = !hasValue
+                          ? "#f9fafb"
+                          : peak >= 90 ? C.criticalBg
+                          : peak >= 80 ? C.highBg
+                          : exceeded ? C.thresholdBg
+                          : C.belowBg;
+                        const dateStr = `${String(dates[i].getMonth() + 1).padStart(2, "0")}-${String(dates[i].getDate()).padStart(2, "0")}`;
+                        return (
+                          <td key={i} style={{ padding: 0, textAlign: "center", width: 32 }}
+                            title={hasValue ? `${groupName} · ${dateStr}\nGroup MAX (across ${members.length} hosts): ${Math.round(peak)}%` : `${groupName} · ${dateStr} — no data`}>
+                            <div style={{
+                              background: bg,
+                              color: !hasValue ? "#d1d5db" : exceeded ? C.exceededText : C.belowText,
+                              padding: "2px 0", fontSize: 10, fontWeight: exceeded ? 700 : 500, lineHeight: 1.2,
+                            }}>
+                              {hasValue ? Math.round(peak) : "—"}
+                            </div>
+                          </td>
+                        );
+                      })}
+                      {(() => {
+                        const fmt = (n: number) => n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+                        const groupPct = totalSampled > 0 ? (totalExceed / totalSampled) * 100 : 0;
+                        const isHigh = totalExceed > 600;
+                        const isMed = totalExceed > 60 && totalExceed <= 600;
+                        const bg = isHigh ? C.riskRedBg : isMed ? C.riskAmberBg : C.riskGrayBg;
+                        const fg = isHigh ? C.riskRedText : isMed ? C.riskAmberText : C.textSec;
+                        const pctText = groupPct >= 10 ? `${Math.round(groupPct)}%` : groupPct >= 1 ? `${groupPct.toFixed(1)}%` : groupPct > 0 ? `${groupPct.toFixed(2)}%` : "0%";
+                        const tooltip = `Across ${members.length} host${members.length === 1 ? "" : "s"}: ${totalExceed} of ${totalSampled} sampled minutes were ≥ ${threshold}% (${groupPct.toFixed(2)}% of total period)`;
+                        return (
+                          <>
+                            <td style={{ padding: "3px 6px", textAlign: "center" }}>
+                              <span style={{
+                                padding: "1px 6px", borderRadius: 8, fontSize: 10, fontWeight: 600,
+                                background: bg, color: fg, fontVariantNumeric: "tabular-nums",
+                              }} title={tooltip}>
+                                {fmt(totalExceed)}<span style={{ opacity: 0.6 }}>/{fmt(totalSampled)}</span>
+                              </span>
+                            </td>
+                            <td style={{ padding: "3px 6px", textAlign: "center" }}>
+                              <span style={{
+                                padding: "1px 6px", borderRadius: 8, fontSize: 10, fontWeight: 700,
+                                background: bg, color: fg, fontVariantNumeric: "tabular-nums",
+                              }} title={tooltip}>{pctText}</span>
+                            </td>
+                          </>
+                        );
+                      })()}
+                    </tr>
+                  );
+
+                  if (isExpanded) {
+                    members.forEach((row) => {
+                      elements.push(renderHostRow(row, runningIdx++));
+                    });
+                  } else {
+                    runningIdx += members.length;
+                  }
+                }
+
+                return elements;
+              })()}
             </tbody>
           </table>
         </div>
@@ -638,7 +985,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
               <div key={proc.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 11, color: C.textSec, width: 64, textAlign: "right", flexShrink: 0 }}>{proc.label}</span>
                 <div style={{ flex: 1, height: 12, background: "#f1f3f5", borderRadius: 3, overflow: "hidden" }}>
-                  <div style={{ height: "100%", borderRadius: 3, background: proc.color, width: `${Math.max(1, val)}%`, transition: "width 0.2s ease" }} />
+                  <div style={{ height: "100%", borderRadius: 3, background: proc.color, width: `${val}%`, transition: "width 0.2s ease" }} />
                 </div>
                 <span style={{ fontSize: 12, fontWeight: 600, color: "#212529", width: 44, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
                   {Math.round(val * 10) / 10}%
@@ -652,7 +999,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 11, color: "#475569", width: 64, textAlign: "right", flexShrink: 0 }} title="CPU consumed by processes we don't monitor by name (kernel, scheduler, services).">Other</span>
             <div style={{ flex: 1, height: 12, background: "#f1f3f5", borderRadius: 3, overflow: "hidden" }}>
-              <div style={{ height: "100%", borderRadius: 3, background: "#94a3b8", width: `${Math.max(1, other)}%`, transition: "width 0.2s ease" }} />
+              <div style={{ height: "100%", borderRadius: 3, background: "#94a3b8", width: `${other}%`, transition: "width 0.2s ease" }} />
             </div>
             <span style={{ fontSize: 12, fontWeight: 600, color: "#475569", width: 44, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
               {Math.round(other * 10) / 10}%
@@ -667,36 +1014,6 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   if (!drill) {
     return (
       <>
-        <DataCoverageBanner
-          title="Data coverage: timeline = daily peak; drill-down = real per-process history"
-          available={(
-            <>
-              Daily peak CPU per host from <code>trends.get</code> (up to 14 d),
-              live snapshot from <code>system.cpu.util[,,avg1]</code>. Drill-down
-              uses real Zabbix <code>history.get</code> for per-process items
-              (<code>python.cpu</code>, <code>spss.cpu</code>, <code>sql.cpu</code>,
-              <code>vm.cpu</code>) plus <code>system.cpu.util</code> as a reference
-              line.
-            </>
-          )}
-          missing={(
-            <>
-              Per-mode breakdown (<code>system.cpu.util[,user]</code>,
-              <code> [,system]</code>, <code>[,iowait]</code>) is not yet ingested.
-              Note: timeline cell shows <em>instantaneous daily max</em>, drill-down
-              bars show <em>hourly average per process</em> — they will not match
-              numerically. The black tick on each bar is the real
-              <code>system.cpu.util</code> per-slot max for direct comparison.
-            </>
-          )}
-          footer={(
-            <>
-              &ldquo;Days without history&rdquo; — host exists, but <code>trends.get</code>
-              returned no value for that day (agent down, proxy lag, or retention
-              limits). Use the <strong>Data Health</strong> tab to analyse wide gaps.
-            </>
-          )}
-        />
         {filterBar(false)}
         <h2 style={{ fontSize: 17, fontWeight: 600, color: "#212529", marginBottom: 4 }}>CPU Threshold Timeline</h2>
         <p style={{ fontSize: 13, color: "#868e96", marginBottom: 10 }}>Heatmap: peak CPU per machine per day. Click a cell to drill down.</p>
@@ -719,6 +1036,44 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             </p>
           </div>
         )}
+        {/* Process category reference — explains what items map to what
+            category. Sits above the data-coverage banner because the user
+            asks "what's in DB?" before "what data is missing?". */}
+        <ProcessCategoryReference />
+        {/* Data coverage banner moved to the page bottom — it's reference
+            material, not something the user needs front-and-centre every visit. */}
+        <div style={{ marginTop: 14 }}>
+          <DataCoverageBanner
+            title="Data coverage: timeline = daily peak; drill-down = real per-process history"
+            available={(
+              <>
+                Daily peak CPU per host from <code>trends.get</code> (up to 14 d),
+                live snapshot from <code>system.cpu.util[,,avg1]</code>. Drill-down
+                uses real Zabbix <code>history.get</code> for per-process items
+                (<code>python.cpu</code>, <code>spss.cpu</code>, <code>sql.cpu</code>,
+                <code>vm.cpu</code>) plus <code>system.cpu.util</code> as a reference
+                line.
+              </>
+            )}
+            missing={(
+              <>
+                Per-mode breakdown (<code>system.cpu.util[,user]</code>,
+                <code> [,system]</code>, <code>[,iowait]</code>) is not yet ingested.
+                Note: timeline cell shows <em>instantaneous daily max</em>, drill-down
+                bars show <em>hourly average per process</em> — they will not match
+                numerically. The black tick on each bar is the real
+                <code>system.cpu.util</code> per-slot max for direct comparison.
+              </>
+            )}
+            footer={(
+              <>
+                &ldquo;Days without history&rdquo; — host exists, but <code>trends.get</code>
+                returned no value for that day (agent down, proxy lag, or retention
+                limits). Use the <strong>Data Health</strong> tab to analyse wide gaps.
+              </>
+            )}
+          />
+        </div>
       </>
     );
   }
@@ -808,7 +1163,6 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 { th: 95, c: "#dc2626", v: daySummary.minutesAbove.t95 },
                 { th: 90, c: "#ef4444", v: daySummary.minutesAbove.t90 },
                 { th: 70, c: "#d97706", v: daySummary.minutesAbove.t70 },
-                { th: 50, c: "#0891b2", v: daySummary.minutesAbove.t50 },
               ].map((row) => (
                 <span key={row.th} style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: row.c, display: "inline-block" }} />
@@ -865,15 +1219,23 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   Process breakdown for the selected moment lives in the panel below; we
                   don't paint it on the chart because at low percentages it becomes a flat
                   invisible smear next to the host CPU line. */}
-              <div style={{ flex: 1, minHeight: 100, position: "relative" }}>
-                {/* 100% ceiling + 70% threshold reference lines */}
+              <div style={{
+                flex: 1, minHeight: 100, position: "relative",
+                // Soft tinted background so the line stands out against the
+                // page chrome and the chart area is visually distinct from
+                // the controls above and the detail panel below.
+                background: "linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)",
+                border: `1px solid ${C.border}`,
+                borderRadius: 6,
+              }}>
+                {/* Reference grid: 100% ceiling, 70% threshold, 0% baseline. */}
                 <div aria-hidden style={{
                   position: "absolute", left: 0, right: 0, top: 0,
                   borderTop: "1px dashed #d0d7de", pointerEvents: "none", zIndex: 1,
                 }}>
                   <span style={{
                     position: "absolute", right: 0, top: -1,
-                    fontSize: 9, color: "#94a3b8", background: "#fafbfc",
+                    fontSize: 9, color: "#94a3b8", background: "transparent",
                     padding: "0 4px", transform: "translateY(-50%)",
                   }}>100%</span>
                 </div>
@@ -883,9 +1245,19 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 }}>
                   <span style={{
                     position: "absolute", right: 0, top: -1,
-                    fontSize: 9, color: "#a16207", background: "#fafbfc",
+                    fontSize: 9, color: "#a16207", background: "transparent",
                     padding: "0 4px", transform: "translateY(-50%)",
                   }}>70%</span>
+                </div>
+                <div aria-hidden style={{
+                  position: "absolute", left: 0, right: 0, bottom: 0,
+                  borderTop: "1px dashed #d0d7de", pointerEvents: "none", zIndex: 1,
+                }}>
+                  <span style={{
+                    position: "absolute", right: 0, top: -1,
+                    fontSize: 9, color: "#94a3b8", background: "transparent",
+                    padding: "0 4px", transform: "translateY(-50%)",
+                  }}>0%</span>
                 </div>
 
                 {/* SVG: host CPU line (max as solid, avg as dashed) + selection cursor + peak dot. */}

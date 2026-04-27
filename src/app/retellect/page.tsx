@@ -107,8 +107,8 @@ export default async function RetellectHubPage() {
 
         {pilots.length === 0 && (
           <div className="bg-white rounded-lg border border-gray-200 px-5 py-12 text-center">
-            <p className="text-gray-400 mb-2">Retellect pilotų dar nėra.</p>
-            <Link href="/pilots" className="text-blue-600 hover:text-blue-800 text-sm">Peržiūrėti visus pilotus →</Link>
+            <p className="text-gray-400 mb-2">No Retellect pilots yet.</p>
+            <Link href="/pilots" className="text-blue-600 hover:text-blue-800 text-sm">View all pilots →</Link>
           </div>
         )}
       </div>

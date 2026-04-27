@@ -246,21 +246,21 @@ export function RtDataHealth({
 
       {/* Methodology note */}
       <div className="rounded border border-gray-200 bg-white px-4 py-3 text-xs text-gray-600">
-        <div className="font-medium text-gray-800 mb-1">Kaip skaičiuojam</div>
+        <div className="font-medium text-gray-800 mb-1">How we compute this</div>
         <ul className="list-disc list-inside space-y-0.5">
           <li>
-            Freshness = naujausio <code className="font-mono">system.cpu.util*</code>{" "}
-            arba <code className="font-mono">system.cpu.load[,avg1]</code>{" "}
-            sample&apos;o amžius vs. wall clock.
+            Freshness = age of the latest <code className="font-mono">system.cpu.util*</code>{" "}
+            or <code className="font-mono">system.cpu.load[,avg1]</code>{" "}
+            sample vs. wall clock.
           </li>
           <li>
-            Item delay yra 1m/5m — viskas &gt;
-            {Math.round(RT_STALE_THRESHOLD_SEC / 60)} min traktuojama kaip
-            „stale&quot; (tikriausiai agent/proxy lag).
+            Item delay is 1m / 5m — anything &gt;
+            {Math.round(RT_STALE_THRESHOLD_SEC / 60)} min is treated as
+            &ldquo;stale&rdquo; (most likely agent / proxy lag).
           </li>
           <li>
-            „Silent&quot; = Zabbix hostas rastas, bet CPU item&apos;ui lastClock = 0
-            → konfigūracija yra, telemetrijos nėra.
+            &ldquo;Silent&rdquo; = Zabbix host found, but the CPU item&apos;s
+            lastClock = 0 → the configuration is there, the telemetry isn&apos;t.
           </li>
         </ul>
       </div>
@@ -269,11 +269,11 @@ export function RtDataHealth({
       <section className="rounded border border-gray-200 bg-white p-4">
         <header className="mb-3">
           <h3 className="text-sm font-semibold text-gray-900">
-            Amžiaus pasiskirstymas
+            Age distribution
           </h3>
           <p className="text-xs text-gray-500">
-            Kiek hostų į kurią laiko „skylę&quot; pakliūna — stulpelių aukštis
-            proporcingas hostų kiekiui bucket&apos;e.
+            How many hosts fall into each time bucket — bar height is
+            proportional to host count in that bucket.
           </p>
         </header>
         <div className="grid grid-cols-6 gap-3">
@@ -325,8 +325,8 @@ export function RtDataHealth({
       {/* Silent hosts */}
       <HostListSection
         title={`Silent (${silentHosts.length})`}
-        subtitle="Zabbix hostas rastas, bet CPU item'ui lastClock = 0 — niekada neatsiuntė reikšmės."
-        emptyMessage="Nė vieno — visi matched hostai bent kartą atsiuntė CPU sample."
+        subtitle="Zabbix host exists, but the CPU item's lastClock = 0 — never sent a value."
+        emptyMessage="None — every matched host has sent a CPU sample at least once."
         rows={silentHosts}
         showAge={false}
       />
@@ -334,10 +334,10 @@ export function RtDataHealth({
       {/* Stale hosts */}
       <HostListSection
         title={`Stale (${staleHosts.length})`}
-        subtitle={`Paskutinis sample yra > ${Math.round(
+        subtitle={`Latest sample is > ${Math.round(
           RT_STALE_THRESHOLD_SEC / 60
-        )} min senumo — rikiuota nuo seniausio.`}
-        emptyMessage="Nė vieno — visi matched hostai reportuoja paskutinius 30 min."
+        )} min old — sorted oldest first.`}
+        emptyMessage="None — every matched host has reported within the last 30 min."
         rows={staleHosts}
         showAge
       />
@@ -346,7 +346,7 @@ export function RtDataHealth({
       {unmatchedHosts.length > 0 && (
         <HostListSection
           title={`Unmatched (${unmatchedHosts.length})`}
-          subtitle="DB device neranda atitinkamo Zabbix hosto — patikrinti sourceHostKey/pavadinimo mapping'ą."
+          subtitle="DB device cannot be matched to a Zabbix host — check the sourceHostKey / hostname mapping."
           emptyMessage=""
           rows={unmatchedHosts}
           showAge={false}

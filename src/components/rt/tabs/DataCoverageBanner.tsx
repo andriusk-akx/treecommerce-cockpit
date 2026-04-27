@@ -22,7 +22,7 @@ export function DataCoverageBanner({
 }: {
   /** Headline — shown always, even when collapsed. Keep it short. */
   title: string;
-  /** Human description of what IS published today (Lithuanian copy welcome). */
+  /** Human description of what IS published today (English copy). */
   available: ReactNode;
   /** Human description of what is NOT published yet and why. */
   missing: ReactNode;
@@ -51,11 +51,11 @@ export function DataCoverageBanner({
       {open && (
         <div className="px-4 pb-3 pt-1 border-t border-amber-200 text-amber-900 space-y-2">
           <div>
-            <span className="font-medium">Prieinama šiandien: </span>
+            <span className="font-medium">Available today: </span>
             {available}
           </div>
           <div>
-            <span className="font-medium">Trūksta (paklausta Rimi Zabbix admin): </span>
+            <span className="font-medium">Missing (requested from Rimi Zabbix admin): </span>
             {missing}
           </div>
           {footer && <div className="text-[11px] text-amber-700">{footer}</div>}

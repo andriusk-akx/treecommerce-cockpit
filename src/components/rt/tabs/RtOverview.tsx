@@ -43,9 +43,12 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     }
   }
 
-  // For freshness comparisons (used in cpuByClass and other places below).
-  // eslint-disable-next-line react-hooks/purity
-  const refMs = nowMs || Date.now();
+  // refMs = nowMs once the component has mounted (useEffect set it). Until
+  // then it's 0, which downstream code treats as "freshness unknown" — no age
+  // labels rendered, no time-window filtering. Critically we do NOT fall back
+  // to Date.now() here: that would diverge between SSR and the first client
+  // paint and trigger a hydration mismatch (e.g. server "36s" vs client "37s").
+  const refMs = nowMs;
 
   // Group by DB cpuModel (sourced from Excel hardware registry).
   // Falls back to core count when cpuModel is missing.
@@ -62,7 +65,10 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     group.hosts++;
     // Use the same CPU total computation as elsewhere — fresh samples only
     if (detail && detail.lastClock) {
-      const ageSec = (refMs - new Date(detail.lastClock).getTime()) / 1000;
+      // Pre-mount (refMs=0) we can't compute a real age — accept the sample
+      // anyway so SSR renders consistent numbers with the first client paint.
+      // After mount the 2h freshness filter kicks in normally.
+      const ageSec = refMs > 0 ? (refMs - new Date(detail.lastClock).getTime()) / 1000 : 0;
       if (ageSec < 7200) { // 2h window — matches REPORTING_WINDOW_SEC; Rimi Zabbix poll cycle for system.cpu.util can be 1h+
         const totalCpu = computeCpuTotal(detail.user, detail.system, detail.total);
         if (totalCpu > 0) group.cpuValues.push(totalCpu);
@@ -188,7 +194,9 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       const hasAnyCpuTelemetry = zabbix.cpuDetail.some((it) => {
         if (it.hostId !== zHost.hostId || !it.lastClock) return false;
         if (!it.key.startsWith("system.cpu")) return false;
-        const ageSec = (refMs - new Date(it.lastClock).getTime()) / 1000;
+        // Pre-mount (refMs=0) accept the sample so SSR/client first-paint render
+        // identically; the freshness window kicks in once the clock is set.
+        const ageSec = refMs > 0 ? (refMs - new Date(it.lastClock).getTime()) / 1000 : 0;
         return ageSec < 2 * 60 * 60; // 2h
       });
       if (hasAnyCpuTelemetry) cur.gapHosts.push(device.name);
@@ -296,11 +304,14 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 const scoMatch = /SCO(\d+)/i.exec(host.hostName) || /SCOW_(\d+)/i.exec(host.hostName) || (dev ? /SCO(\d+)/i.exec(dev.name) : null);
                 const scoNum = scoMatch ? parseInt(scoMatch[1], 10) : 0;
                 const lastClockMs = detail?.lastClock ? new Date(detail.lastClock).getTime() : 0;
-                const ageSec = lastClockMs ? Math.max(0, Math.floor((nowMs - lastClockMs) / 1000)) : null;
+                // ageSec stays null until the client-side clock is set (nowMs > 0).
+                // Pre-mount the age label is hidden, which keeps SSR and client
+                // first-paint markup identical (avoids React hydration warning).
+                const ageSec = lastClockMs && nowMs > 0 ? Math.max(0, Math.floor((nowMs - lastClockMs) / 1000)) : null;
                 const rtHasItem = retellectHasItemByHostId.has(host.hostId);
                 const rtCpuTotal = retellectCpuByHostId.get(host.hostId) ?? 0;
                 const rtFreshestMs = retellectFreshestMsByHostId.get(host.hostId) || 0;
-                const rtPythonAgeSec = rtFreshestMs > 0 ? Math.max(0, Math.floor((refMs - rtFreshestMs) / 1000)) : null;
+                const rtPythonAgeSec = rtFreshestMs > 0 && refMs > 0 ? Math.max(0, Math.floor((refMs - rtFreshestMs) / 1000)) : null;
                 const rtFresh = rtPythonAgeSec !== null && rtPythonAgeSec < FRESH_SEC;
                 const rtActive = rtFresh && rtCpuTotal > RETELLECT_CPU_THRESHOLD;
                 const dbDev = pilot.devices.find((d) => (d.sourceHostKey || d.name) === host.hostName);

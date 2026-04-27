@@ -202,29 +202,31 @@ export function RtCpuComparison({
   return (
     <>
       <DataCoverageBanner
-        title={`Data coverage: ${unknownHostCount}/${totalDevices} (${unknownPct}%) hostų be CPU Model — grupuojam kaip „Unknown“`}
+        title={`Data coverage: ${unknownHostCount}/${totalDevices} (${unknownPct}%) hosts without CPU Model — grouped as "Unknown"`}
         defaultOpen={unknownPct >= 50}
         available={
           <>
-            Live CPU Total % (iš <code>system.cpu.util[,,avg1]</code> arba user+system
-            suma) per <strong>{totalMatched}/{totalDevices}</strong> matched hostų;
-            <code> system.cpu.num</code> tiems, kam publikuota.
+            Live CPU Total % (from <code>system.cpu.util[,,avg1]</code> or user+system
+            sum) for <strong>{totalMatched}/{totalDevices}</strong> matched hosts;
+            <code> system.cpu.num</code> for hosts that publish it.
           </>
         }
         missing={
           <>
-            <code>inventory.hardware</code> → CPU Model: dauguma hostų šiandien
-            tušti, todėl grupuojam po „Unknown“. <code>vm.memory.size</code>{" "}
-            → RAM GB; per-mode CPU (<code>system.cpu.util[,user]</code> /{" "}
-            <code>[,system]</code>) → būtų tikslesnis peak/avg skaičiavimas.
+            <code>inventory.hardware</code> → CPU Model: most hosts today
+            return empty, so we group them under &ldquo;Unknown&rdquo;.
+            <code>vm.memory.size</code> → RAM GB; per-mode CPU
+            (<code>system.cpu.util[,user]</code> /
+            <code>[,system]</code>) would give a more accurate peak/avg breakdown.
           </>
         }
         footer={
           <>
-            Aggregate skaičiai (avg/peak/headroom) ignoruoja hostus, kurių
-            paskutinis sample &gt; 30 min senumo, kad „silent“ hostai
-            neapsimetinėtų nuliu. Stulpelyje „Hosts“ rodomas <em>visas</em>{" "}
-            grupės narystės skaičius; aktyviai reportuojantys nurodyti čia pat.
+            Aggregate numbers (avg / peak / headroom) ignore hosts whose
+            last sample is &gt; 30 min old, so &ldquo;silent&rdquo; hosts
+            don&apos;t fake a zero. The &ldquo;Hosts&rdquo; column shows
+            <em>total</em> group membership; actively reporting hosts are
+            listed alongside.
           </>
         }
       />
@@ -234,8 +236,8 @@ export function RtCpuComparison({
           CPU Comparison by Hardware Class
         </h2>
         <p className="text-xs text-gray-400 mt-0.5">
-          Live Zabbix data for DB devices grouped by CPU model. Agregatai
-          skaičiuojami iš hostų, kurių sample &lt; 30 min senumo.
+          Live Zabbix data for DB devices grouped by CPU model. Aggregates
+          are computed from hosts whose latest sample is &lt; 30 min old.
         </p>
       </div>
 
