@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.claude
+.env
+.env.local
+.env.*.local
+.cache
+coverage
+*.log
+scripts/_probe-*
+scripts/probe-*
+scripts/*.bak
+**/*.bak
+.DS_Store

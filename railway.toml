@@ -1,26 +1,14 @@
-# Railway deployment config
-# https://docs.railway.app/reference/config-as-code
+# Railway deployment config — Dockerfile-driven build & start.
 #
-# Two phases:
-#   1. Build  — generate version.ts, prisma client, run next build
-#   2. Deploy — apply migrations, then start Next.js
-#
-# Healthcheck hits /api/version which is a force-static endpoint that
-# requires no DB or Zabbix — perfect for liveness checks.
+# Build/start commands live in the Dockerfile so the same image works
+# locally (`docker build && docker run`) and on Railway. railway.toml
+# only configures healthcheck + restart policy.
 
 [build]
-builder = "NIXPACKS"
-buildCommand = "npm ci --include=dev && npx prisma generate && npm run version:generate && npm run build"
+builder = "DOCKERFILE"
 
 [deploy]
-# Apply pending migrations on every deploy. Idempotent — already-applied
-# migrations are skipped. Then start Next.js in production mode.
-startCommand = "npx prisma migrate deploy && npx next start -p ${PORT:-3000}"
 healthcheckPath = "/api/version"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
-# Send commit/branch/build-time into the bundle so /api/version reflects
-# what's actually deployed, not the dev machine that pushed last.
-[deploy.envs]
-NODE_ENV = "production"
