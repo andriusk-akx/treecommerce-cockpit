@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "version:generate": "tsx scripts/generate-version.ts",
+    "auth:unlock": "tsx scripts/unlock-user.ts",
     "predev": "npm run version:generate",
     "prebuild": "npm run version:generate",
     "dev": "next dev --webpack",
