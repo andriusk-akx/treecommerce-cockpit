@@ -174,8 +174,7 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
         if (cpuUtilItems.length === 0) return [];
         const itemIds = cpuUtilItems.map((i) => i.itemid);
         const itemHostMap = new Map(cpuUtilItems.map((i) => [i.itemid, i.hostid]));
-        const result = await client.getCpuHistoryDaily(itemIds, itemHostMap, 14);
-        return result;
+        return await client.getCpuHistoryDaily(itemIds, itemHostMap, 14);
       },
     }),
   ]);

@@ -24,6 +24,10 @@ export function classifyProcessKey(key: string): { procName: string; category: P
   return { procName: base, category: "other" };
 }
 
+function effectiveDaysKey(days: number): string {
+  return String(Math.min(Math.max(1, days), 14));
+}
+
 export class ZabbixClient {
   private baseUrl: string;
   private token: string;
@@ -188,6 +192,21 @@ export class ZabbixClient {
     daysBack: number = 14
   ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[]> {
     if (itemIds.length === 0) return [];
+    // Cache the daily aggregate for 2 minutes. This data covers 14 days, the
+    // newest day changes minute-by-minute, but the rest is frozen. A 2-minute
+    // cache keeps the dashboard "live enough" without paying the 1-2s (prod)
+    // / ~10s (dev mode, with fewer concurrent connections) cost on every
+    // page load. In-flight dedup ALSO collapses concurrent renders to one
+    // upstream call — important when the user clicks rapidly between pilots.
+    const cacheKey = `zabbix:cpuHistDaily:${effectiveDaysKey(daysBack)}:${itemIds.slice().sort().join(",")}`;
+    return cached(cacheKey, () => this._getCpuHistoryDailyUncached(itemIds, itemHostMap, daysBack), 120_000);
+  }
+
+  private async _getCpuHistoryDailyUncached(
+    itemIds: string[],
+    itemHostMap: Map<string, string>,
+    daysBack: number = 14
+  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[]> {
     const effectiveDays = Math.min(daysBack, 14);
     const timeFrom = Math.floor(Date.now() / 1000) - effectiveDays * 24 * 3600;
 
