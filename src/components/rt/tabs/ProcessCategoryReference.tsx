@@ -52,8 +52,9 @@ export function ProcessCategoryReference() {
       color: "#0ea5e9",
       items: [
         { primary: "perf_counter[\\Process(vmware-vmx)]", aliases: ["vm.cpu"] },
+        { primary: "perf_counter[\\Process(besclient)]" },
       ],
-      notes: "VMware host process for the SCO VM (vmware-vmx). Does not include kernel work — kernel CPU is in 'Other' until system.cpu.util[,system] is deployed.",
+      notes: "VMware host process for the SCO VM (vmware-vmx) plus IBM BigFix endpoint management client (besclient). Does not include kernel work — kernel CPU is in 'Other' until system.cpu.util[,system] is deployed.",
     },
     {
       category: "Other",

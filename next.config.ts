@@ -36,10 +36,8 @@ if (process.env.NODE_ENV === "production") {
 const nextConfig: NextConfig = {
   // Suppress the X-Powered-By: Next.js header — informational tech disclosure.
   poweredByHeader: false,
-  // Standalone output produces a self-contained server.js bundle in
-  // .next/standalone — exactly what Docker production deploys want.
-  // Avoids the "next start" silent-startup issue we hit on Railway.
-  output: "standalone",
+  // (output: "standalone" removed — server.js exited silently in Railway
+  // crash-loop pattern. Reverted to regular next start with full node_modules.)
   async headers() {
     return [
       {

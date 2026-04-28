@@ -68,6 +68,7 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
     zabbixProcResult,
     zabbixProcCpuResult,
     zabbixHistoryResult,
+    zabbixAgentHealthResult,
   ] = await Promise.all([
     fetchSource(`zabbix-rt-resources-${pilotId}`, {
       source: "zabbix",
@@ -186,6 +187,24 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
         return await client.getCpuHistoryDaily(itemIds, itemHostMap, 14);
       },
     }),
+    fetchSource(`zabbix-rt-agent-health-${pilotId}`, {
+      source: "zabbix",
+      label: "Zabbix Agent Health",
+      env: "prod",
+      fetcher: async () => {
+        // Per-host count of supported / unsupported items so the dashboard
+        // can distinguish "agent broken" from "process idle". Restricted to
+        // hosts matching DB devices to avoid pulling 1000+ unrelated hosts.
+        const client = getZabbixClient();
+        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
+        const matchedHostIds = new Set<string>();
+        for (const h of allHosts) {
+          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
+        }
+        if (matchedHostIds.size === 0) return [];
+        return await client.getAgentHealthSummary(Array.from(matchedHostIds));
+      },
+    }),
   ]);
 
   const zabbixHosts = zabbixResult.data || [];
@@ -193,6 +212,7 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
   const procItems = zabbixProcResult.data || [];
   const procCpuItems = zabbixProcCpuResult.data || [];
   const cpuHistory = zabbixHistoryResult.data || [];
+  const agentHealth = zabbixAgentHealthResult.data || [];
 
   // Serialize pilot data for client component
   const pilotData = {
@@ -251,6 +271,11 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
         utilization: h.disk.utilization || 0,
         path: h.disk.path || "/",
       } : null,
+      // RT-CPUMODEL phase 1: forward Zabbix `host.inventory` (already
+      // normalised in ZabbixClient.getHosts via mapHostInventory). Null here
+      // means either inventory_mode=-1 on this host or every requested
+      // inventory field is empty — Rimi's current state for most SCOs.
+      inventory: h.inventory ?? null,
     })),
     cpuDetail: cpuDetailItems.map((item: any) => ({
       hostId: item.hostId,
@@ -284,6 +309,13 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
       error: zabbixProcCpuResult.error,
     },
     cpuTrends: cpuHistory,
+    agentHealth: agentHealth as Array<{
+      hostId: string;
+      totalEnabled: number;
+      supported: number;
+      unsupported: number;
+      sampleErrors: string[];
+    }>,
   };
 
   return (

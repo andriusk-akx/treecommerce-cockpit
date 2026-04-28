@@ -1,69 +1,41 @@
-# AKpilot production image — official Next.js standalone Docker pattern.
+# AKpilot production image — regular Next.js start with full node_modules.
 #
-# Multi-stage:
-#   1. deps    — install all node_modules (incl. dev for build)
-#   2. build   — generate Prisma client, version.ts, run `next build`
-#                with output: 'standalone' set in next.config.ts
-#   3. runner  — slim image with only the standalone server bundle
-#
-# Standalone output gives us:
-#   - .next/standalone/server.js  (entry point, self-contained)
-#   - .next/standalone/.next/...  (server bundle)
-#   - .next/standalone/node_modules (only the production deps Next traced)
-#   We then re-add public/ and .next/static/ which standalone doesn't include.
+# Earlier attempt with output: "standalone" + server.js produced a
+# crash-loop where the standalone server.js exited silently right after
+# startup. Regular `next start` reads from node_modules and stays alive.
 
-# ─── deps ──────────────────────────────────────────────────────────
-FROM node:24-alpine AS deps
+FROM node:24-alpine
 WORKDIR /app
 RUN apk add --no-cache libc6-compat openssl
+
+# Install all deps (including dev — needed for prisma + next CLI at boot)
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# ─── build ─────────────────────────────────────────────────────────
-FROM node:24-alpine AS build
-WORKDIR /app
-RUN apk add --no-cache libc6-compat openssl git
-COPY --from=deps /app/node_modules ./node_modules
+# App source
 COPY . .
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
 ARG RAILWAY_GIT_COMMIT_SHA
 ARG RAILWAY_GIT_BRANCH
 ENV AKPILOT_COMMIT_OVERRIDE=${RAILWAY_GIT_COMMIT_SHA:-unknown}
 ENV AKPILOT_COMMIT_FULL_OVERRIDE=${RAILWAY_GIT_COMMIT_SHA:-unknown}
 ENV AKPILOT_BRANCH_OVERRIDE=${RAILWAY_GIT_BRANCH:-unknown}
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN npx prisma generate
-RUN npm run version:generate
-RUN npm run build
 
-# ─── runner ────────────────────────────────────────────────────────
-FROM node:24-alpine AS runner
-WORKDIR /app
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN apk add --no-cache libc6-compat openssl
+# Build Prisma client + version stamp + Next.js production bundle.
+RUN npx prisma generate && \
+    npm run version:generate && \
+    npm run build
 
-# Standalone bundle — server.js + traced node_modules
-COPY --from=build /app/.next/standalone ./
-# Static assets (Next.js doesn't copy these into standalone)
-COPY --from=build /app/.next/static ./.next/static
-COPY --from=build /app/public ./public
-# Prisma — generated client + engine binaries needed at runtime.
-# Prisma 7 emits the client to src/generated/prisma; @prisma/client is the
-# runtime peer that loads it. The standalone bundle traces both.
-COPY --from=build /app/src/generated/prisma ./src/generated/prisma
-COPY --from=build /app/prisma ./prisma
-# prisma.config.ts is intentionally NOT copied — it's only needed for
-# `prisma migrate deploy` which runs once via `railway run npx prisma
-# migrate deploy` after first deploy. At runtime the app uses PrismaPg
-# adapter with DATABASE_URL directly, no config file required.
-# Files referenced by app at runtime
-COPY --from=build /app/rimi_hosts_filtered.json ./rimi_hosts_filtered.json
-COPY --from=build /app/scripts ./scripts
+EXPOSE 8080
+# Add a healthcheck that Docker (and Railway) can rely on. If healthcheck
+# fails consistently, Docker marks unhealthy but doesn't restart by itself —
+# Railway uses its own observation. The key is `next start` keeps running.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD wget -qO- http://localhost:${PORT:-8080}/api/version || exit 1
 
-EXPOSE 3000
-ENV PORT=3000
-ENV HOSTNAME=0.0.0.0
-# server.js is the standalone entry point. It binds to 0.0.0.0 by default
-# and listens on PORT (Railway sets this). PID 1 = node, so SIGTERM
-# propagates correctly for graceful shutdown.
-CMD ["node", "server.js"]
+# Use npm start which calls `next start` from package.json.
+# `exec` makes node PID 1 — SIGTERM from Railway propagates for graceful shutdown.
+CMD ["sh", "-c", "exec npm start -- -H 0.0.0.0 -p ${PORT:-8080}"]

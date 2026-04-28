@@ -11,6 +11,7 @@ import {
   computeCpuTotal,
   bytesToGb,
   computeConnectionStats,
+  resolveCpuModel,
   RT_FRESHNESS_THRESHOLD_SEC,
   RT_STALE_THRESHOLD_SEC,
   type RtProcessStatus,
@@ -19,6 +20,11 @@ import {
   type HostSortDir,
 } from "./rt-inventory-helpers";
 import { DataCoverageBanner } from "./DataCoverageBanner";
+import {
+  classifyAgentHealth,
+  describeAgentHealth,
+  type AgentHealthBucket,
+} from "./rt-agent-health-helpers";
 
 type RiskLevel = "critical" | "high" | "medium" | "low" | "unknown";
 
@@ -51,6 +57,17 @@ interface HostRow {
   freshestAgeSec: number | null;
   /** Sum of all Python CPU % readings — Retellect's contribution to host CPU */
   retellectCpuTotal: number;
+  /**
+   * Local Zabbix agent health classification — distinguishes "agent broken /
+   * most items in ZBX_NOTSUPPORTED" from "process idle". Drives the badge
+   * shown next to the host name. `null` means we have no agentHealth feed
+   * (e.g. host wasn't probed for it, or agentHealth was unavailable).
+   */
+  agentHealth: AgentHealthBucket | null;
+  /** Counts behind the agent-health classification, for the badge tooltip. */
+  agentSupported: number;
+  agentUnsupported: number;
+  agentTotalEnabled: number;
 }
 
 const riskColors: Record<string, string> = {
@@ -142,6 +159,13 @@ export function RtInventory({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zab
     );
     const hasProcCpuFeed = (zabbix.procCpu?.length ?? 0) > 0;
 
+    // Per-host agent health (item-state counts). Lets us flag hosts whose
+    // local Zabbix agent is in degraded shape so users don't read "0 % CPU"
+    // as "process idle" when it's really "agent can't see anything".
+    const agentHealthByHostId = new Map(
+      (zabbix.agentHealth ?? []).map((a) => [a.hostId, a]),
+    );
+
     // DB devices only
     for (const device of pilot.devices) {
       const zHost = zabbixByName.get(device.sourceHostKey || "") || zabbixByName.get(device.name);
@@ -175,12 +199,31 @@ export function RtInventory({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zab
       const freshestAgeSec = rtResult.freshestAgeSec;
       const retellectCpuTotal = rtResult.retellectCpuTotal;
 
+      // Resolve agent health for this Zabbix host (if known). When the
+      // agentHealth feed is missing entirely (e.g. dashboard rendered before
+      // we plumbed it through, or the call failed) we leave the bucket as
+      // null and the badge isn't rendered — matches pre-existing behaviour.
+      const agentHealthEntry = zHost ? agentHealthByHostId.get(zHost.hostId) : undefined;
+      const agentBucket: AgentHealthBucket | null = agentHealthEntry
+        ? classifyAgentHealth(
+            agentHealthEntry.supported,
+            agentHealthEntry.unsupported,
+            agentHealthEntry.totalEnabled,
+          )
+        : null;
+
+      // TODO(RT-CPUMODEL): once phase 2 backfills Device.cpuModel from the
+      // Zabbix host inventory feed, this fallback becomes redundant — the DB
+      // path will always win and zHost.inventory will only matter for hosts
+      // added between sync runs.
+      const resolvedCpuModel = resolveCpuModel(device.cpuModel, zHost?.inventory?.cpuModel ?? null);
+
       rows.push({
         id: device.id,
         name: device.name,
         store: device.storeName,
         zabbixMatched: !!zHost,
-        cpuModel: device.cpuModel || "—",
+        cpuModel: resolvedCpuModel,
         // Prefer Zabbix-live RAM (vm.memory.size) when available; fall back to DB ramGb; show "—" if unknown
         ramGb: memTotalGb > 0
           ? `${memTotalGb.toFixed(1)} GB`
@@ -205,6 +248,10 @@ export function RtInventory({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zab
         pythonProcs: pythonProcs ?? [],
         freshestAgeSec,
         retellectCpuTotal,
+        agentHealth: agentBucket,
+        agentSupported: agentHealthEntry?.supported ?? 0,
+        agentUnsupported: agentHealthEntry?.unsupported ?? 0,
+        agentTotalEnabled: agentHealthEntry?.totalEnabled ?? 0,
       });
     }
 
@@ -215,7 +262,11 @@ export function RtInventory({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zab
   const filteredHosts = useMemo(() => {
     let result = allHosts;
     if (filter === "high-risk") result = result.filter((h) => h.risk === "critical" || h.risk === "high");
-    if (filter === "retellect") result = result.filter((h) => h.retellectEnabled);
+    // Hot-fix 2026-04-28: filter on live process status, not DB.retellectEnabled.
+    // The DB flag is hardcoded false by seed_rimi_expand for the live Rimi
+    // fleet, so the old filter returned empty even when python.cpu telemetry
+    // showed Retellect actually running. See RT-BACKFILL backlog item.
+    if (filter === "retellect") result = result.filter((h) => h.rtProcessStatus === "running");
     if (filter === "db-only") result = result.filter((h) => h.status !== "up");
     if (search) {
       const q = search.toLowerCase();
@@ -341,7 +392,21 @@ export function RtInventory({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zab
                     <span className={`text-xs text-gray-400 transition-transform inline-block ${expandedRow === h.id ? "rotate-90" : ""}`}>▶</span>
                   </td>
                   <td className="py-2 px-3">
-                    <div className="font-medium font-mono text-xs">{h.name}</div>
+                    <div className="font-medium font-mono text-xs flex items-center gap-1.5">
+                      <span>{h.name}</span>
+                      {/* Agent-health badge — only rendered for hosts whose
+                          local Zabbix agent is in 'broken' state (most items
+                          UNSUPPORTED). 'partial' and 'healthy' are silent so
+                          we don't add visual noise to fleet-wide rows. */}
+                      {h.agentHealth === "broken" && (
+                        <span
+                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-200"
+                          title={`${describeAgentHealth("broken").tooltip} (${h.agentUnsupported}/${h.agentTotalEnabled} items unsupported)`}
+                        >
+                          ⚠ Agent
+                        </span>
+                      )}
+                    </div>
                     {h.ip && <div className="text-[10px] text-gray-400">{h.ip}</div>}
                   </td>
                   <td className="py-2 px-3 text-gray-500 text-xs">{h.store}</td>

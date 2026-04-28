@@ -7,6 +7,7 @@ import { generateIntervalData, type IntervalSlot } from "./rt-timeline-math";
 import { DataCoverageBanner } from "./DataCoverageBanner";
 import { ProcessCategoryReference } from "./ProcessCategoryReference";
 import { useRtFilters } from "../RtFiltersContext";
+import { resolveCpuModel } from "./rt-inventory-helpers";
 
 // Heatmap is a per-DAY peak view, so periods shorter than 1 day make no sense.
 // Trend retention on this Zabbix is ~5–7 days for trend.get and 14 days for
@@ -129,7 +130,6 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   const cpuModelFilter = filters.cpuModel;
   const setCpuModelFilter = (v: string) => setFilter("cpuModel", v);
   const search = filters.search;
-  const setSearch = (v: string) => setFilter("search", v);
   const granularity = filters.granularity;
   const setGranularity = (v: number) => setFilter("granularity", v);
   const retellectInstalled = filters.retellectInstalled;
@@ -203,7 +203,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     return result;
   }, [periodDays]);
 
-  const { zabbixByName, cpuDetail, trendByHostDate } = useMemo(() => {
+  const { zabbixByName, cpuDetail, trendByHostDate, retellectByHost } = useMemo(() => {
     const byName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
     const detail = new Map<string, { user: number; system: number; total: number; numCpus: number }>();
     for (const item of zabbix.cpuDetail) {
@@ -220,8 +220,30 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       if (!trendMap.has(t.hostId)) trendMap.set(t.hostId, new Map());
       trendMap.get(t.hostId)!.set(t.date, t);
     }
-    return { zabbixByName: byName, cpuDetail: detail, trendByHostDate: trendMap };
+    // Retellect liveness map: hostId -> {cpuTotal, freshestMs}.
+    // Sums python.cpu CPU% across processes per host and tracks the freshest
+    // sample time. Used to derive `rtActive` (live telemetry signal) so the
+    // "Retellect" filter pill reflects what Zabbix actually sees, not the
+    // stale Device.retellectEnabled DB flag (see RT-BACKFILL backlog).
+    const rtMap = new Map<string, { cpuTotal: number; freshestMs: number }>();
+    for (const proc of zabbix.procCpu || []) {
+      if (proc.category !== "retellect") continue;
+      const lastMs = proc.lastClock ? new Date(proc.lastClock).getTime() : 0;
+      const prev = rtMap.get(proc.hostId);
+      const cpuValue = typeof proc.cpuValue === "number" && Number.isFinite(proc.cpuValue) ? proc.cpuValue : 0;
+      if (prev) {
+        prev.cpuTotal += cpuValue;
+        if (lastMs > prev.freshestMs) prev.freshestMs = lastMs;
+      } else {
+        rtMap.set(proc.hostId, { cpuTotal: cpuValue, freshestMs: lastMs });
+      }
+    }
+    return { zabbixByName: byName, cpuDetail: detail, trendByHostDate: trendMap, retellectByHost: rtMap };
   }, [zabbix]);
+
+  // Match Overview's thresholds so the two tabs stay consistent.
+  const RT_FRESH_MS = 5 * 60 * 1000;     // 5 min — same as RT_FRESHNESS_THRESHOLD_SEC
+  const RT_CPU_THRESHOLD = 1.0;          // > 1% — filters out residual noise
 
   const hasTrendData = (zabbix.cpuTrends?.length || 0) > 0;
 
@@ -270,9 +292,20 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           if (typeof t.totalSamples === "number") totalMinutes += t.totalSamples;
         }
         const exceedDays = peaks.filter((p): p is number => p !== null && p >= threshold).length;
-        return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: device.cpuModel || "—", deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, currentCpu: Math.round(cpuTotal * 10) / 10, cores: detail?.numCpus || 0, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedDays, minutesAbove, totalMinutes };
+        // Live Retellect signal — same definition as RtOverview: python.cpu items
+        // fresh (<5 min) AND CPU% > 1.0. We capture this on the row so the
+        // filter, sort, and the column dot all switch from DB flag to telemetry.
+        const rt = zHost ? retellectByHost.get(zHost.hostId) : undefined;
+        const nowMs = Date.now();
+        const rtFresh = !!rt && rt.freshestMs > 0 && (nowMs - rt.freshestMs) < RT_FRESH_MS;
+        const rtActive = rtFresh && (rt?.cpuTotal ?? 0) > RT_CPU_THRESHOLD;
+        // TODO(RT-CPUMODEL): once phase 2 backfills Device.cpuModel, the DB
+        // value will always win; until then we prefer Zabbix inventory so the
+        // CPU column and "Group by CPU model" both have something useful.
+        const resolvedCpuModel = resolveCpuModel(device.cpuModel, zHost?.inventory?.cpuModel ?? null);
+        return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: resolvedCpuModel, deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, rtActive, currentCpu: Math.round(cpuTotal * 10) / 10, cores: detail?.numCpus || 0, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedDays, minutesAbove, totalMinutes };
       });
-  }, [pilot, zabbixByName, cpuDetail, trendByHostDate, storeFilter, threshold, periodDays, dates, hasTrendData]);
+  }, [pilot, zabbixByName, cpuDetail, trendByHostDate, retellectByHost, storeFilter, threshold, periodDays, dates, hasTrendData]);
 
   // Unique CPU model list for the dropdown — derived from currently visible
   // (post-store-filter) rows so we don't offer models that aren't applicable.
@@ -289,7 +322,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.deviceType.toLowerCase().includes(q) || r.cpuModel.toLowerCase().includes(q));
     }
     if (retellectInstalled !== null) {
-      rows = rows.filter((r) => r.retellectEnabled === retellectInstalled);
+      // Hot-fix 2026-04-28: telemetry-based filter, not DB flag.
+      // See RT-BACKFILL backlog item — when DB.retellectEnabled is repopulated
+      // from telemetry, switch back to `r.retellectEnabled === retellectInstalled`
+      // to also surface "should be running but isn't" hosts.
+      rows = rows.filter((r) => r.rtActive === retellectInstalled);
     }
     if (cpuModelFilter !== "all") {
       rows = rows.filter((r) => r.cpuModel === cpuModelFilter);
@@ -298,7 +335,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       let cmp = 0;
       if (sortKey === "name") cmp = a.name.localeCompare(b.name);
       else if (sortKey === "store") cmp = a.storeName.localeCompare(b.storeName);
-      else if (sortKey === "rt") cmp = (a.retellectEnabled ? 1 : 0) - (b.retellectEnabled ? 1 : 0);
+      else if (sortKey === "rt") cmp = (a.rtActive ? 1 : 0) - (b.rtActive ? 1 : 0);
       else if (sortKey === "type") cmp = a.deviceType.localeCompare(b.deviceType);
       else if (sortKey === "exceed") cmp = a.minutesAbove - b.minutesAbove;
       else if (sortKey === "exceedPct") {
@@ -493,9 +530,6 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: C.textSec, padding: "4px 0", flexWrap: "wrap" }}>
         <span style={{ fontWeight: 600, color: "#212529" }}>{stats.total} hosts</span>
-        {stats.critical > 0 && <span style={{ color: C.riskRedText }}>● {stats.critical} critical</span>}
-        {stats.warning > 0 && <span style={{ color: C.riskAmberText }}>● {stats.warning} warning</span>}
-        <span style={{ color: C.okGreen }}>● {stats.ok} OK</span>
         {stats.noData > 0 && <span style={{ color: "#adb5bd" }}>● {stats.noData} no data</span>}
         {filtered && <span style={{ color: C.pillActive }}>→ {hostRows.length} shown</span>}
         {filteredAggregate.totalSampled > 0 && (
@@ -606,12 +640,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         ))}
       </div>
       <div style={{ width: 1, height: 16, background: C.border }} />
-      {/* Tri-state Retellect filter pill: off → installed → not installed → off.
-          Mirrors the Overview tab's chip style so the user recognises it. */}
+      {/* Tri-state Retellect filter pill: off → running → not running → off.
+          Mirrors the Overview tab's chip style so the user recognises it.
+          Filters on live python.cpu telemetry, not DB.retellectEnabled — see
+          RT-BACKFILL backlog. */}
       {(() => {
         const next = retellectInstalled === null ? true : retellectInstalled === true ? false : null;
-        const label = retellectInstalled === true ? "Retellect installed"
-          : retellectInstalled === false ? "Retellect not installed"
+        const label = retellectInstalled === true ? "Retellect running"
+          : retellectInstalled === false ? "Retellect not running"
           : "Retellect: any";
         const dot = retellectInstalled === true ? "#10b981"
           : retellectInstalled === false ? "#94a3b8"
@@ -621,7 +657,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           <button
             type="button"
             onClick={() => setRetellectInstalled(next)}
-            title="Click to cycle: any → installed → not installed → any"
+            title="Click to cycle: any → running → not running → any. Live python.cpu telemetry."
             style={{
               display: "inline-flex", alignItems: "center", gap: 6,
               padding: "2px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer",
@@ -639,16 +675,6 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           </button>
         );
       })()}
-      <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: compact ? 0 : "auto" }}>
-        <span style={{ fontSize: 12, color: "#adb5bd" }}>⌕</span>
-        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search host..."
-          style={{ fontSize: 12, padding: "3px 8px", border: "1px solid #dee2e6", borderRadius: 4, width: compact ? 110 : 140, outline: "none" }} />
-        {search && (
-          <button onClick={() => setSearch("")}
-            style={{ fontSize: 10, padding: "1px 5px", border: "none", background: "#e9ecef", borderRadius: 3, cursor: "pointer", color: "#495057" }}>✕</button>
-        )}
-      </div>
       {compact && <span style={{ fontSize: 10, color: hasTrendData ? "#059669" : "#c9cdd1", marginLeft: "auto" }}>{hasTrendData ? "✓ Live Zabbix trends" : "⚠ No trend data"}</span>}
     </div>
   );
@@ -678,11 +704,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis",
         }} title={rowTitle}>{row.name}</td>
         <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={row.cpuModel}>{row.cpuModel}</td>
-        <td style={{ padding: "3px 6px", textAlign: "center" }} title={row.retellectEnabled ? "Retellect installed" : "Retellect not installed"}>
+        <td style={{ padding: "3px 6px", textAlign: "center" }} title={row.rtActive ? "Retellect running (live python.cpu)" : "Retellect not detected on this host"}>
           <span style={{
             display: "inline-block", width: 8, height: 8, borderRadius: "50%",
-            background: row.retellectEnabled ? "#10b981" : "transparent",
-            border: row.retellectEnabled ? "none" : "1px solid #cbd5e1",
+            background: row.rtActive ? "#10b981" : "transparent",
+            border: row.rtActive ? "none" : "1px solid #cbd5e1",
             verticalAlign: "middle",
           }} />
         </td>
@@ -771,10 +797,46 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     );
   };
 
+  // RT-CPUMODEL phase 1: when the user activates "Group by CPU model" but
+  // most of the visible fleet has no CPU string, every group collapses into
+  // one "—" bucket and the view stops being useful. Surface a one-line note
+  // pointing them at the better grouping until phase 2 backfills the data.
+  // Threshold is >50 % of currently-visible rows; computed here on the
+  // post-filter `hostRows` so it tracks user filtering live.
+  const cpuModelCoverage = useMemo(() => {
+    const total = hostRows.length;
+    if (total === 0) return { unknown: 0, total: 0 };
+    const unknown = hostRows.filter((r) => {
+      const m = r.cpuModel.trim();
+      return m === "" || m === "—" || m === "-";
+    }).length;
+    return { unknown, total };
+  }, [hostRows]);
+  const showCpuGroupWarning =
+    groupBy === "cpu" &&
+    cpuModelCoverage.total > 0 &&
+    cpuModelCoverage.unknown * 2 > cpuModelCoverage.total;
+
   // ─── Heatmap table ────────────────────────────────────────────────
   const heatmapTable = (
     <>
       {statsBar}
+      {showCpuGroupWarning && (
+        <div
+          role="note"
+          style={{
+            background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 6,
+            padding: "6px 10px", marginBottom: 8, fontSize: 11, color: "#92400e",
+            display: "flex", alignItems: "center", gap: 6,
+          }}
+        >
+          <span aria-hidden="true">⚠</span>
+          <span>
+            CPU model unknown for {cpuModelCoverage.unknown} of {cpuModelCoverage.total} hosts —
+            group by Store or Host instead, or wait for inventory backfill (RT-CPUMODEL).
+          </span>
+        </div>
+      )}
       <div style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 6, overflow: "hidden", position: "relative" }}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>

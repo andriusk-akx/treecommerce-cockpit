@@ -266,10 +266,10 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
               type="button"
               onClick={() => setRtFilter((v) => !v)}
               className={`ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] transition ${rtFilter ? "bg-emerald-50 border-emerald-300 text-emerald-700 font-medium" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
-              title="Show only hosts where Retellect is marked as installed (DB Device.retellectEnabled)"
+              title="Show only hosts where Retellect is currently running per Zabbix telemetry (python.cpu items reporting). DB Device.retellectEnabled is currently unreliable on Rimi prod — see roadmap RT-BACKFILL."
             >
               <span className={`w-1.5 h-1.5 rounded-full ${rtFilter ? "bg-emerald-500" : "bg-gray-300"}`} />
-              Retellect installed
+              Retellect running
             </button>
           </div>
           <div className="flex items-center gap-3 pr-6 mb-1 text-[9px] uppercase tracking-wider text-gray-400 font-semibold">
@@ -320,9 +320,14 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 return { hostId: host.hostId, hostName: host.hostName, storeName, scoNum, cpuTotal, ageSec, rtActive, rtPlanned, rtConfidence, rtHasItem, rtCpuTotal, rtPythonAgeSec, rtFresh };
               }).filter((r) => {
                 if (!rtFilter) return true;
-                // Filter on: show only hosts marked as Retellect-installed in DB
-                // (regardless of current Zabbix liveness state)
-                return r.rtPlanned === true;
+                // Hot-fix 2026-04-28: filter on live telemetry, not DB flag.
+                // `Device.retellectEnabled` is hardcoded false in seed_rimi_expand.ts
+                // for the live Rimi fleet, so DB-based filter returned empty.
+                // `rtActive` = python.cpu items fresh (<5 min) AND CPU > threshold.
+                // TODO(RT-BACKFILL): once retellectEnabled is backfilled from
+                // telemetry, switch back to `r.rtPlanned === true` so this also
+                // surfaces hosts that SHOULD run Retellect but currently don't.
+                return r.rtActive === true;
               });
 
               // Helper: secondary tiebreaker after primary group key

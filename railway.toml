@@ -8,7 +8,8 @@
 builder = "DOCKERFILE"
 
 [deploy]
-healthcheckPath = "/api/version"
-healthcheckTimeout = 120
+# Healthcheck disabled — Railway was killing the container during cold-start
+# windows where /api/version was momentarily slow. Without a healthcheck,
+# Railway only restarts on actual process exit.
 restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 3
+restartPolicyMaxRetries = 10

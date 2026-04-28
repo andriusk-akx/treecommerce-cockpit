@@ -1,5 +1,46 @@
-import type { ProcessCategory, ProcessCpuItem } from "./types";
+import type { HostInventory, ProcessCategory, ProcessCpuItem } from "./types";
 import { cached } from "./cache";
+
+/**
+ * Map raw Zabbix `host.inventory` payload to our normalised `HostInventory`.
+ *
+ * Zabbix returns `inventory` as either:
+ *   - an empty array `[]` when `inventory_mode = -1` (disabled), or
+ *   - an object whose keys are the inventory field names we asked for in
+ *     `selectInventory`.
+ *
+ * Empty strings, `"0"` and `null` are all treated as "no value" — Zabbix never
+ * returns a literal null but admins routinely save empty placeholders. When
+ * every requested field is empty the function returns `null` so the UI can
+ * cheaply distinguish "no inventory at all" from "inventory present, just
+ * missing one field".
+ *
+ * RT-CPUMODEL phase 1: read-only fallback so the dashboard can render a CPU
+ * model column even before phase 2 backfills `Device.cpuModel` from this same
+ * source.
+ */
+export function mapHostInventory(raw: unknown): HostInventory | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const pick = (key: string): string | null => {
+    const v = r[key];
+    if (typeof v !== "string") return null;
+    const trimmed = v.trim();
+    if (trimmed === "" || trimmed === "0") return null;
+    return trimmed;
+  };
+  // Prefer the longer "_full" variant for human readability — Zabbix
+  // populates `hardware` with a short label (e.g. "Intel(R) Pentium(R)") and
+  // `hardware_full` with the full CPUID string when both are configured.
+  const hardware = pick("hardware");
+  const hardwareFull = pick("hardware_full");
+  const cpuModel = hardwareFull && (!hardware || hardwareFull.length >= hardware.length)
+    ? hardwareFull
+    : (hardware ?? hardwareFull);
+  const os = pick("os_full") || pick("os");
+  if (!cpuModel && !os) return null;
+  return { cpuModel, ramBytes: null, os };
+}
 
 /**
  * Classify a process CPU Zabbix key (e.g. "python1.cpu", "spss.cpu") into the
@@ -64,14 +105,28 @@ export class ZabbixClient {
   async getHosts(): Promise<any[]> {
     // In-process dedup + 30s TTL: collapses the 4–5 host.get calls a single
     // RT page render used to fire into one Zabbix round-trip.
+    //
+    // `selectInventory` (RT-CPUMODEL phase 1): pull the hardware/OS strings so
+    // the dashboard has a runtime fallback when `Device.cpuModel` is null in
+    // the DB. Empty arrays come back for hosts whose `inventory_mode = -1`,
+    // which we handle gracefully via `mapHostInventory`.
     return cached(
       "zabbix:host.get",
-      () =>
-        this.request("host.get", {
-          output: ["hostid", "host", "name", "status", "maintenance_status"],
+      async () => {
+        const hosts = (await this.request("host.get", {
+          output: ["hostid", "host", "name", "status", "maintenance_status", "inventory_mode"],
           selectInterfaces: ["ip", "type", "available"],
           selectGroups: ["groupid", "name"],
-        }),
+          selectInventory: ["hardware", "hardware_full", "os", "os_full"],
+        })) as Array<Record<string, unknown>>;
+        // Normalise inventory in-place. Keep the original `inventory` key
+        // pointing at our derived shape so downstream code can read either
+        // `host.inventory.cpuModel` or fall through to null cleanly.
+        for (const h of hosts) {
+          h.inventory = mapHostInventory(h.inventory);
+        }
+        return hosts;
+      },
     );
   }
 
@@ -141,6 +196,72 @@ export class ZabbixClient {
         sortfield: "name",
       }),
     );
+  }
+
+  /**
+   * Per-host item health summary — counts enabled items in each Zabbix `state`
+   * value plus a sample of `error` strings for unsupported items. Unlike
+   * `getItems`, this method does NOT filter `state: 0`, so it can SEE items
+   * the agent has marked as ZBX_NOTSUPPORTED.
+   *
+   * Used by the Data Health tab to surface hosts where the local Zabbix agent
+   * is in degraded shape (e.g. broken Windows perfcounters, lacking privileges
+   * to read `\Process(*)\% Processor Time`). Without this, a host whose 22 of
+   * 24 items report `state=1` would silently show all-zero CPU on the
+   * dashboard — a misleading "Retellect not running" reading when the truth is
+   * "we have no data to make any claim".
+   *
+   * The sample errors are useful for diagnostics: the agent returns the
+   * specific failure reason ("ZBX_NOTSUPPORTED", "Cannot evaluate function",
+   * etc.) which points at whether it's a permissions issue, PDH corruption, or
+   * a missing process.
+   */
+  async getAgentHealthSummary(
+    hostIds: string[],
+  ): Promise<{ hostId: string; totalEnabled: number; supported: number; unsupported: number; sampleErrors: string[] }[]> {
+    if (hostIds.length === 0) return [];
+    const cacheKey = `zabbix:agentHealth:${hostIds.slice().sort().join(",")}`;
+    return cached(cacheKey, async () => {
+      const items = (await this.request("item.get", {
+        output: ["itemid", "hostid", "key_", "state", "error"],
+        hostids: hostIds,
+        // status: 0 only — exclude DISABLED items (admin-disabled, not the
+        // agent's fault). Crucially: NO state filter, so unsupported items
+        // come through.
+        filter: { status: 0 },
+      })) as Array<{ itemid: string; hostid: string; key_: string; state: string; error: string }>;
+      // Aggregate by host. A Map keyed by hostId, accumulating counts and
+      // capturing up to 5 sample error strings for diagnostics in the UI.
+      const byHost = new Map<string, { totalEnabled: number; supported: number; unsupported: number; sampleErrors: string[] }>();
+      for (const it of items) {
+        let entry = byHost.get(it.hostid);
+        if (!entry) {
+          entry = { totalEnabled: 0, supported: 0, unsupported: 0, sampleErrors: [] };
+          byHost.set(it.hostid, entry);
+        }
+        entry.totalEnabled += 1;
+        if (it.state === "1") {
+          entry.unsupported += 1;
+          if (entry.sampleErrors.length < 5 && it.error) entry.sampleErrors.push(it.error);
+        } else {
+          entry.supported += 1;
+        }
+      }
+      // Ensure every requested host appears in the result, even with 0 items
+      // (would happen if the host has no enabled items at all — rare but
+      // worth flagging in the UI as "no monitoring configured").
+      const result = hostIds.map((hostId) => {
+        const e = byHost.get(hostId);
+        return {
+          hostId,
+          totalEnabled: e?.totalEnabled ?? 0,
+          supported: e?.supported ?? 0,
+          unsupported: e?.unsupported ?? 0,
+          sampleErrors: e?.sampleErrors ?? [],
+        };
+      });
+      return result;
+    });
   }
 
   /** Get history data for items */
@@ -437,6 +558,11 @@ export class ZabbixClient {
         memory: null,
         disk: null,
         network: null,
+        // RT-CPUMODEL phase 1: carry inventory through from getHosts() so the
+        // dashboard can fall back to live Zabbix CPU/OS strings when the DB
+        // device row has them as null. mapHostInventory() already normalises
+        // the raw Zabbix payload to { cpuModel, ramBytes, os } | null.
+        inventory: (host.inventory ?? null) as HostInventory | null,
         items: [],
       });
     }

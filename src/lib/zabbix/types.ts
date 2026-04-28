@@ -11,6 +11,34 @@ export interface ZabbixHost {
   host: string;
   name: string;
   status: number; // 0 = monitored, 1 = unmonitored
+  /** Optional: resolved hardware inventory (RT-CPUMODEL phase 1) */
+  inventory?: HostInventory | null;
+}
+
+/**
+ * Hardware inventory derived from Zabbix `host.get` `selectInventory` output.
+ *
+ * Zabbix's inventory subsystem is opt-in per host (`inventory_mode`):
+ *   -1 → DISABLED  → API returns an empty array, all fields read as null here
+ *    0 → MANUAL    → admin filled fields by hand
+ *    1 → AUTOMATIC → discovery rules populate fields from system items
+ *
+ * The Rimi deployment currently has most hosts at `inventory_mode = -1`, which
+ * is why `cpuModel` etc. arrive as null until SP admin enables inventory mode
+ * (RT-CPUMODEL phase 2). We surface whatever IS populated as a runtime fallback
+ * for the Host Inventory and CPU Threshold Timeline tabs.
+ *
+ * `cpuModel`: prefer `inventory.hardware_full` over `inventory.hardware`
+ *   (the "_full" field is a longer human-readable string when both exist).
+ * `os`:       prefer `inventory.os_full` over `inventory.os` (same rule).
+ * `ramBytes`: Zabbix inventory does not have a dedicated RAM field — leave
+ *   null and rely on the existing live `vm.memory.size[total]` item already
+ *   plumbed via HostResources.memory.total.
+ */
+export interface HostInventory {
+  cpuModel: string | null;
+  ramBytes: number | null;
+  os: string | null;
 }
 
 /** Zabbix problem object (simplified) */
@@ -52,6 +80,12 @@ export interface HostResources {
   memory: { utilization: number; available: number; total: number; itemId: string; valueType: string } | null;
   disk: { utilization: number; path: string; itemId: string; valueType: string } | null;
   network: { inBps: number; outBps: number; inItemId: string; outItemId: string; valueType: string } | null;
+  /**
+   * Hardware inventory carried over from `host.get` (RT-CPUMODEL phase 1).
+   * `null` when the host has `inventory_mode = -1` or when none of the
+   * requested inventory fields are populated.
+   */
+  inventory: HostInventory | null;
   items: any[];
 }
 

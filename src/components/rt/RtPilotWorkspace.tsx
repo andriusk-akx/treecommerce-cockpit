@@ -55,6 +55,14 @@ export interface ZabbixHostData {
   cpu: { utilization: number; load: number } | null;
   memory: { utilization: number; totalBytes: number; availableBytes: number } | null;
   disk: { utilization: number; path: string } | null;
+  /**
+   * Hardware inventory pulled from Zabbix `host.inventory` (RT-CPUMODEL phase 1).
+   * `null` when the host has `inventory_mode = -1` or every requested field is
+   * empty. The Inventory and Timeline tabs read this as a fallback when the DB
+   * `Device.cpuModel` is null — phase 2 will backfill the DB and this fallback
+   * becomes redundant but harmless.
+   */
+  inventory: { cpuModel: string | null; ramBytes: number | null; os: string | null } | null;
 }
 
 export interface ZabbixCpuDetailItem {
@@ -112,6 +120,21 @@ export interface ZabbixCpuTrend {
   totalSamples?: number;
 }
 
+/**
+ * Per-host Zabbix item-state summary. Lets the dashboard distinguish
+ * "agent broken" (most items in `state=1` / ZBX_NOTSUPPORTED) from
+ * "process idle" (items reporting 0 normally). Populated by
+ * `ZabbixClient.getAgentHealthSummary()`.
+ */
+export interface ZabbixAgentHealth {
+  hostId: string;
+  totalEnabled: number;
+  supported: number;
+  unsupported: number;
+  /** Up to 5 sample error strings from unsupported items, for diagnostics. */
+  sampleErrors: string[];
+}
+
 export interface ZabbixData {
   status: "live" | "cached" | "unavailable";
   fetchMs: number;
@@ -124,6 +147,8 @@ export interface ZabbixData {
   procCpu?: ZabbixProcCpuItem[];
   procCpuMeta?: ZabbixProcCpuMeta;
   cpuTrends?: ZabbixCpuTrend[];
+  /** Per-host item state summary — flags hosts with broken Zabbix agents */
+  agentHealth?: ZabbixAgentHealth[];
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
@@ -268,7 +293,18 @@ export function RtPilotWorkspace({
       <div className="max-w-6xl mx-auto px-6 py-6">
         {activeTab === "overview"   && allowedSet.has("overview")   && <RtOverview pilot={pilot} zabbix={zabbix} />}
         {activeTab === "inventory"  && allowedSet.has("inventory")  && <RtInventory pilot={pilot} zabbix={zabbix} />}
-        {activeTab === "health"     && allowedSet.has("datahealth") && <RtDataHealth pilot={pilot} zabbix={zabbix} />}
+        {activeTab === "health"     && allowedSet.has("datahealth") && (
+          <RtDataHealth
+            pilot={pilot}
+            zabbix={zabbix}
+            onNavigateTab={(id) => {
+              // Only switch if the requested tab is permitted for this user;
+              // otherwise leave the active tab alone (silent no-op).
+              const tab = tabs.find((t) => t.id === id);
+              if (tab && allowedSet.has(tab.permKey)) setActiveTab(id);
+            }}
+          />
+        )}
         {activeTab === "timeline"   && allowedSet.has("timeline")   && <RtTimeline pilot={pilot} zabbix={zabbix} />}
         {activeTab === "cpu"        && allowedSet.has("comparison") && <RtCpuComparison pilot={pilot} zabbix={zabbix} />}
         {activeTab === "reference"  && allowedSet.has("reference")  && <RtReference pilot={pilot} zabbix={zabbix} />}

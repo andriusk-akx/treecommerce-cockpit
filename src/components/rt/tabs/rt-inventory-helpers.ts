@@ -366,6 +366,50 @@ export function computeCpuTotal(
   return Math.round(fallback * 10) / 10;
 }
 
+// ─── RT-CPUMODEL phase 1: hardware fallback resolution ──────────────────
+
+/**
+ * Resolve the CPU model string for a host row, preferring the DB-seeded value
+ * but falling back to live Zabbix inventory when the DB column is null/empty.
+ *
+ * Phase-1 contract:
+ *   - DB has a non-empty value          → DB wins (fast, stable, audit trail)
+ *   - DB null/empty, inventory present  → inventory.cpuModel wins
+ *   - both null/empty                   → returns the supplied placeholder
+ *
+ * "Empty" here covers: null, undefined, "", "—", "-", and the string "null"
+ * (some legacy seed scripts wrote that literal). Phase 2 (RT-CPUMODEL seed
+ * update) will backfill `Device.cpuModel` from this same Zabbix source so the
+ * fallback path becomes a no-op for the Rimi fleet.
+ */
+export function resolveCpuModel(
+  dbValue: string | null | undefined,
+  inventoryValue: string | null | undefined,
+  placeholder: string = "—",
+): string {
+  const clean = (v: string | null | undefined): string | null => {
+    if (v === null || v === undefined) return null;
+    const t = v.trim();
+    if (t === "" || t === "—" || t === "-" || t.toLowerCase() === "null") return null;
+    return t;
+  };
+  return clean(dbValue) ?? clean(inventoryValue) ?? placeholder;
+}
+
+/**
+ * Same fallback pattern as `resolveCpuModel`, applied to OS strings. Kept as a
+ * separate exported helper so callers don't accidentally pass a CPU value to
+ * an OS slot — they're identical today but may diverge (e.g. OS could need
+ * additional normalisation if Zabbix returns "Microsoft Windows...").
+ */
+export function resolveOs(
+  dbValue: string | null | undefined,
+  inventoryValue: string | null | undefined,
+  placeholder: string = "—",
+): string {
+  return resolveCpuModel(dbValue, inventoryValue, placeholder);
+}
+
 /** Convert bytes (Zabbix `vm.memory.size[total]`) to GB with safe handling. */
 export function bytesToGb(bytes: number | null | undefined): number {
   if (bytes === null || bytes === undefined) return 0;

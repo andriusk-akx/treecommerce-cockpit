@@ -3,92 +3,71 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
 import {
-  RT_FRESHNESS_THRESHOLD_SEC,
-  RT_STALE_THRESHOLD_SEC,
-  formatAgeShort,
+  determineRtStatus,
+  buildProcByHost,
+  buildRetellectProcsByHost,
+  type RtProcessStatus,
 } from "./rt-inventory-helpers";
+import {
+  classifyDataHealth,
+  groupByStore,
+  summarize,
+  diagnosisFor,
+  type DataHealthBucket,
+  type DataHealthHostRow,
+} from "./rt-data-health-helpers";
 
-// ─── Types ───────────────────────────────────────────────────────────────
-
-interface HostHealthRow {
-  /** DB device id (stable React key) */
-  id: string;
-  deviceName: string;
-  storeName: string;
-  /** Resolved Zabbix host name, if matched */
-  zabbixHostName: string | null;
-  zabbixMatched: boolean;
-  /** ms since epoch of the most recent `system.cpu.util*` sample, or null */
-  lastClockMs: number | null;
-  /** Age in seconds vs. nowMs, or null when lastClock is missing */
-  ageSec: number | null;
-  /** Coarse bucket label used for grouping */
-  bucket: AgeBucket;
-}
-
-type AgeBucket =
-  | "live" //          < 5 min
-  | "recent" //        5–30 min
-  | "stale-1h" //      30–60 min
-  | "stale-6h" //      1–6 h
-  | "stale-24h" //     6–24 h
-  | "stale-older" //   ≥ 24 h
-  | "silent" //        zabbix-matched but never reported
-  | "unmatched"; //    DB device not found in Zabbix at all
-
-interface HealthStats {
-  total: number;
-  matched: number;
-  unmatched: number;
-  live: number;
-  recent: number;
-  staleTotal: number;
-  silent: number;
-  /** Histogram bucket counts for the age distribution chart */
-  histogram: Record<AgeBucket, number>;
-}
-
-// ─── Component ───────────────────────────────────────────────────────────
-
+/**
+ * MON-1 Data Health tab.
+ *
+ * Why this view exists:
+ *   A host where the local Zabbix agent reports most items as
+ *   `ZBX_NOTSUPPORTED` looks identical to a host where Retellect is genuinely
+ *   idle — both read as "0 % CPU" on every other tab. This view separates
+ *   those two failure modes so a monitoring gap on one host doesn't pollute
+ *   capacity findings (false negative: "looks like Retellect is off, actually
+ *   we just can't see anything from this host").
+ *
+ *   Per-store grouping with sibling-contrast detection makes host-level
+ *   issues obvious: when a single store has both a healthy host and a
+ *   broken host, the problem is almost certainly host-side (perfcounter
+ *   privileges, corrupt PDH, stuck WMI provider) — not site-wide.
+ */
 export function RtDataHealth({
   pilot,
   zabbix,
+  onNavigateTab,
 }: {
   pilot: RtPilotData;
   zabbix: ZabbixData;
+  /** Switch to another tab in the parent workspace (e.g. "inventory"). */
+  onNavigateTab?: (tabId: string) => void;
 }) {
-  // Client-only clock to keep SSR output deterministic; refresh every 30s so
-  // the view ages in place while the user reads it. The initial tick is
-  // scheduled via setTimeout(0) so the setState happens inside a callback
-  // rather than synchronously in the effect body — satisfies the React 19
-  // `react-hooks/set-state-in-effect` rule while preserving the same UX.
-  const [nowMs, setNowMs] = useState<number>(0);
+  // Lightweight toast for the placeholder runbook button. Absolute-positioned
+  // so it doesn't shift the layout, and auto-dismisses after 3 s.
+  const [toast, setToast] = useState<string | null>(null);
   useEffect(() => {
-    const firstTick = setTimeout(() => setNowMs(Date.now()), 0);
-    const id = setInterval(() => setNowMs(Date.now()), 30_000);
-    return () => {
-      clearTimeout(firstTick);
-      clearInterval(id);
-    };
-  }, []);
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(id);
+  }, [toast]);
 
-  // Build one row per DB device, join to Zabbix, pick the freshest CPU sample.
-  const rows = useMemo<HostHealthRow[]>(() => {
+  // Group filter chips: All / Issues only / Mixed stores.
+  const [groupFilter, setGroupFilter] = useState<"all" | "issues" | "mixed">(
+    "all",
+  );
+
+  // Build host rows: join DB devices to Zabbix hosts and agent-health entries.
+  const rows = useMemo<DataHealthHostRow[]>(() => {
     const zabbixByName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
+    const agentHealthByHostId = new Map(
+      (zabbix.agentHealth ?? []).map((a) => [a.hostId, a]),
+    );
 
-    // Per-host: newest lastClock across any system.cpu.util* or cpu.load item
+    // Newest CPU sample per host — surfaces in the "Last update" column.
     const newestClockByHostId = new Map<string, number>();
     for (const item of zabbix.cpuDetail) {
       if (!item.lastClock) continue;
-      // Only consider items we actually care about for freshness. The cpuDetail
-      // payload already only contains system.cpu.* keys, but we keep the check
-      // explicit so a future schema tweak does not silently expand the set.
-      if (
-        !item.key.startsWith("system.cpu.util") &&
-        item.key !== "system.cpu.load[,avg1]"
-      ) {
-        continue;
-      }
       const ts = Date.parse(item.lastClock);
       if (!Number.isFinite(ts) || ts <= 0) continue;
       const prev = newestClockByHostId.get(item.hostId);
@@ -97,428 +76,436 @@ export function RtDataHealth({
       }
     }
 
-    const out: HostHealthRow[] = [];
+    // RT-status inputs (mirrors RtInventory's logic so the "Retellect" pill
+    // here agrees with the Inventory tab).
+    const procByHost = buildProcByHost(
+      (zabbix.procItems || []).map((p) => ({
+        hostId: p.hostId,
+        key: p.key,
+        name: p.name,
+        value: p.value,
+      })),
+    );
+    const retellectProcsByHost = buildRetellectProcsByHost(
+      (zabbix.procCpu || []).map((p) => ({
+        hostId: p.hostId,
+        key: p.key,
+        name: p.name,
+        procName: p.procName,
+        category: p.category,
+        cpuValue: p.cpuValue,
+        lastClockUnix: p.lastClockUnix,
+      })),
+    );
+    const hasProcCpuFeed = (zabbix.procCpu?.length ?? 0) > 0;
+
+    const out: DataHealthHostRow[] = [];
     for (const device of pilot.devices) {
       const zHost =
         zabbixByName.get(device.sourceHostKey || "") ||
         zabbixByName.get(device.name);
+      const matched = !!zHost;
+      const entry = zHost ? agentHealthByHostId.get(zHost.hostId) : undefined;
+      const bucket: DataHealthBucket = classifyDataHealth(matched, entry);
+
+      const procEntry = zHost ? procByHost.get(zHost.hostId) : undefined;
+      const pythonProcs = zHost ? retellectProcsByHost.get(zHost.hostId) : undefined;
+      const retellectProcsForStatus = hasProcCpuFeed && zHost
+        ? (pythonProcs ?? [])
+        : undefined;
+      const rt = determineRtStatus({
+        retellectEnabled: device.retellectEnabled,
+        zabbixHostExists: matched,
+        procMatch: procEntry ? { count: procEntry.count } : null,
+        retellectProcs: retellectProcsForStatus,
+      });
+      const rtStatus: RtProcessStatus = rt.status;
+
       const lastClockMs = zHost
         ? newestClockByHostId.get(zHost.hostId) ?? null
         : null;
-      const ageSec =
-        nowMs > 0 && lastClockMs !== null
-          ? Math.max(0, Math.floor((nowMs - lastClockMs) / 1000))
-          : null;
+
       out.push({
-        id: device.id,
-        deviceName: device.name,
+        deviceId: device.id,
+        hostName: device.name,
         storeName: device.storeName,
         zabbixHostName: zHost ? zHost.hostName : null,
-        zabbixMatched: !!zHost,
-        lastClockMs,
-        ageSec,
-        bucket: classifyBucket(!!zHost, lastClockMs, ageSec),
+        zabbixMatched: matched,
+        retellectEnabled: device.retellectEnabled,
+        rtStatus,
+        supported: entry?.supported ?? 0,
+        unsupported: entry?.unsupported ?? 0,
+        totalEnabled: entry?.totalEnabled ?? 0,
+        bucket,
+        lastUpdate: lastClockMs ? new Date(lastClockMs).toISOString() : null,
       });
     }
     return out;
-  }, [pilot, zabbix, nowMs]);
+  }, [pilot, zabbix]);
 
-  const stats = useMemo<HealthStats>(() => {
-    const histogram: Record<AgeBucket, number> = {
-      live: 0,
-      recent: 0,
-      "stale-1h": 0,
-      "stale-6h": 0,
-      "stale-24h": 0,
-      "stale-older": 0,
-      silent: 0,
-      unmatched: 0,
-    };
-    let matched = 0;
-    for (const r of rows) {
-      histogram[r.bucket] += 1;
-      if (r.zabbixMatched) matched += 1;
-    }
-    const staleTotal =
-      histogram["stale-1h"] +
-      histogram["stale-6h"] +
-      histogram["stale-24h"] +
-      histogram["stale-older"];
-    return {
-      total: rows.length,
-      matched,
-      unmatched: histogram.unmatched,
-      live: histogram.live,
-      recent: histogram.recent,
-      staleTotal,
-      silent: histogram.silent,
-      histogram,
-    };
-  }, [rows]);
+  const summary = useMemo(() => summarize(rows), [rows]);
+  const groups = useMemo(() => groupByStore(rows), [rows]);
 
-  // Derived: sorted lists for the "Silent hosts" and "Stale hosts" panels.
-  // Sort stale hosts oldest-first (most urgent at the top); silent hosts are
-  // alphabetized by device name since they have no freshness to compare.
-  const silentHosts = useMemo(
-    () =>
-      rows
-        .filter((r) => r.bucket === "silent")
-        .sort((a, b) =>
-          a.deviceName.localeCompare(b.deviceName, undefined, { numeric: true })
-        ),
-    [rows]
-  );
-  const staleHosts = useMemo(
-    () =>
-      rows
-        .filter(
-          (r) =>
-            r.bucket === "stale-1h" ||
-            r.bucket === "stale-6h" ||
-            r.bucket === "stale-24h" ||
-            r.bucket === "stale-older"
-        )
-        .sort((a, b) => (b.ageSec ?? 0) - (a.ageSec ?? 0)),
-    [rows]
-  );
-  const unmatchedHosts = useMemo(
-    () =>
-      rows
-        .filter((r) => r.bucket === "unmatched")
-        .sort((a, b) =>
-          a.deviceName.localeCompare(b.deviceName, undefined, { numeric: true })
-        ),
-    [rows]
-  );
+  const visibleGroups = useMemo(() => {
+    if (groupFilter === "issues") return groups.filter((g) => g.hasIssue);
+    if (groupFilter === "mixed") return groups.filter((g) => g.isMixed);
+    return groups;
+  }, [groups, groupFilter]);
 
-  const maxHistCount = Math.max(
-    1,
-    stats.histogram.live,
-    stats.histogram.recent,
-    stats.histogram["stale-1h"],
-    stats.histogram["stale-6h"],
-    stats.histogram["stale-24h"],
-    stats.histogram["stale-older"]
-  );
-
-  // ─── Render ──────────────────────────────────────────────────────────
+  // ─── Render ────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
-      {/* Summary tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        <HealthTile label="DB devices" value={stats.total} tone="neutral" />
-        <HealthTile
-          label="Zabbix matched"
-          value={`${stats.matched} / ${stats.total}`}
-          tone={stats.matched === stats.total ? "ok" : "warn"}
-          hint="DB host key resolved to a monitored Zabbix host"
+      {/* Why-this-view banner */}
+      <div className="rounded border border-amber-200 bg-amber-50 px-5 py-4 border-l-4 border-l-amber-400">
+        <h3 className="font-semibold text-sm text-amber-900 mb-1">
+          Why this view exists
+        </h3>
+        <p className="text-sm text-amber-900/90 leading-relaxed">
+          A host with no CPU data is <em>not</em> the same as a host where
+          Retellect is off. Some Rimi SCOs have local Zabbix agents in a
+          degraded state where most <code className="font-mono">perf_counter[*]</code>{" "}
+          items report <code className="font-mono">ZBX_NOTSUPPORTED</code> —
+          the dashboard would otherwise read those as 0 % Retellect activity,
+          a false negative. This view surfaces monitoring gaps separately so
+          they don&apos;t pollute capacity findings.
+        </p>
+      </div>
+
+      {/* 4 KPI cards — healthy / partial / broken / unenrolled */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <KpiCard
+          label="Healthy"
+          value={summary.healthy}
+          tone="ok"
+          hint="Agent reporting normally — < 25 % items unsupported."
         />
-        <HealthTile
-          label="Live (<5 min)"
-          value={stats.live}
-          tone={stats.live > 0 ? "ok" : "warn"}
-          hint={`system.cpu.util sample < ${Math.round(
-            RT_FRESHNESS_THRESHOLD_SEC / 60
-          )} min old`}
+        <KpiCard
+          label="Partial"
+          value={summary.partial}
+          tone="warn"
+          hint="25–50 % items unsupported — partial visibility into per-process CPU."
         />
-        <HealthTile
-          label="Recent (5–30 min)"
-          value={stats.recent}
-          tone={stats.recent > 0 ? "warn" : "neutral"}
-          hint="Reporting but outside live window"
+        <KpiCard
+          label="Broken"
+          value={summary.broken}
+          tone="alert"
+          hint="> 50 % items in ZBX_NOTSUPPORTED — host-side agent / perfcounter problem. Dashboard numbers from these hosts NOT reliable."
         />
-        <HealthTile
-          label="Stale (>30 min)"
-          value={stats.staleTotal}
-          tone={stats.staleTotal > 0 ? "warn" : "neutral"}
-          hint={`Last sample ≥ ${Math.round(
-            RT_STALE_THRESHOLD_SEC / 60
-          )} min old`}
-        />
-        <HealthTile
-          label="Silent (never)"
-          value={stats.silent}
-          tone={stats.silent > 0 ? "alert" : "neutral"}
-          hint="Zabbix-matched but lastClock is 0 — item configured, never reported"
+        <KpiCard
+          label="Unenrolled"
+          value={summary.unenrolled}
+          tone="neutral"
+          hint="DB device not registered in Zabbix monitoring, or template empty."
         />
       </div>
 
-      {/* Methodology note */}
-      <div className="rounded border border-gray-200 bg-white px-4 py-3 text-xs text-gray-600">
-        <div className="font-medium text-gray-800 mb-1">How we compute this</div>
-        <ul className="list-disc list-inside space-y-0.5">
-          <li>
-            Freshness = age of the latest <code className="font-mono">system.cpu.util*</code>{" "}
-            or <code className="font-mono">system.cpu.load[,avg1]</code>{" "}
-            sample vs. wall clock.
-          </li>
-          <li>
-            Item delay is 1m / 5m — anything &gt;
-            {Math.round(RT_STALE_THRESHOLD_SEC / 60)} min is treated as
-            &ldquo;stale&rdquo; (most likely agent / proxy lag).
-          </li>
-          <li>
-            &ldquo;Silent&rdquo; = Zabbix host found, but the CPU item&apos;s
-            lastClock = 0 → the configuration is there, the telemetry isn&apos;t.
-          </li>
-        </ul>
-      </div>
-
-      {/* Age distribution histogram */}
-      <section className="rounded border border-gray-200 bg-white p-4">
-        <header className="mb-3">
-          <h3 className="text-sm font-semibold text-gray-900">
-            Age distribution
-          </h3>
-          <p className="text-xs text-gray-500">
-            How many hosts fall into each time bucket — bar height is
-            proportional to host count in that bucket.
-          </p>
-        </header>
-        <div className="grid grid-cols-6 gap-3">
-          <HistogramBar
-            label="<5m"
-            sublabel="live"
-            count={stats.histogram.live}
-            max={maxHistCount}
-            tone="ok"
-          />
-          <HistogramBar
-            label="5–30m"
-            sublabel="recent"
-            count={stats.histogram.recent}
-            max={maxHistCount}
-            tone="warn-soft"
-          />
-          <HistogramBar
-            label="30–60m"
-            sublabel="stale"
-            count={stats.histogram["stale-1h"]}
-            max={maxHistCount}
-            tone="warn"
-          />
-          <HistogramBar
-            label="1–6h"
-            sublabel="stale"
-            count={stats.histogram["stale-6h"]}
-            max={maxHistCount}
-            tone="warn"
-          />
-          <HistogramBar
-            label="6–24h"
-            sublabel="very stale"
-            count={stats.histogram["stale-24h"]}
-            max={maxHistCount}
-            tone="alert-soft"
-          />
-          <HistogramBar
-            label="≥24h"
-            sublabel="very stale"
-            count={stats.histogram["stale-older"]}
-            max={maxHistCount}
-            tone="alert"
-          />
+      {/* Per-store breakdown header + filter chips */}
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm text-gray-900">
+          Per-store breakdown
+        </h3>
+        <div className="flex items-center gap-2 text-xs">
+          {(
+            [
+              { id: "all", label: "All" },
+              { id: "issues", label: "Issues only" },
+              { id: "mixed", label: "Mixed stores" },
+            ] as const
+          ).map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setGroupFilter(f.id)}
+              className={`px-3 py-1 rounded-full font-medium transition ${
+                groupFilter === f.id
+                  ? "bg-blue-50 text-blue-700"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
-      </section>
+      </div>
 
-      {/* Silent hosts */}
-      <HostListSection
-        title={`Silent (${silentHosts.length})`}
-        subtitle="Zabbix host exists, but the CPU item's lastClock = 0 — never sent a value."
-        emptyMessage="None — every matched host has sent a CPU sample at least once."
-        rows={silentHosts}
-        showAge={false}
-      />
+      {/* Per-store groups */}
+      {visibleGroups.length === 0 ? (
+        <div className="rounded border border-gray-200 bg-white px-5 py-8 text-center text-xs text-gray-400">
+          {groupFilter === "mixed"
+            ? "No stores currently show mixed (healthy + broken) hosts. Sibling-contrast diagnosis is unavailable until at least one store has both."
+            : groupFilter === "issues"
+              ? "No stores have any agent issues. Every host is reporting normally or has no monitoring entry."
+              : "No hosts in this pilot."}
+        </div>
+      ) : (
+        visibleGroups.map((g) => (
+          <section
+            key={g.storeName}
+            className="rounded border border-gray-200 bg-white overflow-hidden"
+          >
+            <header className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+              <div className="flex items-center gap-3">
+                <span className="font-semibold text-sm text-gray-900">
+                  {g.storeName}
+                </span>
+                <span className="text-xs text-gray-500">
+                  {g.hosts.length} host{g.hosts.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              {g.isMixed && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                  Mixed — host-level issue
+                </span>
+              )}
+            </header>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-white text-gray-500 uppercase text-[10px] tracking-wide">
+                  <tr>
+                    <th className="text-left py-2 px-3 font-medium">Host</th>
+                    <th className="text-center py-2 px-3 font-medium">Agent</th>
+                    <th className="text-center py-2 px-3 font-medium">
+                      Retellect
+                    </th>
+                    <th className="text-center py-2 px-3 font-medium">
+                      Items OK
+                    </th>
+                    <th className="text-left py-2 px-3 font-medium">
+                      Last update
+                    </th>
+                    <th className="text-left py-2 px-3 font-medium">
+                      Diagnosis
+                    </th>
+                    <th className="text-right py-2 px-3 font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {g.hosts.map((h) => (
+                    <tr
+                      key={h.deviceId}
+                      className="border-t border-gray-100 align-top"
+                    >
+                      <td className="py-3 px-3 font-mono text-xs text-gray-900">
+                        {h.hostName}
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        <AgentPill bucket={h.bucket} />
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        <RtPill status={h.rtStatus} />
+                      </td>
+                      <td className="py-3 px-3 text-center text-xs">
+                        {h.totalEnabled > 0 ? (
+                          <span
+                            className={`font-medium ${
+                              h.supported < h.totalEnabled
+                                ? "text-amber-600"
+                                : "text-emerald-600"
+                            }`}
+                          >
+                            {h.supported}/{h.totalEnabled}{" "}
+                            <span className="text-[10px] font-normal text-gray-400">
+                              supported
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-xs text-gray-500">
+                        {h.lastUpdate
+                          ? new Date(h.lastUpdate).toLocaleString("lt-LT")
+                          : "—"}
+                      </td>
+                      <td className="py-3 px-3 text-xs text-gray-700 max-w-md leading-relaxed">
+                        {diagnosisFor(h.bucket)}
+                      </td>
+                      <td className="py-3 px-3 text-right whitespace-nowrap">
+                        <ActionCell
+                          host={h}
+                          onAction={() =>
+                            setToast(
+                              `Runbook for ${h.hostName} not yet wired`,
+                            )
+                          }
+                          onViewInventory={
+                            onNavigateTab
+                              ? () => onNavigateTab("inventory")
+                              : undefined
+                          }
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ))
+      )}
 
-      {/* Stale hosts */}
-      <HostListSection
-        title={`Stale (${staleHosts.length})`}
-        subtitle={`Latest sample is > ${Math.round(
-          RT_STALE_THRESHOLD_SEC / 60
-        )} min old — sorted oldest first.`}
-        emptyMessage="None — every matched host has reported within the last 30 min."
-        rows={staleHosts}
-        showAge
-      />
-
-      {/* Unmatched (DB-only) hosts */}
-      {unmatchedHosts.length > 0 && (
-        <HostListSection
-          title={`Unmatched (${unmatchedHosts.length})`}
-          subtitle="DB device cannot be matched to a Zabbix host — check the sourceHostKey / hostname mapping."
-          emptyMessage=""
-          rows={unmatchedHosts}
-          showAge={false}
-        />
+      {/* Toast (placeholder runbook target) */}
+      {toast && (
+        <div
+          className="fixed bottom-6 right-6 z-50 rounded-lg shadow-lg bg-gray-900 text-white text-sm px-4 py-3 max-w-sm"
+          role="status"
+          aria-live="polite"
+        >
+          {toast}
+        </div>
       )}
     </div>
   );
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────
+// ─── Sub-components ────────────────────────────────────────────────────────
 
-function classifyBucket(
-  matched: boolean,
-  lastClockMs: number | null,
-  ageSec: number | null
-): AgeBucket {
-  if (!matched) return "unmatched";
-  if (lastClockMs === null) return "silent";
-  if (ageSec === null) return "silent";
-  if (ageSec < RT_FRESHNESS_THRESHOLD_SEC) return "live";
-  if (ageSec < RT_STALE_THRESHOLD_SEC) return "recent";
-  if (ageSec < 60 * 60) return "stale-1h";
-  if (ageSec < 6 * 60 * 60) return "stale-6h";
-  if (ageSec < 24 * 60 * 60) return "stale-24h";
-  return "stale-older";
-}
-
-// ─── Sub-components ──────────────────────────────────────────────────────
-
-type HealthTone = "ok" | "warn" | "alert" | "neutral";
-
-function HealthTile({
+function KpiCard({
   label,
   value,
   tone,
   hint,
 }: {
   label: string;
-  value: number | string;
-  tone: HealthTone;
-  hint?: string;
+  value: number;
+  tone: "ok" | "warn" | "alert" | "neutral";
+  hint: string;
 }) {
-  const toneClass =
+  const valueColor =
     tone === "ok"
-      ? "text-emerald-700 border-emerald-200 bg-emerald-50"
+      ? "text-emerald-600"
       : tone === "warn"
-        ? "text-amber-700 border-amber-200 bg-amber-50"
+        ? "text-amber-600"
         : tone === "alert"
-          ? "text-red-700 border-red-200 bg-red-50"
-          : "text-gray-700 border-gray-200 bg-white";
+          ? "text-red-600"
+          : "text-gray-500";
   return (
-    <div className={`rounded border ${toneClass} px-3 py-2`} title={hint}>
-      <div className="text-[10px] uppercase tracking-wide text-gray-500">
+    <div
+      className="rounded-lg border border-gray-200 bg-white p-4"
+      title={hint}
+    >
+      <div className={`text-3xl font-semibold ${valueColor}`}>{value}</div>
+      <div className="text-xs uppercase tracking-wide text-gray-500 mt-1">
         {label}
       </div>
-      <div className="text-lg font-semibold">{value}</div>
-      {hint && (
-        <div className="text-[10px] text-gray-500 leading-tight mt-0.5">
-          {hint}
-        </div>
-      )}
-    </div>
-  );
-}
-
-type HistogramTone =
-  | "ok"
-  | "warn-soft"
-  | "warn"
-  | "alert-soft"
-  | "alert";
-
-function HistogramBar({
-  label,
-  sublabel,
-  count,
-  max,
-  tone,
-}: {
-  label: string;
-  sublabel: string;
-  count: number;
-  max: number;
-  tone: HistogramTone;
-}) {
-  // Percentage of the tallest bar; min 2% so a single-host bucket is still visible.
-  const pct = count === 0 ? 0 : Math.max(2, Math.round((count / max) * 100));
-  const barClass =
-    tone === "ok"
-      ? "bg-emerald-500"
-      : tone === "warn-soft"
-        ? "bg-amber-300"
-        : tone === "warn"
-          ? "bg-amber-500"
-          : tone === "alert-soft"
-            ? "bg-red-400"
-            : "bg-red-600";
-  return (
-    <div className="flex flex-col items-center">
-      <div className="h-20 w-full flex items-end">
-        <div
-          className={`w-full rounded-t ${barClass}`}
-          style={{ height: `${pct}%` }}
-          aria-label={`${label}: ${count} hosts`}
-        />
+      <div className="text-[11px] text-gray-400 mt-1 leading-tight">
+        {hint}
       </div>
-      <div className="mt-1 text-xs font-semibold text-gray-900">{count}</div>
-      <div className="text-[10px] text-gray-500 leading-tight">{label}</div>
-      <div className="text-[10px] text-gray-400 leading-tight">{sublabel}</div>
     </div>
   );
 }
 
-function HostListSection({
-  title,
-  subtitle,
-  emptyMessage,
-  rows,
-  showAge,
-}: {
-  title: string;
-  subtitle: string;
-  emptyMessage: string;
-  rows: HostHealthRow[];
-  showAge: boolean;
-}) {
+function AgentPill({ bucket }: { bucket: DataHealthBucket }) {
+  const cfg: Record<
+    DataHealthBucket,
+    { label: string; classes: string }
+  > = {
+    healthy: {
+      label: "Healthy",
+      classes: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    },
+    partial: {
+      label: "Partial",
+      classes: "bg-amber-50 text-amber-700 border-amber-200",
+    },
+    broken: {
+      label: "Broken",
+      classes: "bg-red-50 text-red-700 border-red-200",
+    },
+    "no-data": {
+      label: "No data",
+      classes: "bg-gray-100 text-gray-500 border-gray-200",
+    },
+    unmatched: {
+      label: "Unenrolled",
+      classes: "bg-gray-100 text-gray-500 border-gray-200",
+    },
+  };
+  const c = cfg[bucket];
   return (
-    <section className="rounded border border-gray-200 bg-white">
-      <header className="px-4 py-3 border-b border-gray-100">
-        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-        <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>
-      </header>
-      {rows.length === 0 ? (
-        <div className="px-4 py-6 text-xs text-gray-400">{emptyMessage}</div>
-      ) : (
-        <div className="max-h-72 overflow-y-auto">
-          <table className="w-full text-xs">
-            <thead className="bg-gray-50 text-gray-500 uppercase text-[10px] tracking-wide">
-              <tr>
-                <th className="text-left px-4 py-2 font-medium">Device</th>
-                <th className="text-left px-4 py-2 font-medium">Store</th>
-                <th className="text-left px-4 py-2 font-medium">
-                  Zabbix host
-                </th>
-                {showAge && (
-                  <th className="text-right px-4 py-2 font-medium">
-                    Last sample
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id} className="border-t border-gray-100">
-                  <td className="px-4 py-2 font-medium text-gray-900">
-                    {r.deviceName}
-                  </td>
-                  <td className="px-4 py-2 text-gray-600">{r.storeName}</td>
-                  <td className="px-4 py-2 text-gray-500 font-mono">
-                    {r.zabbixHostName ?? "—"}
-                  </td>
-                  {showAge && (
-                    <td className="px-4 py-2 text-right text-gray-700">
-                      {formatAgeShort(r.ageSec)}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${c.classes}`}
+    >
+      {c.label}
+    </span>
+  );
+}
+
+function RtPill({ status }: { status: RtProcessStatus }) {
+  if (status === "running") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+        Running
+      </span>
+    );
+  }
+  if (status === "stopped") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-50 text-red-600">
+        <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+        Stopped
+      </span>
+    );
+  }
+  if (status === "not-installed") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-gray-50 text-gray-400">
+        <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
+        N/A
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-600">
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+      Unknown
+    </span>
+  );
+}
+
+function ActionCell({
+  host,
+  onAction,
+  onViewInventory,
+}: {
+  host: DataHealthHostRow;
+  onAction: () => void;
+  onViewInventory?: () => void;
+}) {
+  // Healthy hosts get no action — they're not actionable.
+  if (host.bucket === "healthy") {
+    return <span className="text-xs text-gray-400">No action needed</span>;
+  }
+  // Action label depends on the failure mode.
+  const label =
+    host.bucket === "broken"
+      ? "Open runbook →"
+      : host.bucket === "partial"
+        ? "Show unsupported items →"
+        : host.bucket === "unmatched"
+          ? "Enroll host →"
+          : "Open runbook →"; // no-data fallback
+  return (
+    <div className="flex items-center justify-end gap-3">
+      {host.bucket === "broken" && onViewInventory && (
+        <button
+          type="button"
+          onClick={onViewInventory}
+          className="text-xs text-blue-600 hover:text-blue-800 underline-offset-2 hover:underline"
+          title="Jump to this host in the Host Inventory tab"
+        >
+          View in Inventory →
+        </button>
       )}
-    </section>
+      <button
+        type="button"
+        onClick={onAction}
+        className="border border-gray-200 bg-white text-gray-700 text-xs font-medium px-2.5 py-1 rounded hover:bg-gray-50 transition"
+      >
+        {label}
+      </button>
+    </div>
   );
 }

@@ -54,6 +54,11 @@ describe("categorise", () => {
     expect(categorise("vm")).toBe("system");
     expect(categorise("vmware-vmx")).toBe("system");
   });
+  it("classifies besclient (BigFix endpoint mgmt) as system", () => {
+    // Added 2026-04-28 after SP testlab snapshot showed besclient running
+    // with multiple instances at ~3% per core on SCO hosts.
+    expect(categorise("besclient")).toBe("system");
+  });
   it("returns null for unknown procs (cs300sd, NHSTW32, udm)", () => {
     expect(categorise("cs300sd")).toBeNull();
     expect(categorise("nhstw32")).toBeNull();

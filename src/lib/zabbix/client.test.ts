@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { classifyProcessKey, ZabbixClient } from "./client";
+import { classifyProcessKey, mapHostInventory, ZabbixClient } from "./client";
 import { invalidateCache } from "./cache";
 
 describe("classifyProcessKey", () => {
@@ -62,6 +62,64 @@ describe("classifyProcessKey", () => {
     expect(classifyProcessKey("Python1.cpu").category).toBe("retellect");
     expect(classifyProcessKey("SPSS.cpu").category).toBe("sco");
     expect(classifyProcessKey("Sqlservr.cpu").category).toBe("db");
+  });
+});
+
+// ─── mapHostInventory (RT-CPUMODEL phase 1) ───────────────────
+
+describe("mapHostInventory", () => {
+  it("returns null for an empty array (Zabbix's representation of inventory_mode=-1)", () => {
+    expect(mapHostInventory([])).toBeNull();
+  });
+
+  it("returns null for null/undefined/non-objects", () => {
+    expect(mapHostInventory(null)).toBeNull();
+    expect(mapHostInventory(undefined)).toBeNull();
+    expect(mapHostInventory("string")).toBeNull();
+    expect(mapHostInventory(42)).toBeNull();
+  });
+
+  it("returns null when every requested field is empty/blank/'0'", () => {
+    expect(mapHostInventory({ hardware: "", hardware_full: "", os: "", os_full: "" })).toBeNull();
+    expect(mapHostInventory({ hardware: "0", os: "0" })).toBeNull();
+    expect(mapHostInventory({})).toBeNull();
+  });
+
+  it("picks `hardware` when only the short field is populated", () => {
+    const r = mapHostInventory({ hardware: "Intel Atom", os: "" });
+    expect(r).toEqual({ cpuModel: "Intel Atom", ramBytes: null, os: null });
+  });
+
+  it("prefers `hardware_full` when it is populated and at least as long as `hardware`", () => {
+    const r = mapHostInventory({ hardware: "Intel", hardware_full: "Intel(R) Pentium(R) CPU G4400 @ 3.30GHz" });
+    expect(r?.cpuModel).toBe("Intel(R) Pentium(R) CPU G4400 @ 3.30GHz");
+  });
+
+  it("falls back to `hardware` when `hardware_full` is shorter (rare but seen)", () => {
+    const r = mapHostInventory({ hardware: "Intel(R) Pentium(R) Long string", hardware_full: "Short" });
+    expect(r?.cpuModel).toBe("Intel(R) Pentium(R) Long string");
+  });
+
+  it("prefers `os_full` over `os` when both are populated", () => {
+    const r = mapHostInventory({ hardware: "Intel", os: "Win10", os_full: "Microsoft Windows 10 Pro 22H2" });
+    expect(r?.os).toBe("Microsoft Windows 10 Pro 22H2");
+  });
+
+  it("returns the inventory shape with ramBytes always null (no inventory ram field)", () => {
+    const r = mapHostInventory({ hardware: "Intel", os: "Win10" });
+    expect(r?.ramBytes).toBeNull();
+  });
+
+  it("trims whitespace on string fields", () => {
+    const r = mapHostInventory({ hardware: "  Intel Xeon  ", os: "  Linux  " });
+    expect(r?.cpuModel).toBe("Intel Xeon");
+    expect(r?.os).toBe("Linux");
+  });
+
+  it("survives unexpected non-string field values without throwing", () => {
+    const r = mapHostInventory({ hardware: 42 as unknown as string, os: null as unknown as string, os_full: "Linux" });
+    expect(r?.cpuModel).toBeNull();
+    expect(r?.os).toBe("Linux");
   });
 });
 

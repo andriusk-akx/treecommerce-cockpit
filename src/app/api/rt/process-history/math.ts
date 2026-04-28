@@ -40,12 +40,21 @@ export function normalizeProcName(name: string): string {
 /**
  * Map a normalised process name to the user-facing category.
  * Returns null for processes the cockpit doesn't track (peripheral drivers).
+ *
+ * `besclient` (IBM BigFix endpoint management client) was added 2026-04-28
+ * after a SP testlab snapshot revealed it consistently consuming CPU on
+ * SCO hosts. BigFix is a SP-stack standard so it almost certainly runs on
+ * the Rimi prod fleet too; categorising it here shrinks the "Other" bucket
+ * by attributing the cycles to the System category. Awaiting prod snapshot
+ * before deciding whether to also categorise teamviewer / vmware-vmx-related
+ * processes / Defender (MsMpEng); those decisions live in CAT-2/CAT-3 if
+ * needed.
  */
 export function categorise(procName: string): Category | null {
   if (/^python\d*$/.test(procName)) return "retellect";
   if (procName === "spss" || procName === "sp.sss" || procName === "sp") return "scoApp";
   if (procName === "sql" || procName === "sqlservr") return "db";
-  if (procName === "vm" || procName === "vmware-vmx") return "system";
+  if (procName === "vm" || procName === "vmware-vmx" || procName === "besclient") return "system";
   return null;
 }
 

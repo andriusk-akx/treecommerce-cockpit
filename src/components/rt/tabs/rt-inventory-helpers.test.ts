@@ -13,6 +13,8 @@ import {
   computeCpuTotal,
   bytesToGb,
   computeConnectionStats,
+  resolveCpuModel,
+  resolveOs,
   type HostSortable,
   type ConnectionStatsInput,
   type RtProcessStatus,
@@ -746,6 +748,75 @@ describe("resolvePeriodDays", () => {
     expect(resolvePeriodDays("abc")).toBe(14);
     expect(resolvePeriodDays("0")).toBe(14);
     expect(resolvePeriodDays("-5")).toBe(14);
+  });
+});
+
+// ─── resolveCpuModel / resolveOs (RT-CPUMODEL phase 1) ───────────────
+
+describe("resolveCpuModel", () => {
+  it("prefers DB value when both are present", () => {
+    expect(resolveCpuModel("Intel Xeon E3-1220", "Intel(R) generic")).toBe("Intel Xeon E3-1220");
+  });
+
+  it("falls back to inventory value when DB is null", () => {
+    expect(resolveCpuModel(null, "Intel(R) Pentium(R) G4400")).toBe("Intel(R) Pentium(R) G4400");
+  });
+
+  it("falls back to inventory value when DB is undefined", () => {
+    expect(resolveCpuModel(undefined, "Intel Atom")).toBe("Intel Atom");
+  });
+
+  it("falls back to inventory value when DB is empty string", () => {
+    expect(resolveCpuModel("", "AMD Ryzen 5")).toBe("AMD Ryzen 5");
+  });
+
+  it("falls back to inventory value when DB is em-dash placeholder", () => {
+    expect(resolveCpuModel("—", "Intel Core i5")).toBe("Intel Core i5");
+  });
+
+  it("falls back to inventory value when DB is hyphen placeholder", () => {
+    expect(resolveCpuModel("-", "Intel Core i7")).toBe("Intel Core i7");
+  });
+
+  it("falls back to inventory value when DB is the literal string 'null'", () => {
+    expect(resolveCpuModel("null", "Intel Core i9")).toBe("Intel Core i9");
+    expect(resolveCpuModel("NULL", "Intel Core i9")).toBe("Intel Core i9");
+  });
+
+  it("returns placeholder when both DB and inventory are null/empty", () => {
+    expect(resolveCpuModel(null, null)).toBe("—");
+    expect(resolveCpuModel(undefined, undefined)).toBe("—");
+    expect(resolveCpuModel("", "")).toBe("—");
+    expect(resolveCpuModel("—", null)).toBe("—");
+  });
+
+  it("respects a custom placeholder", () => {
+    expect(resolveCpuModel(null, null, "Unknown")).toBe("Unknown");
+    expect(resolveCpuModel("", "", "n/a")).toBe("n/a");
+  });
+
+  it("trims whitespace before deciding presence", () => {
+    expect(resolveCpuModel("   ", "Intel Atom")).toBe("Intel Atom");
+    expect(resolveCpuModel("  Intel Xeon  ", null)).toBe("Intel Xeon");
+  });
+
+  it("never returns a falsy string — always either a real value or the placeholder", () => {
+    const inputs: Array<[string | null | undefined, string | null | undefined]> = [
+      [null, null], ["", ""], [undefined, undefined], ["—", "—"], ["-", "-"],
+    ];
+    for (const [a, b] of inputs) {
+      expect(resolveCpuModel(a, b)).toBeTruthy();
+    }
+  });
+});
+
+describe("resolveOs", () => {
+  it("uses the same fallback contract as resolveCpuModel", () => {
+    // Sanity: resolveOs is a thin wrapper today but exists separately so callers
+    // signal intent (and so we can diverge later without breaking callers).
+    expect(resolveOs("Windows 10 Pro", "Microsoft Windows 10")).toBe("Windows 10 Pro");
+    expect(resolveOs(null, "Windows Server 2019")).toBe("Windows Server 2019");
+    expect(resolveOs(null, null)).toBe("—");
   });
 });
 
