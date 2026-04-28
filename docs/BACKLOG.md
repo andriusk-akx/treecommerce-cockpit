@@ -60,3 +60,43 @@ Search for `RT-BACKFILL` in source for the exact rollback points.
 - Inventory column in RtInventory shows the actual CPU model rather than "—".
 
 **Why parked here.** The fix is a multi-layer change (Zabbix client → seed → UI fallback) and requires SP admin to confirm inventory mode is enabled on the Rimi hosts. Captured immediately so it's not forgotten while we focus on the filter and Data Health work.
+
+---
+
+## MON-2 — Template coverage diagnostic (hosts without `python.cpu` items)
+
+**Status:** Open (added 2026-04-28)
+
+**Context.** Live diagnostic against prod Zabbix on 2026-04-28 (probe: `scripts/probe-rt-running-filter.mjs`) showed a much larger monitoring gap than expected:
+
+| Bucket | Count | What it means |
+|---|---|---|
+| Total enabled Rimi SCO hosts | 66 | Zabbix host status = "enabled" |
+| Hosts with `python*.cpu` items at all | **8** | Retellect monitoring template attached |
+| **Hosts with NO `python*.cpu` items** | **58 (88 %)** | Template never deployed / unattached |
+| Hosts reporting fresh + CPU > 0.01 % | 7 | Filter shows these as "running" after FIX-1 |
+
+The 58 host gap is a different failure mode from MON-1 (broken Zabbix agent → ZBX_NOTSUPPORTED). Here the agent may be perfectly healthy — it just has no python.cpu items configured, so the dashboard quietly classifies the host as "not running Retellect" by default. We can't tell from the dashboard whether those 58 hosts: (a) genuinely don't have Retellect deployed, (b) have Retellect but missing template attachment, or (c) need a new Zabbix template push.
+
+**This task.** Make the gap visible so the user (and any reader) sees the real number of "we don't know" hosts, instead of confidently saying "only 7 hosts run Retellect".
+
+**Approach.**
+
+1. **Data Health tab — new section "No Retellect monitoring template".** Lists hosts that have ZERO retellect-pattern items (`python*.cpu` / `perf_counter[\Process(python*)\…]`). Distinct from the existing "Silent" and "Agent issues" sections so each failure mode is named. Source: extend `getAgentHealthSummary()` (or add a parallel call) to also return a per-host count of items matching the retellect key pattern.
+
+2. **Overview "Retellect Active" tile — subtitle expansion.** Today: `"X hosts running Retellect (across Y of Z stores)"`. After: `"X running · 58 unknown (no template)"` with the unknown count clickable through to the Data Health section above. Keeps the small running number from looking like the whole story.
+
+3. **SP admin request template.** A copy-paste paragraph in `docs/zabbix-prasymas-sp-adminui-LT.md` listing the 58 host names and asking which subset is (a)/(b)/(c) above. Lets the user push this back to SP without re-running the probe each time.
+
+**Acceptance.**
+
+- Data Health tab shows "No Retellect monitoring template (N)" section with host list and Zabbix host names visible.
+- Overview tile subtitle calls out the unknown count.
+- SP admin request doc generated with current host list.
+- All three views update automatically when the gap shrinks (e.g. SP admin attaches template to 10 more hosts → "Retellect template missing" drops from 58 to 48).
+
+**Out of scope.** Auto-detecting whether a host SHOULD have Retellect template — that's RT-BACKFILL above. MON-2 only describes the gap; closing it is SP admin work + RT-BACKFILL work.
+
+**Why parked here.** Closing the gap depends on SP admin response (per-host accounting), which has its own coordination cost. Surfacing the gap is fast, but lower priority than FIX-1 which immediately corrects what users see today.
+
+---

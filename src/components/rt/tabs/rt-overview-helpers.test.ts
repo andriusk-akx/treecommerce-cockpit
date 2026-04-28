@@ -4,6 +4,8 @@ import {
   cpuRiskColor,
   aggregateRetellectCpu,
   summarizeHardwareClasses,
+  isRetellectRunning,
+  RETELLECT_CPU_THRESHOLD,
 } from "./rt-overview-helpers";
 
 describe("formatRetellectCpu", () => {
@@ -151,5 +153,127 @@ describe("summarizeHardwareClasses", () => {
 
   it("returns empty array for empty input", () => {
     expect(summarizeHardwareClasses(new Map())).toEqual([]);
+  });
+});
+
+// ─── isRetellectRunning ────────────────────────────────────────────
+//
+// Calibration: real Rimi prod values observed 2026-04-28. The fixed
+// threshold (0.01 %) accepts genuine idle-but-running readings and rejects
+// numerical noise. Test cases mirror specific live hosts so a regression
+// (e.g. accidental return to 1.0 % threshold) breaks immediately.
+
+describe("isRetellectRunning", () => {
+  // Reference: refMs is "now"; 100s ago = freshestMs = refMs - 100_000
+  const refMs = 1_700_000_000_000;
+  const freshSec = 300;
+
+  it("RETELLECT_CPU_THRESHOLD is set to 0.01 (calibrated 2026-04-28)", () => {
+    // Encoded so a future change becomes visible in this test
+    expect(RETELLECT_CPU_THRESHOLD).toBe(0.01);
+  });
+
+  it("Pavilnionys SCO2 — fresh + 4.39% CPU → running", () => {
+    expect(isRetellectRunning({
+      freshestMs: refMs - 36_000,   // 36 s ago
+      refMs,
+      totalCpu: 4.39,
+      freshSec,
+    })).toBe(true);
+  });
+
+  it("Outlet SCO5 — fresh + 0.94% CPU → running (was rejected before fix)", () => {
+    expect(isRetellectRunning({
+      freshestMs: refMs - 82_000,
+      refMs,
+      totalCpu: 0.94,
+      freshSec,
+    })).toBe(true);
+  });
+
+  it("Dangeručio SCO1 — fresh + 0.40% CPU → running (was rejected before fix)", () => {
+    expect(isRetellectRunning({
+      freshestMs: refMs - 48_000,
+      refMs,
+      totalCpu: 0.40,
+      freshSec,
+    })).toBe(true);
+  });
+
+  it("never-reported host (freshestMs=0) → not running", () => {
+    expect(isRetellectRunning({
+      freshestMs: 0,
+      refMs,
+      totalCpu: 5.0,   // would pass cpu rule, but never reported
+      freshSec,
+    })).toBe(false);
+  });
+
+  it("pre-mount client (refMs=0) → not running, avoids hydration flash", () => {
+    expect(isRetellectRunning({
+      freshestMs: 1_699_999_900_000,
+      refMs: 0,
+      totalCpu: 5.0,
+      freshSec,
+    })).toBe(false);
+  });
+
+  it("stale sample (>5 min old) → not running, even with high CPU", () => {
+    expect(isRetellectRunning({
+      freshestMs: refMs - 600_000,   // 10 min ago
+      refMs,
+      totalCpu: 50,
+      freshSec,
+    })).toBe(false);
+  });
+
+  it("noise-level CPU (0.005%) → not running, threshold filters it", () => {
+    expect(isRetellectRunning({
+      freshestMs: refMs - 30_000,
+      refMs,
+      totalCpu: 0.005,
+      freshSec,
+    })).toBe(false);
+  });
+
+  it("exactly at threshold (0.01%) → not running (strict >)", () => {
+    expect(isRetellectRunning({
+      freshestMs: refMs - 30_000,
+      refMs,
+      totalCpu: 0.01,
+      freshSec,
+    })).toBe(false);
+  });
+
+  it("just above threshold (0.011%) → running", () => {
+    expect(isRetellectRunning({
+      freshestMs: refMs - 30_000,
+      refMs,
+      totalCpu: 0.011,
+      freshSec,
+    })).toBe(true);
+  });
+
+  it("zero CPU + fresh sample → not running (idle host with python items reporting 0)", () => {
+    expect(isRetellectRunning({
+      freshestMs: refMs - 30_000,
+      refMs,
+      totalCpu: 0,
+      freshSec,
+    })).toBe(false);
+  });
+
+  it("default freshSec is 300 when omitted", () => {
+    // Sanity check the default — at exactly 300 s we should be the boundary.
+    expect(isRetellectRunning({
+      freshestMs: refMs - 299_000,
+      refMs,
+      totalCpu: 5,
+    })).toBe(true);
+    expect(isRetellectRunning({
+      freshestMs: refMs - 301_000,
+      refMs,
+      totalCpu: 5,
+    })).toBe(false);
   });
 });

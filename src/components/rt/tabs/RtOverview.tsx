@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
 import { computeCpuTotal, formatAgeShort } from "./rt-inventory-helpers";
+import { isRetellectRunning } from "./rt-overview-helpers";
 
 export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: ZabbixData }) {
   const [cpuSummarySort, setCpuSummarySort] = useState<"store" | "cpu">("store");
@@ -114,7 +115,10 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // publishes a fresh python.cpu reading > 0% (i.e. the Retellect worker is
   // actually running right now, per Zabbix per-process telemetry).
   const FRESH_SEC = 300;         // 5 min — for per-process live liveness
-  const RETELLECT_CPU_THRESHOLD = 1.0; // > 1% — filters out residual python noise (0.01% etc)
+  // RETELLECT_CPU_THRESHOLD now lives in rt-overview-helpers.ts and is shared
+  // with `isRetellectRunning()` so the big-tile count and the filter button
+  // can never disagree again. Calibrated 2026-04-28 from real Rimi prod
+  // data — see helper file for the history.
 
   // Per-host Retellect 3-state aggregation:
   //   • > 0%  → Retellect doing work
@@ -135,12 +139,13 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     }
   }
 
-  // Live host ids: any host with summed retellect CPU > 1% AND fresh sample (<5min)
+  // Live host ids — single source of truth shared with the "Retellect running"
+  // filter button below via isRetellectRunning(). Eliminating the parallel
+  // implementations is what makes the tile count and the filter agree.
   const retellectLiveHostIds = new Set<string>();
   for (const [hid, totalCpu] of retellectCpuByHostId) {
-    if (totalCpu <= 0) continue;  // Any positive python.cpu counts as active (matches column display)
-    const lastMs = retellectFreshestMsByHostId.get(hid) || 0;
-    if (lastMs && refMs - lastMs <= FRESH_SEC * 1000) {
+    const freshestMs = retellectFreshestMsByHostId.get(hid) || 0;
+    if (isRetellectRunning({ freshestMs, refMs, totalCpu, freshSec: FRESH_SEC })) {
       retellectLiveHostIds.add(hid);
     }
   }
@@ -313,7 +318,8 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 const rtFreshestMs = retellectFreshestMsByHostId.get(host.hostId) || 0;
                 const rtPythonAgeSec = rtFreshestMs > 0 && refMs > 0 ? Math.max(0, Math.floor((refMs - rtFreshestMs) / 1000)) : null;
                 const rtFresh = rtPythonAgeSec !== null && rtPythonAgeSec < FRESH_SEC;
-                const rtActive = rtFresh && rtCpuTotal > RETELLECT_CPU_THRESHOLD;
+                // Single shared rule with the big-tile retellectLiveHostIds set.
+                const rtActive = isRetellectRunning({ freshestMs: rtFreshestMs, refMs, totalCpu: rtCpuTotal, freshSec: FRESH_SEC });
                 const dbDev = pilot.devices.find((d) => (d.sourceHostKey || d.name) === host.hostName);
                 const rtPlanned = dbDev?.retellectEnabled || false;
                 const rtConfidence = (dbDev?.retellectConfidence || null) as "high" | "low" | null;
