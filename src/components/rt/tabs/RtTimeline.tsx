@@ -8,6 +8,7 @@ import { DataCoverageBanner } from "./DataCoverageBanner";
 import { ProcessCategoryReference } from "./ProcessCategoryReference";
 import { useRtFilters } from "../RtFiltersContext";
 import { resolveCpuModel } from "./rt-inventory-helpers";
+import { isRetellectRunning } from "./rt-overview-helpers";
 
 // Heatmap is a per-DAY peak view, so periods shorter than 1 day make no sense.
 // Trend retention on this Zabbix is ~5–7 days for trend.get and 14 days for
@@ -17,14 +18,12 @@ const PERIODS = [
   { id: "14d", label: "14d", days: 14 },
 ] as const;
 
-// 1m default — agent already samples every minute, so no info loss.
-// 5m / 15m smooth out short spikes; 1h shows the broadest pattern.
-const GRANULARITIES = [
-  { id: 1, label: "1min", slots: 1440 },
-  { id: 5, label: "5min", slots: 288 },
-  { id: 15, label: "15min", slots: 96 },
-  { id: 60, label: "1h", slots: 24 },
-] as const;
+// Granularity selector was removed from the UI 2026-04-28; we now always use
+// 1-minute resolution (the agent's native sample rate). The `granularity`
+// value still lives in RtFiltersContext because the drill-down API call
+// reads it as a query param — callers either get 1 (default) or, for any
+// stale localStorage value, are migrated to 1 by the context provider.
+// The legacy GRANULARITIES list of presets is no longer needed.
 
 const C = {
   belowBg: "#e0effe", belowText: "#868e96",
@@ -130,8 +129,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   const cpuModelFilter = filters.cpuModel;
   const setCpuModelFilter = (v: string) => setFilter("cpuModel", v);
   const search = filters.search;
+  // `granularity` is consumed by the drill-down history API call. The UI
+  // setter was removed alongside the granularity buttons; the value is
+  // expected to be 1 (anything else is treated as legacy and normalised
+  // inside RtFiltersContext on read).
   const granularity = filters.granularity;
-  const setGranularity = (v: number) => setFilter("granularity", v);
   const retellectInstalled = filters.retellectInstalled;
   const setRetellectInstalled = (v: boolean | null) => setFilter("retellectInstalled", v);
   // chartMode kept in filter context for backwards-compat with stored prefs;
@@ -146,6 +148,15 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // hosts run hot from hour 18", or "Pavilnionys store hosts spike together").
   // Stays local — not in RtFiltersContext — because it only applies to this view.
   const [groupBy, setGroupBy] = useState<"host" | "cpu" | "store">("host");
+  // Heatmap cell metric:
+  //   "peak"     — day-MAX CPU% (current default; same data the cell title
+  //                tooltip already shows as "Day max").
+  //   "minAbove" — number of sample-minutes that day where CPU ≥ threshold.
+  //                Uses `trend.minutesAbove[thKey]` already computed for the
+  //                summary columns; just renders it cell-by-cell so users can
+  //                see *for how long* a host stayed in trouble, not only how
+  //                high it spiked.
+  const [metric, setMetric] = useState<"peak" | "minAbove">("peak");
   // Which CPU-model groups are currently expanded. Empty set = all collapsed,
   // showing only headers (per-class summary row with day-by-day MAX). Click
   // a header to drop in / out.
@@ -158,6 +169,12 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     });
   }, []);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
+  // Tracks whether the user has explicitly cleared the selection (Esc, click
+  // on active bar, "Clear selection" button) inside the *current* drill
+  // session. The auto-select-peak effect respects this flag so it doesn't
+  // bounce the cursor back onto the peak when the user has just chosen to
+  // see the day at-rest. Reset to false whenever a new drill opens.
+  const userClearedSelectionRef = useRef(false);
   // (custom-granularity state removed — only fixed presets are exposed now.)
   const [customPeriodDays, setCustomPeriodDays] = useState<string>("");
   const [showCustomPeriod, setShowCustomPeriod] = useState(false);
@@ -184,7 +201,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     maxAtClock: number;
     maxLabel: string;
     avgValue: number;
-    minutesAbove: { t50: number; t70: number; t90: number; t95: number };
+    // Match the threshold dropdown one-to-one so the legend can read the
+    // bucket the user actually picked. Pre-2026-04-28 only t50/t70/t90/t95
+    // existed; t60/t80 were added when the legend started honouring the
+    // active threshold.
+    minutesAbove: { t50: number; t60: number; t70: number; t80: number; t90: number; t95: number };
     raw: Array<{ clock: number; value: number }>;
   };
   const [daySummary, setDaySummary] = useState<DaySummary | null>(null);
@@ -241,11 +262,24 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     return { zabbixByName: byName, cpuDetail: detail, trendByHostDate: trendMap, retellectByHost: rtMap };
   }, [zabbix]);
 
-  // Match Overview's thresholds so the two tabs stay consistent.
-  const RT_FRESH_MS = 5 * 60 * 1000;     // 5 min — same as RT_FRESHNESS_THRESHOLD_SEC
-  const RT_CPU_THRESHOLD = 1.0;          // > 1% — filters out residual noise
+  // Single source of truth lives in rt-overview-helpers.ts (`isRetellectRunning`,
+  // `RETELLECT_CPU_THRESHOLD`). Pre-2026-04-28 this file had its own copy with
+  // a 1.0% cutoff — helper is now 0.01% because real Rimi prod idle Retellect
+  // sits at 0.4–0.95%. Hard-coding 1.0% here filtered the live fleet down to
+  // a single host. Always use the helper.
+  //
+  // Freshness window: 2h (not 5 min) because Rimi prod Zabbix polls python.cpu
+  // on a ~1h cycle. A 5-min window would reject every host even when Retellect
+  // is genuinely active. Matches the FILTER_FRESH_SEC choice in RtOverview.
+  const RT_FILTER_FRESH_SEC = 7200;
 
   const hasTrendData = (zabbix.cpuTrends?.length || 0) > 0;
+
+  // Snap the user's threshold (50/60/70/80/90) to the closest minutesAbove
+  // bucket key emitted by the trend rollup. The same expression also lives
+  // inside `allHostRows` for the column totals; keeping a component-scope
+  // copy lets the cell renderer below read `trend.minutesAbove[thKey]`.
+  const thKey = (threshold >= 90 ? 90 : threshold >= 80 ? 80 : threshold >= 70 ? 70 : threshold >= 60 ? 60 : 50) as 50 | 60 | 70 | 80 | 90;
 
   const allHostRows = useMemo(() => {
     return pilot.devices
@@ -283,7 +317,8 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         // they tell the user "of N minutes we have data for, X were above
         // the threshold". `exceedDays` is kept as a fallback for hosts that
         // only have trend.get coverage (no raw 1-min samples available).
-        const thKey = (threshold >= 90 ? 90 : threshold >= 80 ? 80 : threshold >= 70 ? 70 : threshold >= 60 ? 60 : 50) as 50 | 60 | 70 | 80 | 90;
+        // (thKey is hoisted to component scope above so renderHostRow can
+        // share the same bucket without duplicating the snap logic.)
         let minutesAbove = 0;
         let totalMinutes = 0;
         for (const t of dayTrends) {
@@ -296,14 +331,31 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         // fresh (<5 min) AND CPU% > 1.0. We capture this on the row so the
         // filter, sort, and the column dot all switch from DB flag to telemetry.
         const rt = zHost ? retellectByHost.get(zHost.hostId) : undefined;
-        const nowMs = Date.now();
-        const rtFresh = !!rt && rt.freshestMs > 0 && (nowMs - rt.freshestMs) < RT_FRESH_MS;
-        const rtActive = rtFresh && (rt?.cpuTotal ?? 0) > RT_CPU_THRESHOLD;
-        // TODO(RT-CPUMODEL): once phase 2 backfills Device.cpuModel, the DB
-        // value will always win; until then we prefer Zabbix inventory so the
-        // CPU column and "Group by CPU model" both have something useful.
-        const resolvedCpuModel = resolveCpuModel(device.cpuModel, zHost?.inventory?.cpuModel ?? null);
-        return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: resolvedCpuModel, deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, rtActive, currentCpu: Math.round(cpuTotal * 10) / 10, cores: detail?.numCpus || 0, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedDays, minutesAbove, totalMinutes };
+        const rtActive = isRetellectRunning({
+          freshestMs: rt?.freshestMs ?? 0,
+          refMs: Date.now(),
+          totalCpu: rt?.cpuTotal ?? 0,
+          freshSec: RT_FILTER_FRESH_SEC,
+        });
+        // Resolution order:
+        //   1. Device.cpuModel (DB — sourced from Excel hardware registry)
+        //   2. Zabbix host.inventory.cpuModel (rarely populated on Rimi prod)
+        //   3. "${cores}-core (model unknown)" — derived from system.cpu.num so
+        //      "Group by CPU model" still produces meaningful buckets even when
+        //      the registry is missing entries (e.g. CHM Outlet T813 fleet).
+        //      Mirrors the fallback used by RtOverview's Hardware Class panel.
+        //   4. "—" placeholder (only when even cores are unknown).
+        // TODO(RT-CPUMODEL phase 2): backfill Device.cpuModel and the fallback
+        // becomes a no-op for the Rimi fleet.
+        const cores = detail?.numCpus || 0;
+        const cpuModelFromRegistry = resolveCpuModel(device.cpuModel, zHost?.inventory?.cpuModel ?? null);
+        const resolvedCpuModel =
+          cpuModelFromRegistry !== "—"
+            ? cpuModelFromRegistry
+            : cores > 0
+              ? `${cores}-core (model unknown)`
+              : "—";
+        return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: resolvedCpuModel, deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, rtActive, currentCpu: Math.round(cpuTotal * 10) / 10, cores, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedDays, minutesAbove, totalMinutes };
       });
   }, [pilot, zabbixByName, cpuDetail, trendByHostDate, retellectByHost, storeFilter, threshold, periodDays, dates, hasTrendData]);
 
@@ -321,12 +373,17 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       const q = search.toLowerCase();
       rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.deviceType.toLowerCase().includes(q) || r.cpuModel.toLowerCase().includes(q));
     }
-    if (retellectInstalled !== null) {
-      // Hot-fix 2026-04-28: telemetry-based filter, not DB flag.
-      // See RT-BACKFILL backlog item — when DB.retellectEnabled is repopulated
-      // from telemetry, switch back to `r.retellectEnabled === retellectInstalled`
-      // to also surface "should be running but isn't" hosts.
-      rows = rows.filter((r) => r.rtActive === retellectInstalled);
+    // Two separate pills now: "Retellect On" and "Retellect Off". They are
+    // mutually exclusive in the UI (clicking one deactivates the other), so
+    // only three states reach this filter:
+    //   true   — show hosts where Retellect is currently active (rtActive)
+    //   false  — show hosts where it is not
+    //   null   — no filter
+    // Telemetry-based, not DB flag (see RT-BACKFILL backlog).
+    if (retellectInstalled === true) {
+      rows = rows.filter((r) => r.rtActive);
+    } else if (retellectInstalled === false) {
+      rows = rows.filter((r) => !r.rtActive);
     }
     if (cpuModelFilter !== "all") {
       rows = rows.filter((r) => r.cpuModel === cpuModelFilter);
@@ -458,15 +515,36 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
 
   const openDrill = useCallback((date: Date, hostId: string, displayName: string, sourceHostKey: string, peak: number) => {
     const newDate = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    if (drill?.date === newDate && drill?.hostId === hostId) { setDrill(null); setSelectedSlot(null); return; }
+    if (drill?.date === newDate && drill?.hostId === hostId) { setDrill(null); setSelectedSlot(null); userClearedSelectionRef.current = false; return; }
     setDrill({ date: newDate, dateObj: date, hostId, displayName, sourceHostKey, peak });
     setDrillTab("process");
     setSelectedSlot(null);
+    userClearedSelectionRef.current = false;
   }, [drill]);
 
   // Keyboard navigation: ←/→ moves the cursor across the day, Home/End jump to
   // the edges, Esc clears the selection. If nothing is selected yet, ← starts
   // at the peak (most informative), → at the start of the day.
+  // Auto-select the day's peak slot when the drill-down opens, so the process
+  // breakdown is visible immediately without an extra click.
+  //   Race fix 2026-04-28: `peakSlot` identity changes on every render, which
+  //   used to re-fire this effect after the user pressed Esc — because the
+  //   `if (selectedSlot !== null) return` guard saw `null` again and the
+  //   effect promptly restored the peak. We now gate the auto-select on a
+  //   ref that's only flipped when the drill itself opens, not on every
+  //   parent re-render.
+  useEffect(() => {
+    if (!drill || !drillIntervals || drillIntervals.length === 0) return;
+    if (drillTab !== "process") return;
+    if (userClearedSelectionRef.current) return;
+    if (selectedSlot !== null) return;
+    if (!peakSlot || (peakSlot.sysCpuMax ?? 0) <= 0) return;
+    setSelectedSlot(peakSlot.slot);
+    // Intentionally exclude `selectedSlot` from deps — the ref above is the
+    // single source of truth for "user wanted nothing selected".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drill, drillIntervals, drillTab, peakSlot]);
+
   useEffect(() => {
     if (!drill || !drillIntervals || drillIntervals.length === 0) return;
     if (drillTab !== "process") return;
@@ -492,6 +570,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         setSelectedSlot(max);
       } else if (e.key === "Escape") {
         setSelectedSlot(null);
+        userClearedSelectionRef.current = true;
       }
     }
     window.addEventListener("keydown", onKey);
@@ -515,44 +594,49 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     // we surface a separate aggregate showing the chosen subset's combined
     // minute count and percentage, so the user immediately sees how the slice
     // they picked behaved.
+    // The "≥ N% across selection" aggregate pill was removed 2026-04-28 —
+    // Andrius felt it added noise without changing decisions. The same
+    // numbers are still computed by `filteredAggregate` and shown per row
+    // in the >80% MIN / % columns, so we keep the calc; just no headline.
     const filtered = storeFilter !== "all" || cpuModelFilter !== "all" || retellectInstalled !== null || search !== "";
-    const aggFmt = (n: number) => n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-    const aggPctText = filteredAggregate.pct >= 10
-      ? `${Math.round(filteredAggregate.pct)}%`
-      : filteredAggregate.pct >= 1
-        ? `${filteredAggregate.pct.toFixed(1)}%`
-        : filteredAggregate.pct > 0
-          ? `${filteredAggregate.pct.toFixed(2)}%`
-          : "0%";
-    const aggColor = filteredAggregate.pct >= 5 ? C.riskRedText
-      : filteredAggregate.pct >= 1 ? C.riskAmberText
-      : "#475569";
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: C.textSec, padding: "4px 0", flexWrap: "wrap" }}>
         <span style={{ fontWeight: 600, color: "#212529" }}>{stats.total} hosts</span>
         {stats.noData > 0 && <span style={{ color: "#adb5bd" }}>● {stats.noData} no data</span>}
         {filtered && <span style={{ color: C.pillActive }}>→ {hostRows.length} shown</span>}
-        {filteredAggregate.totalSampled > 0 && (
-          <span
-            style={{
-              marginLeft: "auto",
-              padding: "2px 10px", borderRadius: 12,
-              background: filteredAggregate.pct >= 5 ? C.riskRedBg : filteredAggregate.pct >= 1 ? C.riskAmberBg : "#f1f5f9",
-              color: aggColor, fontWeight: 600, fontVariantNumeric: "tabular-nums",
-            }}
-            title={`Across ${filteredAggregate.hostsWithData} reporting host${filteredAggregate.hostsWithData === 1 ? "" : "s"} in the current selection: ${filteredAggregate.totalAbove} of ${filteredAggregate.totalSampled} sampled minutes were ≥ ${threshold}% (${filteredAggregate.pct.toFixed(2)}% of total period).`}
-          >
-            ≥ {threshold}% across selection: <strong>{aggFmt(filteredAggregate.totalAbove)}</strong>
-            <span style={{ opacity: 0.6 }}>/{aggFmt(filteredAggregate.totalSampled)} min</span>
-            <span style={{ marginLeft: 6, fontWeight: 700 }}>· {aggPctText}</span>
-          </span>
-        )}
       </div>
     );
   })();
 
   const filterBar = (compact: boolean) => (
-    <div style={{ display: "flex", alignItems: "center", gap: compact ? 8 : 12, flexWrap: "wrap", padding: compact ? "5px 10px" : "8px 14px", background: "#fff", border: `1px solid ${C.border}`, borderRadius: compact ? 6 : 8, marginBottom: compact ? 6 : 12 }}>
+    // Two-row layout (explicit, not flex-wrap-driven):
+    //   Row 1 — primary: threshold → metric toggle → store → CPU → 14d/Custom.
+    //           Threshold + metric sit together because the threshold defines
+    //           when a cell is hot and the metric defines what it shows.
+    //   Row 2 — secondary slicers: Group by, Retellect.
+    // Each row uses flex with wrap fallback for narrow viewports.
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: compact ? "5px 10px" : "8px 14px", background: "#fff", border: `1px solid ${C.border}`, borderRadius: compact ? 6 : 8, marginBottom: compact ? 6 : 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: compact ? 8 : 12, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 10, textTransform: "uppercase", color: "#212529", fontWeight: 700, letterSpacing: "0.04em" }}>Threshold</span>
+      <select value={threshold} onChange={(e) => setThreshold(Number(e.target.value))}
+        style={{ fontSize: 13, fontWeight: 600, padding: "3px 6px", border: "1px solid #cbd5e1", borderRadius: 4, width: 64, background: "#f8fafc" }}>
+        {[50, 60, 70, 80, 90].map((v) => <option key={v} value={v}>{v}%</option>)}
+      </select>
+      <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
+        {([
+          { id: "minAbove" as const, label: "Minutes above threshold", tip: "Sample-minutes per day with CPU ≥ threshold — how long it stayed in trouble." },
+          { id: "peak" as const, label: "Peak %", tip: "Day-MAX CPU% per host — how high it spiked." },
+        ]).map((m) => (
+          <button key={m.id} onClick={() => setMetric(m.id)} title={m.tip} style={{
+            padding: "2px 8px", borderRadius: 12, fontSize: 11, cursor: "pointer",
+            border: metric === m.id ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
+            background: metric === m.id ? C.pillActive : "#fff",
+            color: metric === m.id ? "#fff" : "#495057",
+            fontWeight: metric === m.id ? 600 : 400,
+          }}>{m.label}</button>
+        ))}
+      </div>
+      <div style={{ width: 1, height: 16, background: C.border }} />
       <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }}>Store</span>
       <select value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)}
         style={{ fontSize: 12, padding: "3px 6px", border: "1px solid #dee2e6", borderRadius: 4, maxWidth: 200 }}>
@@ -566,7 +650,13 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         <option value="all">All</option>
         {cpuModelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
       </select>
-      <div style={{ width: 1, height: 16, background: C.border }} />
+      </div>
+      {/* Row 2 — secondary slicers, all label-prefixed so first-time users
+          immediately know what each control does. "Period" uses an explicit
+          label even though only one preset exists today, because pairing
+          "14d" with the word "Period" removes any ambiguity about the unit. */}
+      <div style={{ display: "flex", alignItems: "center", gap: compact ? 8 : 12, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }} title="How many days of history to show">Period</span>
       <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
         {PERIODS.map((p) => (
           <button key={p.id} onClick={() => { setPeriod(p.id); setShowCustomPeriod(false); }} style={{
@@ -574,7 +664,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             border: period === p.id && !showCustomPeriod ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
             background: period === p.id && !showCustomPeriod ? C.pillActive : "#fff",
             color: period === p.id && !showCustomPeriod ? "#fff" : "#495057", fontWeight: period === p.id && !showCustomPeriod ? 600 : 400,
-          }}>{p.label}</button>
+          }} title="Show the last 14 days">{p.label}</button>
         ))}
         <button onClick={() => setShowCustomPeriod(!showCustomPeriod)} style={{
           padding: "2px 8px", borderRadius: 12, fontSize: 11, cursor: "pointer",
@@ -582,7 +672,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           background: showCustomPeriod || !isPresetPeriod ? C.pillActive : "#fff",
           color: showCustomPeriod || !isPresetPeriod ? "#fff" : "#495057",
           fontWeight: showCustomPeriod || !isPresetPeriod ? 600 : 400,
-        }}>Custom</button>
+        }} title="Pick a custom number of days">Custom</button>
         {showCustomPeriod && (
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <input
@@ -617,20 +707,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         )}
       </div>
       <div style={{ width: 1, height: 16, background: C.border }} />
-      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }}>Threshold</span>
-      <select value={threshold} onChange={(e) => setThreshold(Number(e.target.value))}
-        style={{ fontSize: 12, padding: "3px 6px", border: "1px solid #dee2e6", borderRadius: 4, width: 56 }}>
-        {[50, 60, 70, 80, 90].map((v) => <option key={v} value={v}>{v}%</option>)}
-      </select>
-      <div style={{ width: 1, height: 16, background: C.border }} />
-      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }}>Group</span>
+      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }} title="How rows are bucketed in the heatmap">Group by</span>
       <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
         {([
-          { id: "host" as const, label: "Host" },
-          { id: "cpu" as const, label: "CPU model" },
-          { id: "store" as const, label: "Store" },
+          { id: "host" as const, label: "Host", tip: "One row per cash register — the most detailed view." },
+          { id: "cpu" as const, label: "CPU model", tip: "Group by hardware model (e.g. WN Beetle M3)." },
+          { id: "store" as const, label: "Store", tip: "Group by retail location." },
         ]).map((g) => (
-          <button key={g.id} onClick={() => setGroupBy(g.id)} style={{
+          <button key={g.id} onClick={() => setGroupBy(g.id)} title={g.tip} style={{
             padding: "2px 8px", borderRadius: 12, fontSize: 11, cursor: "pointer",
             border: groupBy === g.id ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
             background: groupBy === g.id ? C.pillActive : "#fff",
@@ -640,42 +724,44 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         ))}
       </div>
       <div style={{ width: 1, height: 16, background: C.border }} />
-      {/* Tri-state Retellect filter pill: off → running → not running → off.
-          Mirrors the Overview tab's chip style so the user recognises it.
-          Filters on live python.cpu telemetry, not DB.retellectEnabled — see
-          RT-BACKFILL backlog. */}
-      {(() => {
-        const next = retellectInstalled === null ? true : retellectInstalled === true ? false : null;
-        const label = retellectInstalled === true ? "Retellect running"
-          : retellectInstalled === false ? "Retellect not running"
-          : "Retellect: any";
-        const dot = retellectInstalled === true ? "#10b981"
-          : retellectInstalled === false ? "#94a3b8"
-          : "transparent";
-        const active = retellectInstalled !== null;
-        return (
-          <button
-            type="button"
-            onClick={() => setRetellectInstalled(next)}
-            title="Click to cycle: any → running → not running → any. Live python.cpu telemetry."
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              padding: "2px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer",
-              border: active ? "1px solid #a7f3d0" : "1px solid #dee2e6",
-              background: active ? "#ecfdf5" : "#fff",
-              color: active ? "#065f46" : "#495057",
-              fontWeight: active ? 600 : 400,
-            }}
-          >
-            <span style={{
-              width: 8, height: 8, borderRadius: "50%",
-              background: dot, border: dot === "transparent" ? "1px solid #cbd5e1" : "none",
-            }} />
-            {label}
-          </button>
-        );
-      })()}
+      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }} title="Filter by Retellect telemetry">Filter</span>
+      {/* Two mutually-exclusive Retellect filter pills:
+          • "Retellect On"  — only hosts with live python.cpu telemetry (rtActive)
+          • "Retellect Off" — only hosts WITHOUT live telemetry
+          Clicking the active one deselects (returns to "show all"). Telemetry-
+          based, not DB.retellectEnabled (see RT-BACKFILL backlog). */}
+      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        {([
+          { id: true as const, label: "Retellect On", dot: "#10b981", bgActive: "#ecfdf5", borderActive: "#a7f3d0", textActive: "#065f46", tip: "Show only hosts where Retellect is installed (live python.cpu telemetry within the last 2h)." },
+          { id: false as const, label: "Retellect Off", dot: "#94a3b8", bgActive: "#f1f5f9", borderActive: "#cbd5e1", textActive: "#334155", tip: "Show only hosts WITHOUT live Retellect telemetry." },
+        ]).map((p) => {
+          const active = retellectInstalled === p.id;
+          return (
+            <button
+              key={String(p.id)}
+              type="button"
+              onClick={() => setRetellectInstalled(active ? null : p.id)}
+              title={p.tip}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                padding: "2px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer",
+                border: active ? `1px solid ${p.borderActive}` : "1px solid #dee2e6",
+                background: active ? p.bgActive : "#fff",
+                color: active ? p.textActive : "#495057",
+                fontWeight: active ? 600 : 400,
+              }}
+            >
+              <span style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: active ? p.dot : "#cbd5e1",
+              }} />
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
       {compact && <span style={{ fontSize: 10, color: hasTrendData ? "#059669" : "#c9cdd1", marginLeft: "auto" }}>{hasTrendData ? "✓ Live Zabbix trends" : "⚠ No trend data"}</span>}
+      </div>
     </div>
   );
 
@@ -714,23 +800,51 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         </td>
         {row.peaks.map((peak, i) => {
           const hasValue = row.hasMatch && peak !== null;
-          const exceeded = hasValue && peak >= threshold;
+          const trend = row.dayTrends[i];
           const dateStr = `${String(dates[i].getMonth() + 1).padStart(2, "0")}-${String(dates[i].getDate()).padStart(2, "0")}`;
           const active = sel && drill?.date === dateStr;
+
+          // Metric switch — "peak" shows day-MAX %, "minAbove" shows the
+          // minute-count above the active threshold for the same day. Both
+          // colour by their own buckets; "exceeded" still drives bold/white.
+          const minAbove = trend?.minutesAbove?.[thKey] ?? 0;
+          const exceeded = metric === "peak"
+            ? (hasValue && (peak ?? 0) >= threshold)
+            : (hasValue && minAbove > 0);
           const bg = !hasValue
             ? "#f9fafb"
-            : peak >= 90 ? C.criticalBg
-            : peak >= 80 ? C.highBg
-            : exceeded ? C.thresholdBg
-            : C.belowBg;
-          const trend = row.dayTrends[i];
+            : metric === "peak"
+              ? ((peak ?? 0) >= 90 ? C.criticalBg
+                : (peak ?? 0) >= 80 ? C.highBg
+                : ((peak ?? 0) >= threshold) ? C.thresholdBg
+                : C.belowBg)
+              // Minute-count buckets, calibrated for a 24h day (1440 min):
+              //   0       → below   (no exceedance)
+              //   1–15    → amber   (sporadic)
+              //   16–60   → high    (sustained quarter-hour to an hour)
+              //   61+     → critical (≥ 1h above threshold)
+              : (minAbove >= 61 ? C.criticalBg
+                : minAbove >= 16 ? C.highBg
+                : minAbove >= 1  ? C.thresholdBg
+                : C.belowBg);
+          const cellLabel = (() => {
+            if (!hasValue) return "—";
+            if (metric === "peak") return Math.round(peak!);
+            if (minAbove === 0) return "0";
+            if (minAbove >= 1000) return `${(minAbove / 1000).toFixed(1)}k`;
+            return String(minAbove);
+          })();
           const cellTitle = !row.hasMatch
             ? "No Zabbix host match"
             : peak === null
               ? "No history for this day"
               : trend
-                ? `${row.name} · ${dateStr}\nDay max:  ${trend.max}%\nDay avg:  ${trend.avg}%\nDay min:  ${trend.min}%\nClick to open drill-down (per-minute breakdown)`
-                : `Day max ${Math.round(peak!)}% — click to drill down`;
+                ? metric === "peak"
+                  ? `${row.name} · ${dateStr}\nDay max:  ${trend.max}%\nDay avg:  ${trend.avg}%\nDay min:  ${trend.min}%\nMin ≥ ${threshold}%: ${minAbove}\nClick to open drill-down (per-minute breakdown)`
+                  : `${row.name} · ${dateStr}\nMinutes ≥ ${threshold}%: ${minAbove}\nDay max:  ${trend.max}% · avg: ${trend.avg}%\nClick to open drill-down (per-minute breakdown)`
+                : metric === "peak"
+                  ? `Day max ${Math.round(peak!)}% — click to drill down`
+                  : `${minAbove} min ≥ ${threshold}% — click to drill down`;
           return (
             <td key={i} style={{ padding: 0, textAlign: "center", width: 32, cursor: hasValue ? "pointer" : "default" }}
               onClick={() => hasValue && rowHostId && openDrill(dates[i], rowHostId, row.name, row.zHost?.hostName || row.name, peak!)}
@@ -741,7 +855,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 padding: "2px 0", fontSize: 10, fontWeight: exceeded ? 700 : 400, lineHeight: 1.2,
                 outline: active ? "2px solid #0070c9" : "none", outlineOffset: -1, borderRadius: active ? 2 : 0,
               }}>
-                {hasValue ? Math.round(peak!) : "—"}
+                {cellLabel}
               </div>
             </td>
           );
@@ -806,6 +920,9 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   const cpuModelCoverage = useMemo(() => {
     const total = hostRows.length;
     if (total === 0) return { unknown: 0, total: 0 };
+    // "Unknown" = no registry hit AND no core-count fallback. The
+    // "X-core (model unknown)" buckets are still useful groupings, so they
+    // don't count toward the warning's threshold.
     const unknown = hostRows.filter((r) => {
       const m = r.cpuModel.trim();
       return m === "" || m === "—" || m === "-";
@@ -877,30 +994,79 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 // render the individual host rows below the header.
                 const groupKey = (r: typeof hostRows[number]): string =>
                   groupBy === "cpu" ? r.cpuModel : r.storeName;
-                const sorted = [...hostRows].sort((a, b) => groupKey(a).localeCompare(groupKey(b)) || a.name.localeCompare(b.name));
+                // Pre-bucket the rows so we have access to per-group totals
+                // before deciding the order. We then layer the active sort on
+                // top of the alphabetical fallback so headers honour the same
+                // ">MIN" / ">%" toggle the user just clicked.
                 const groups = new Map<string, typeof hostRows>();
-                for (const r of sorted) {
+                for (const r of hostRows) {
                   const k = groupKey(r);
                   if (!groups.has(k)) groups.set(k, []);
                   groups.get(k)!.push(r);
                 }
+                // Stable: sort members within each group alphabetically so
+                // expanded groups render in a predictable order regardless of
+                // the active group-level sort.
+                for (const arr of groups.values()) {
+                  arr.sort((a, b) => a.storeName.localeCompare(b.storeName) || a.name.localeCompare(b.name));
+                }
+                // Compute group-level aggregates once so the sort comparator
+                // and the rendered header row read from the same source.
+                type GroupAgg = { name: string; members: typeof hostRows; totalExceed: number; totalSampled: number; pct: number };
+                const groupAggs: GroupAgg[] = [];
+                for (const [name, members] of groups) {
+                  const totalExceed = members.reduce((s, r) => s + r.minutesAbove, 0);
+                  const totalSampled = members.reduce((s, r) => s + r.totalMinutes, 0);
+                  const pct = totalSampled > 0 ? (totalExceed / totalSampled) * 100 : 0;
+                  groupAggs.push({ name, members, totalExceed, totalSampled, pct });
+                }
+                groupAggs.sort((a, b) => {
+                  // Only the two right-hand exceedance columns reorder groups;
+                  // every other sort key falls back to alphabetical so the
+                  // group list stays stable when sorting by row-level fields
+                  // like Host or Retellect (which don't have a meaningful
+                  // group-level interpretation).
+                  let cmp = 0;
+                  if (sortKey === "exceed") cmp = a.totalExceed - b.totalExceed;
+                  else if (sortKey === "exceedPct") cmp = a.pct - b.pct;
+                  if (cmp === 0) return a.name.localeCompare(b.name);
+                  return sortDir === "desc" ? -cmp : cmp;
+                });
 
                 const elements: ReactElement[] = [];
                 let runningIdx = 0;
-                for (const [groupName, members] of groups) {
+                for (const { name: groupName, members } of groupAggs) {
                   const isExpanded = expandedGroups.has(groupName);
                   const matchedHosts = members.filter((r) => r.hasMatch).length;
-                  const totalExceed = members.reduce((s, r) => s + r.minutesAbove, 0);
-                  const totalSampled = members.reduce((s, r) => s + r.totalMinutes, 0);
-                  // Per-day MAX peak across the group — gives an at-a-glance
+                  // Pulled from groupAggs above so the sort and the rendered
+                  // numbers can never disagree.
+                  const groupAggEntry = groupAggs.find((g) => g.name === groupName)!;
+                  const totalExceed = groupAggEntry.totalExceed;
+                  const totalSampled = groupAggEntry.totalSampled;
+                  // Per-day metric across the group — gives an at-a-glance
                   // heatmap row even when the group is collapsed.
-                  const dayMaxes: (number | null)[] = dates.map((_, i) => {
-                    let max: number | null = null;
-                    for (const r of members) {
-                      const v = r.peaks[i];
-                      if (v !== null && (max === null || v > max)) max = v;
+                  //   Peak mode      : MAX peak% across members
+                  //   Min-above mode : SUM of minutes ≥ threshold across members
+                  // Both signals are aggregations the user can read down a
+                  // column to see which days hit the whole group.
+                  const dayAgg: (number | null)[] = dates.map((_, i) => {
+                    if (metric === "peak") {
+                      let max: number | null = null;
+                      for (const r of members) {
+                        const v = r.peaks[i];
+                        if (v !== null && (max === null || v > max)) max = v;
+                      }
+                      return max;
                     }
-                    return max;
+                    let sum = 0;
+                    let any = false;
+                    for (const r of members) {
+                      const t = r.dayTrends[i];
+                      if (!t) continue;
+                      any = true;
+                      sum += t.minutesAbove?.[thKey] ?? 0;
+                    }
+                    return any ? sum : null;
                   });
 
                   elements.push(
@@ -920,25 +1086,51 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                           <span style={{ color: "#64748b", fontSize: 10 }}>· {matchedHosts} reporting</span>
                         </div>
                       </td>
-                      {dayMaxes.map((peak, i) => {
-                        const hasValue = peak !== null;
-                        const exceeded = hasValue && peak >= threshold;
+                      {dayAgg.map((val, i) => {
+                        const hasValue = val !== null;
+                        const dateStr = `${String(dates[i].getMonth() + 1).padStart(2, "0")}-${String(dates[i].getDate()).padStart(2, "0")}`;
+                        const exceeded = hasValue && (
+                          metric === "peak" ? (val ?? 0) >= threshold : (val ?? 0) > 0
+                        );
                         const bg = !hasValue
                           ? "#f9fafb"
-                          : peak >= 90 ? C.criticalBg
-                          : peak >= 80 ? C.highBg
-                          : exceeded ? C.thresholdBg
-                          : C.belowBg;
-                        const dateStr = `${String(dates[i].getMonth() + 1).padStart(2, "0")}-${String(dates[i].getDate()).padStart(2, "0")}`;
+                          : metric === "peak"
+                            ? ((val ?? 0) >= 90 ? C.criticalBg
+                              : (val ?? 0) >= 80 ? C.highBg
+                              : ((val ?? 0) >= threshold) ? C.thresholdBg
+                              : C.belowBg)
+                            // Per-host-equivalent buckets: the per-host
+                            // thresholds (≥ 61 / 16 / 1 minutes) scale with
+                            // group size, so a 5-host group needs the SUM
+                            // to reach 5× those values. This means the colour
+                            // reflects the average member's load, not just
+                            // "any one hot host pulled the total up". A single
+                            // host going red inside a 5-host group keeps the
+                            // group amber until at least the average host
+                            // crosses the per-host threshold — prevents one
+                            // outlier from painting the whole fleet red.
+                            : ((val ?? 0) >= 61 * members.length ? C.criticalBg
+                              : (val ?? 0) >= 16 * members.length ? C.highBg
+                              : (val ?? 0) >= 1 ? C.thresholdBg
+                              : C.belowBg);
+                        const cellLabel = !hasValue ? "—"
+                          : metric === "peak" ? Math.round(val ?? 0)
+                          : (val ?? 0) >= 1000 ? `${((val ?? 0) / 1000).toFixed(1)}k`
+                          : String(val ?? 0);
+                        const cellTitle = hasValue
+                          ? metric === "peak"
+                            ? `${groupName} · ${dateStr}\nGroup MAX (across ${members.length} hosts): ${Math.round(val ?? 0)}%`
+                            : `${groupName} · ${dateStr}\nGroup minutes ≥ ${threshold}% (sum of ${members.length} hosts): ${val}`
+                          : `${groupName} · ${dateStr} — no data`;
                         return (
                           <td key={i} style={{ padding: 0, textAlign: "center", width: 32 }}
-                            title={hasValue ? `${groupName} · ${dateStr}\nGroup MAX (across ${members.length} hosts): ${Math.round(peak)}%` : `${groupName} · ${dateStr} — no data`}>
+                            title={cellTitle}>
                             <div style={{
                               background: bg,
                               color: !hasValue ? "#d1d5db" : exceeded ? C.exceededText : C.belowText,
                               padding: "2px 0", fontSize: 10, fontWeight: exceeded ? 700 : 500, lineHeight: 1.2,
                             }}>
-                              {hasValue ? Math.round(peak) : "—"}
+                              {cellLabel}
                             </div>
                           </td>
                         );
@@ -990,11 +1182,27 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 10, color: C.textSec, marginTop: 6 }}>
-        {[{ bg: C.belowBg, l: "Below" }, { bg: C.thresholdBg, l: `${threshold}–${Math.min(threshold+10,80)}%` }, { bg: C.highBg, l: "80–89%" }, { bg: C.criticalBg, l: "≥90%" }].map(({ bg, l }) => (
+        {(metric === "peak"
+          ? [
+              { bg: C.belowBg, l: "Below" },
+              { bg: C.thresholdBg, l: `${threshold}–${Math.min(threshold+10,80)}%` },
+              { bg: C.highBg, l: "80–89%" },
+              { bg: C.criticalBg, l: "≥90%" },
+            ]
+          : [
+              { bg: C.belowBg, l: "0 min" },
+              { bg: C.thresholdBg, l: "1–15 min" },
+              { bg: C.highBg, l: "16–60 min" },
+              { bg: C.criticalBg, l: "≥61 min" },
+            ]
+        ).map(({ bg, l }) => (
           <span key={l} style={{ display: "flex", alignItems: "center", gap: 3 }}>
             <span style={{ width: 10, height: 8, borderRadius: 2, background: bg, display: "inline-block" }} />{l}
           </span>
         ))}
+        <span style={{ marginLeft: "auto", color: "#94a3b8" }}>
+          {metric === "peak" ? `Peak · ≥ ${threshold}%` : `Min above · ≥ ${threshold}% per day`}
+        </span>
       </div>
     </>
   );
@@ -1078,7 +1286,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       <>
         {filterBar(false)}
         <h2 style={{ fontSize: 17, fontWeight: 600, color: "#212529", marginBottom: 4 }}>CPU Threshold Timeline</h2>
-        <p style={{ fontSize: 13, color: "#868e96", marginBottom: 10 }}>Heatmap: peak CPU per machine per day. Click a cell to drill down.</p>
+        <p style={{ fontSize: 13, color: "#868e96", marginBottom: 10 }}>
+          {metric === "minAbove"
+            ? `Heatmap: minutes per day with CPU ≥ ${threshold}% per machine. Click a cell to drill down.`
+            : "Heatmap: peak CPU per machine per day. Click a cell to drill down."}
+        </p>
         {heatmapTable}
         <div style={{ background: "#eff6ff", borderRadius: 6, padding: "10px 14px", marginTop: 14 }}>
           <p style={{ fontSize: 12, color: "#1e40af", margin: 0 }}>
@@ -1186,58 +1398,20 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             </span>
             {drillResources && <span style={{ fontSize: 11, color: "#adb5bd" }}>{drillResources.cores} cores · {drillResources.totalRamGb} GB · {drillResources.deviceType}</span>}
           </div>
+          {/* Tab pills removed 2026-04-28 — the only meaningful view is the
+              process breakdown. The Resource Utilization tab was a placeholder
+              for hourly RAM/disk history that never landed; bringing it back
+              would mean re-adding both the pill and the empty-state copy. */}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {([{ id: "process" as const, label: "Process Breakdown" }, { id: "resources" as const, label: "Resource Utilization" }]).map((t) => (
-              <button key={t.id} onClick={() => { setDrillTab(t.id); setSelectedSlot(null); }} style={{
-                padding: "4px 12px", fontSize: 12, fontWeight: drillTab === t.id ? 600 : 400, borderRadius: 14,
-                color: drillTab === t.id ? "#fff" : C.textSec, background: drillTab === t.id ? C.pillActive : "#e9ecef",
-                border: "none", cursor: "pointer",
-              }}>{t.label}</button>
-            ))}
-            <button onClick={() => { setDrill(null); setSelectedSlot(null); }} style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #dee2e6", borderRadius: 6, background: "#fff", color: "#495057", cursor: "pointer", marginLeft: 4 }}>Close ✕</button>
+            <button onClick={() => { setDrill(null); setSelectedSlot(null); }} style={{ fontSize: 11, padding: "4px 10px", border: "1px solid #dee2e6", borderRadius: 6, background: "#fff", color: "#495057", cursor: "pointer" }}>Close ✕</button>
           </div>
         </div>
 
-        {/* Day summary banner — answers "where did the timeline 100% come from".
-            Built from raw 1-min system.cpu.util samples for the selected day. */}
-        {daySummary && (
-          <div style={{
-            padding: "8px 16px", background: "#fff", borderBottom: `1px solid ${C.border}`,
-            display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", flexShrink: 0,
-          }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-              <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600, letterSpacing: 0.4 }}>Day max</span>
-              <span style={{
-                fontSize: 18, fontWeight: 700,
-                color: daySummary.maxValue >= 90 ? "#dc2626" : daySummary.maxValue >= 70 ? "#d97706" : "#212529",
-              }}>{daySummary.maxValue}%</span>
-              <span style={{ fontSize: 11, color: C.textSec }}>at <strong style={{ color: "#212529", fontFamily: "'SF Mono','Cascadia Code',monospace" }}>{daySummary.maxLabel}</strong> Vilnius</span>
-            </div>
-            <div style={{ width: 1, height: 28, background: C.border }} />
-            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-              <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600, letterSpacing: 0.4 }}>Day avg</span>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#212529" }}>{daySummary.avgValue}%</span>
-            </div>
-            <div style={{ width: 1, height: 28, background: C.border }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: C.textSec }}>
-              <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600, letterSpacing: 0.4 }}>Minutes ≥</span>
-              {[
-                { th: 95, c: "#dc2626", v: daySummary.minutesAbove.t95 },
-                { th: 90, c: "#ef4444", v: daySummary.minutesAbove.t90 },
-                { th: 70, c: "#d97706", v: daySummary.minutesAbove.t70 },
-              ].map((row) => (
-                <span key={row.th} style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: 2, background: row.c, display: "inline-block" }} />
-                  {row.th}%: <strong style={{ color: row.v > 0 ? "#212529" : "#adb5bd", fontVariantNumeric: "tabular-nums" }}>{row.v}</strong>
-                </span>
-              ))}
-            </div>
-            <div style={{ width: 1, height: 28, background: C.border }} />
-            <span style={{ fontSize: 10, color: "#94a3b8", fontStyle: "italic" }}>
-              from {daySummary.samples} × 1-min samples of <code style={{ fontSize: 9, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>system.cpu.util</code>
-            </span>
-          </div>
-        )}
+        {/* Day summary banner removed 2026-04-28 to give the chart more
+            vertical room. The host-peak callout already on the chart covers
+            "Day max at HH:MM"; the "Min ≥ threshold" count moved into the
+            legend row at the bottom of the chart so it stays visible without
+            claiming its own band of pixels. */}
 
         <div style={{ flex: 1, padding: "16px 20px", background: "#fafbfc", overflow: "auto" }}>
           {drillTab === "process" && drillLoading && (
@@ -1257,25 +1431,10 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           )}
           {drillTab === "process" && drillIntervals && (
             <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-              {/* Granularity selector — fixed presets, no custom (1m is the
-                  native sample rate, anything below is aliasing). */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexShrink: 0, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600, letterSpacing: 0.4 }}>Granularity</span>
-                <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-                  {GRANULARITIES.map((g) => (
-                    <button key={g.id} onClick={() => { setGranularity(g.id); setSelectedSlot(null); }} style={{
-                      padding: "2px 8px", borderRadius: 10, fontSize: 11, cursor: "pointer",
-                      border: granularity === g.id ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
-                      background: granularity === g.id ? C.pillActive : "#fff",
-                      color: granularity === g.id ? "#fff" : "#495057",
-                      fontWeight: granularity === g.id ? 600 : 400,
-                    }}>{g.label}</button>
-                  ))}
-                </div>
-                <span style={{ fontSize: 10, color: "#c9cdd1" }}>
-                  ({drillIntervals.length} intervals)
-                </span>
-              </div>
+              {/* Granularity selector removed 2026-04-28 — 1min is the agent's
+                  native sample rate, so it's the only resolution that doesn't
+                  alias. The state still exists (default 1) for the API call;
+                  we just stopped exposing it as a control. */}
 
               {/* Chart — host CPU line + reference levels + peak marker + selection cursor.
                   Process breakdown for the selected moment lives in the panel below; we
@@ -1413,7 +1572,15 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                     const tot = s.retellect + s.scoApp + s.db + s.system;
                     return (
                       <div key={s.slot}
-                        onClick={() => setSelectedSlot(isSelected ? null : s.slot)}
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedSlot(null);
+                            userClearedSelectionRef.current = true;
+                          } else {
+                            setSelectedSlot(s.slot);
+                            userClearedSelectionRef.current = false;
+                          }
+                        }}
                         style={{
                           flex: "1 1 0%", cursor: "pointer", position: "relative",
                           background: isSelected ? "rgba(0,112,201,0.06)" : "transparent",
@@ -1475,7 +1642,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
 
               {/* Legend + peak info */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: selSlotData ? 8 : 10, flexShrink: 0 }}>
-                <div style={{ display: "flex", gap: 14, fontSize: 12, color: C.textSec, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 14, fontSize: 12, color: C.textSec, flexWrap: "wrap", alignItems: "center", flex: 1 }}>
                   {PROCESSES.map(({ color, label, border: b }) => (
                     <span key={label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <span style={{ width: 12, height: 10, borderRadius: 2, background: color, display: "inline-block", ...(b ? { border: "1px solid #c3dafe" } : {}) }} />{label}
@@ -1489,6 +1656,38 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                     <span style={{ width: 12, height: 0, borderTop: "1px dashed #0f172a", display: "inline-block" }} />
                     Host CPU avg
                   </span>
+                  {/* Day-level numbers tucked into the legend row so they
+                      remain glanceable without spending a full banner row.
+                      Source: same `daySummary` that used to feed the banner. */}
+                  {daySummary && (() => {
+                    // Map the active threshold to its matching bucket. Buckets
+                    // mirror the threshold dropdown (50/60/70/80/90) plus a 95
+                    // cap. We pick the EXACT bucket here — not a
+                    // "close enough" fallback — because the legend reads the
+                    // value as `Min ≥ {threshold}%`, and showing the t70 count
+                    // when the user picked 80 silently understated severity
+                    // (saw 0 minutes ≥ 70 → painted host as quiet) before the
+                    // fix.
+                    const minAboveActive =
+                      threshold >= 95 ? daySummary.minutesAbove.t95
+                      : threshold >= 90 ? daySummary.minutesAbove.t90
+                      : threshold >= 80 ? daySummary.minutesAbove.t80
+                      : threshold >= 70 ? daySummary.minutesAbove.t70
+                      : threshold >= 60 ? daySummary.minutesAbove.t60
+                      : daySummary.minutesAbove.t50;
+                    return (
+                      <span style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto", color: C.textSec }}>
+                        <span style={{ fontSize: 11 }}>
+                          Day max <strong style={{ color: daySummary.maxValue >= 90 ? "#dc2626" : daySummary.maxValue >= 70 ? "#d97706" : "#212529" }}>{daySummary.maxValue}%</strong>
+                          <span style={{ color: "#94a3b8" }}> at {daySummary.maxLabel}</span>
+                        </span>
+                        <span style={{ color: "#cbd5e1" }}>·</span>
+                        <span style={{ fontSize: 11 }}>
+                          Min ≥ {threshold}% <strong style={{ color: minAboveActive > 0 ? "#212529" : "#adb5bd", fontVariantNumeric: "tabular-nums" }}>{minAboveActive}</strong>
+                        </span>
+                      </span>
+                    );
+                  })()}
                 </div>
                 {!selSlotData && peakSlot && (
                   <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "4px 12px" }}>
@@ -1501,7 +1700,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   </div>
                 )}
                 {selSlotData && (
-                  <button onClick={() => setSelectedSlot(null)} style={{
+                  <button onClick={() => { setSelectedSlot(null); userClearedSelectionRef.current = true; }} style={{
                     fontSize: 11, padding: "3px 10px", border: "1px solid #dee2e6", borderRadius: 5,
                     background: "#fff", color: "#495057", cursor: "pointer",
                   }}>Clear selection</button>
@@ -1516,43 +1715,10 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             </div>
           )}
 
-          {drillTab === "resources" && drillResources && (
-            <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, flexShrink: 0 }}>
-                {[
-                  { l: "CPU", v: `${Math.round(drillResources.currentCpu * 10) / 10}%`, s: `${drillResources.cores} cores`, c: drillResources.currentCpu > 70 ? "#ef4444" : drillResources.currentCpu > 40 ? "#f59f00" : "#059669" },
-                  { l: "MEMORY", v: `${Math.round(drillResources.currentMem)}%`, s: `${drillResources.totalRamGb} GB total`, c: drillResources.currentMem > 80 ? "#ef4444" : drillResources.currentMem > 60 ? "#f59f00" : "#059669" },
-                  { l: "DISK", v: drillResources.currentDisk > 0 ? `${Math.round(drillResources.currentDisk)}%` : "N/A", s: drillResources.diskPath, c: drillResources.currentDisk > 80 ? "#ef4444" : drillResources.currentDisk > 60 ? "#f59f00" : "#059669" },
-                ].map((card) => (
-                  <div key={card.l} style={{ background: "#fff", borderRadius: 8, padding: "10px 14px", border: `1px solid ${C.border}` }}>
-                    <div style={{ fontSize: 10, color: C.headerText, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, marginBottom: 2 }}>{card.l}</div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: card.c }}>{card.v}</div>
-                    <div style={{ fontSize: 11, color: C.textSec }}>{card.s}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#fff", border: `1px dashed ${C.border}`, borderRadius: 8, padding: "20px 24px", minHeight: 80 }}>
-                <div style={{ textAlign: "center", maxWidth: 480 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#495057", marginBottom: 4 }}>Hourly CPU / Memory / Disk history not available yet</div>
-                  <div style={{ fontSize: 11, color: C.textSec, lineHeight: 1.5 }}>
-                    Zabbix archives daily aggregates (max/avg/min) — those drive
-                    the Timeline heatmap. Per-hour breakdown will be wired up
-                    when we add a per-host single-day{" "}
-                    <code style={{ fontSize: 10, background: "#f1f3f5", padding: "0 4px", borderRadius: 3 }}>history.get</code>{" "}
-                    fetch for these metrics.
-                  </div>
-                </div>
-              </div>
-              {drillResources.currentMem > 80 && (
-                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 12px", flexShrink: 0 }}>
-                  <p style={{ fontSize: 12, color: "#991b1b", margin: 0 }}><strong>Warning:</strong> {drill.displayName} — {Math.round(drillResources.currentMem)}% memory, {drillResources.totalRamGb} GB total.</p>
-                </div>
-              )}
-            </div>
-          )}
-          {!drillResources && drillTab === "resources" && (
-            <div style={{ textAlign: "center", padding: "32px 0", color: C.textSec, fontSize: 14 }}>No Zabbix data available for this host.</div>
-          )}
+          {/* Resource Utilization tab removed 2026-04-28; only the process
+              breakdown view remains. `drillResources` is still derived above
+              for the host badge in the header (cores/RAM/type), so we keep
+              the memo, just not the tab body. */}
         </div>
       </div>
     </div>

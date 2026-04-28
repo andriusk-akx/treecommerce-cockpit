@@ -42,14 +42,14 @@ export default function SettingsPage() {
     <div>
       <div className="mb-6">
         <h2 className="text-lg font-semibold text-gray-800">Bendri nustatymai</h2>
-        <p className="text-xs text-gray-400 mt-0.5">AKpilot platformos konfigūracija</p>
+        <p className="text-xs text-gray-400 mt-0.5">Store X platformos konfigūracija</p>
       </div>
 
       <div className="space-y-4 max-w-lg">
         {/* App Info — version + build identity */}
         <div className="bg-white rounded-lg border border-gray-200 p-5">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-gray-800">About AKpilot</h3>
+            <h3 className="text-sm font-semibold text-gray-800">About Store X</h3>
             {versionInfo.dirty && (
               <span
                 className="text-[9px] uppercase tracking-wide bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded"
@@ -93,7 +93,7 @@ export default function SettingsPage() {
             <div>
               <h3 className="text-sm font-semibold text-gray-800">Auto-start po login</h3>
               <p className="text-[11px] text-gray-400 mt-0.5">
-                Prisijungus prie Mac, AKpilot automatiškai pasileis fone.
+                Prisijungus prie Mac, Store X automatiškai pasileis fone.
               </p>
             </div>
             <button
@@ -115,7 +115,7 @@ export default function SettingsPage() {
             {autostart === null
               ? "Kraunama..."
               : autostart
-                ? "Įjungta — AKpilot startuos automatiškai po kiekvieno login"
+                ? "Įjungta — Store X startuos automatiškai po kiekvieno login"
                 : "Išjungta — rankiniam paleidimui naudok start-cockpit.sh"}
           </div>
         </div>

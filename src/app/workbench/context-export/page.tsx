@@ -96,7 +96,7 @@ export default async function ContextExportPage() {
 
 function generateContextMarkdown(clients: any[], pilots: any[]): string {
   const lines: string[] = [];
-  lines.push("# AKpilot — Projekto kontekstas");
+  lines.push("# Store X — Projekto kontekstas");
   lines.push(`Generuota: ${new Date().toISOString()}`);
   lines.push("");
 

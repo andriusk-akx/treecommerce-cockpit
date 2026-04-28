@@ -98,7 +98,7 @@ export default async function DashboardPage() {
         <div>
           <h2 className="text-lg font-semibold text-gray-800">Apžvalga</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            AKpilot — visų pilotų ir klientų suvestinė
+            Store X — visų pilotų ir klientų suvestinė
             {zabbixData && ` | Zabbix v${zabbixData.version}`}
           </p>
         </div>

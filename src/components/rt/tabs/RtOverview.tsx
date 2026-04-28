@@ -7,6 +7,10 @@ import { isRetellectRunning } from "./rt-overview-helpers";
 export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: ZabbixData }) {
   const [cpuSummarySort, setCpuSummarySort] = useState<"store" | "cpu">("store");
   const [withinGroupSort, setWithinGroupSort] = useState<"default" | "host-asc" | "retellect-on" | "cpu-desc" | "age-asc">("host-asc");
+  // Single "Retellect installed" toggle on the Overview — simpler than the
+  // Timeline's On/Off pair because here the user is reviewing the live fleet
+  // and only ever asks "who's currently running it?". The deeper investigation
+  // ("who is NOT running it?") happens on the Timeline tab, which keeps both.
   const [rtFilter, setRtFilter] = useState<boolean>(true);
   const [nowMs, setNowMs] = useState<number>(0);
   useEffect(() => {
@@ -114,7 +118,18 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // Retellect Active Stores: count distinct stores where at least one host
   // publishes a fresh python.cpu reading > 0% (i.e. the Retellect worker is
   // actually running right now, per Zabbix per-process telemetry).
-  const FRESH_SEC = 300;         // 5 min — for per-process live liveness
+  // Two separate freshness windows on this view:
+  //   FRESH_SEC (5 min)        — controls per-row "live vs stale" coloring of
+  //                              the python.cpu value (amber when older).
+  //   FILTER_FRESH_SEC (2 h)  — controls whether a host counts as "Retellect
+  //                              running" for the big tile and the filter.
+  //                              Rimi prod Zabbix polls python.cpu hourly
+  //                              (see age labels: "1h" common in screenshots),
+  //                              so a 5-min window rejects every host even
+  //                              though Retellect is genuinely active. The 2h
+  //                              window matches the Host CPU column policy.
+  const FRESH_SEC = 300;
+  const FILTER_FRESH_SEC = 7200;
   // RETELLECT_CPU_THRESHOLD now lives in rt-overview-helpers.ts and is shared
   // with `isRetellectRunning()` so the big-tile count and the filter button
   // can never disagree again. Calibrated 2026-04-28 from real Rimi prod
@@ -145,7 +160,7 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   const retellectLiveHostIds = new Set<string>();
   for (const [hid, totalCpu] of retellectCpuByHostId) {
     const freshestMs = retellectFreshestMsByHostId.get(hid) || 0;
-    if (isRetellectRunning({ freshestMs, refMs, totalCpu, freshSec: FRESH_SEC })) {
+    if (isRetellectRunning({ freshestMs, refMs, totalCpu, freshSec: FILTER_FRESH_SEC })) {
       retellectLiveHostIds.add(hid);
     }
   }
@@ -271,10 +286,10 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
               type="button"
               onClick={() => setRtFilter((v) => !v)}
               className={`ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] transition ${rtFilter ? "bg-emerald-50 border-emerald-300 text-emerald-700 font-medium" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"}`}
-              title="Show only hosts where Retellect is currently running per Zabbix telemetry (python.cpu items reporting). DB Device.retellectEnabled is currently unreliable on Rimi prod — see roadmap RT-BACKFILL."
+              title="Show only hosts where Retellect is installed (live python.cpu telemetry within the last 2h). DB Device.retellectEnabled is unreliable on Rimi prod — see roadmap RT-BACKFILL."
             >
               <span className={`w-1.5 h-1.5 rounded-full ${rtFilter ? "bg-emerald-500" : "bg-gray-300"}`} />
-              Retellect running
+              Retellect installed
             </button>
           </div>
           <div className="flex items-center gap-3 pr-6 mb-1 text-[9px] uppercase tracking-wider text-gray-400 font-semibold">
@@ -319,20 +334,14 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 const rtPythonAgeSec = rtFreshestMs > 0 && refMs > 0 ? Math.max(0, Math.floor((refMs - rtFreshestMs) / 1000)) : null;
                 const rtFresh = rtPythonAgeSec !== null && rtPythonAgeSec < FRESH_SEC;
                 // Single shared rule with the big-tile retellectLiveHostIds set.
-                const rtActive = isRetellectRunning({ freshestMs: rtFreshestMs, refMs, totalCpu: rtCpuTotal, freshSec: FRESH_SEC });
+                const rtActive = isRetellectRunning({ freshestMs: rtFreshestMs, refMs, totalCpu: rtCpuTotal, freshSec: FILTER_FRESH_SEC });
                 const dbDev = pilot.devices.find((d) => (d.sourceHostKey || d.name) === host.hostName);
                 const rtPlanned = dbDev?.retellectEnabled || false;
                 const rtConfidence = (dbDev?.retellectConfidence || null) as "high" | "low" | null;
                 return { hostId: host.hostId, hostName: host.hostName, storeName, scoNum, cpuTotal, ageSec, rtActive, rtPlanned, rtConfidence, rtHasItem, rtCpuTotal, rtPythonAgeSec, rtFresh };
               }).filter((r) => {
                 if (!rtFilter) return true;
-                // Hot-fix 2026-04-28: filter on live telemetry, not DB flag.
-                // `Device.retellectEnabled` is hardcoded false in seed_rimi_expand.ts
-                // for the live Rimi fleet, so DB-based filter returned empty.
-                // `rtActive` = python.cpu items fresh (<5 min) AND CPU > threshold.
-                // TODO(RT-BACKFILL): once retellectEnabled is backfilled from
-                // telemetry, switch back to `r.rtPlanned === true` so this also
-                // surfaces hosts that SHOULD run Retellect but currently don't.
+                // Hot-fix 2026-04-28: live telemetry, not DB flag (RT-BACKFILL).
                 return r.rtActive === true;
               });
 
@@ -525,9 +534,9 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             <div className="text-xs text-red-500 ml-4">{zabbix.error}</div>
           )}
           <div className="flex items-center gap-2 text-xs">
-            <span className="w-2 h-2 rounded-full bg-blue-500" />
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
             <span className="text-gray-700 font-medium">Pilot DB</span>
-            <span className="text-blue-600 font-semibold">OK</span>
+            <span className="text-emerald-600 font-semibold">OK</span>
             <span className="text-gray-400">— {pilot.deviceCount} devices, {pilot.storeCount} stores</span>
           </div>
           <div className="flex items-center gap-2 text-xs">

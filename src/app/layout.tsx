@@ -20,7 +20,7 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "AKpilot",
+  title: "Store X",
   description: "Consultant-controlled pilot operations cockpit",
 };
 
@@ -55,7 +55,7 @@ export default async function RootLayout({
               <div className="flex items-center gap-4">
                 <div>
                   <h1 className="text-lg font-bold text-gray-900 tracking-tight">
-                    AKpilot
+                    Store X
                   </h1>
                   <p className="text-[10px] text-gray-400 -mt-0.5">
                     Pilot management system
@@ -92,7 +92,7 @@ export default async function RootLayout({
           {children}
         </main>
         <footer className="border-t border-gray-200 px-6 py-3 text-center text-[10px] text-gray-400">
-          AKpilot &mdash; Consultant&rsquo;s pilot management tool
+          Store X &mdash; Consultant&rsquo;s pilot management tool
           <span className="mx-2 text-gray-300">·</span>
           {/* Version string is concatenated server-side so it ends up as a
               single text node in the DOM (no React comment markers between

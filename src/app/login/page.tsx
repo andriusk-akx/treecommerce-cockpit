@@ -24,7 +24,7 @@ export default async function LoginPage({ searchParams }: Props) {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm bg-white border border-gray-200 rounded-lg shadow-sm p-6">
         <div className="text-center mb-6">
-          <h1 className="text-xl font-bold text-gray-900">AKpilot 🚀</h1>
+          <h1 className="text-xl font-bold text-gray-900">Store X 🚀</h1>
           <p className="text-xs text-gray-500 mt-0.5">Sign in to continue</p>
         </div>
         <LoginForm next={next ?? "/"} />

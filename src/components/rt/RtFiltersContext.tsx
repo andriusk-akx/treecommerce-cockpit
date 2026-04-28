@@ -98,7 +98,18 @@ export function RtFiltersProvider({ pilotId, children }: ProviderProps) {
       const parsed = JSON.parse(raw) as Partial<DashboardFilters>;
       // Shallow-merge with defaults so missing keys fall back gracefully when
       // the schema gains a field between sessions.
-      return { ...defaultFilters, ...parsed };
+      const merged = { ...defaultFilters, ...parsed };
+      // Migration 2026-04-28: drill-down granularity used to expose 1/5/15/60
+      // presets. The 5- and 15-minute buckets were dropped, but legacy
+      // localStorage payloads still carry those values — if we let them
+      // through, the drill-down API silently fetches a 5- or 15-minute
+      // resolution that no UI control can change, leaving the user with
+      // stale-looking data and no way out. Snap anything outside the new
+      // {1, 60} set back to the default (1).
+      if (merged.granularity !== 1 && merged.granularity !== 60) {
+        merged.granularity = defaultFilters.granularity;
+      }
+      return merged;
     } catch {
       return defaultFilters;
     }

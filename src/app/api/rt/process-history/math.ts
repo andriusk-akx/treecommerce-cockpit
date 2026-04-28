@@ -167,7 +167,11 @@ export function summariseDay(samples: Array<{ clock: number; value: number }>): 
   maxValue: number;
   maxAtClock: number;
   avgValue: number;
-  minutesAbove: { t50: number; t70: number; t90: number; t95: number };
+  // Bucket keys mirror the threshold dropdown values exactly (50/60/70/80/90)
+  // plus a 95 cap for very-hot days. Don't drop t50/t70/t90/t95 — older
+  // callers (drill-down banner pre-2026-04-28) still consume them via the
+  // RtTimeline DaySummary type.
+  minutesAbove: { t50: number; t60: number; t70: number; t80: number; t90: number; t95: number };
 } | null {
   if (samples.length === 0) return null;
   const peak = samples.reduce((m, s) => (s.value > m.value ? s : m), samples[0]);
@@ -178,6 +182,9 @@ export function summariseDay(samples: Array<{ clock: number; value: number }>): 
     maxValue: Math.round(peak.value * 10) / 10,
     maxAtClock: peak.clock,
     avgValue: Math.round((sum / samples.length) * 10) / 10,
-    minutesAbove: { t50: above(50), t70: above(70), t90: above(90), t95: above(95) },
+    minutesAbove: {
+      t50: above(50), t60: above(60), t70: above(70),
+      t80: above(80), t90: above(90), t95: above(95),
+    },
   };
 }
