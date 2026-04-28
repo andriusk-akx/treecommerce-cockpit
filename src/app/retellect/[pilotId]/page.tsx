@@ -59,9 +59,19 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
   // History was previously sequential after Phase 1 — moving it into the
   // parallel group saves ~400ms on cold load (history wall is ~1800ms with
   // concurrency=24, Phase 1 wall is ~450ms; before it was 1800+450, now max).
-  const expectedHostKeys = new Set(
-    pilot.devices.map((d) => d.sourceHostKey).filter((k): k is string => !!k),
-  );
+  // Build the set of Zabbix host names we expect to find. We look at BOTH
+  // sourceHostKey (the canonical Zabbix display name set during seed) AND the
+  // device's plain `name` — the latter is the fallback the workspace header's
+  // "matched" counter already uses, so the two now agree. Without this fallback
+  // a production DB whose sourceHostKey column is unset (legacy seed) leaves
+  // the CPU history fetcher with an empty matchedHostIds set — the fetch
+  // returns [] and the Timeline shows blank cells even though the header says
+  // "115/115 matched".
+  const expectedHostKeys = new Set<string>();
+  for (const d of pilot.devices) {
+    if (d.sourceHostKey) expectedHostKeys.add(d.sourceHostKey);
+    if (d.name) expectedHostKeys.add(d.name);
+  }
   const [
     zabbixResult,
     zabbixCpuDetailResult,
@@ -309,6 +319,11 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
       error: zabbixProcCpuResult.error,
     },
     cpuTrends: cpuHistory,
+    cpuTrendsMeta: {
+      status: zabbixHistoryResult.status,
+      fetchMs: zabbixHistoryResult.fetchMs,
+      error: zabbixHistoryResult.error,
+    },
     agentHealth: agentHealth as Array<{
       hostId: string;
       totalEnabled: number;

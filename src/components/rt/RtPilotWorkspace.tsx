@@ -147,6 +147,12 @@ export interface ZabbixData {
   procCpu?: ZabbixProcCpuItem[];
   procCpuMeta?: ZabbixProcCpuMeta;
   cpuTrends?: ZabbixCpuTrend[];
+  /** Status + error for the trend fetcher specifically. Surfaced to the
+   *  cross-tab error banner so a silent history.get failure (long fetch
+   *  timed out, item permissions, etc.) is visible even when the hosts
+   *  fetch succeeded — i.e. exactly the scenario where the Timeline shows
+   *  empty cells but the header still says "Zabbix LIVE". */
+  cpuTrendsMeta?: { status: "live" | "cached" | "unavailable"; fetchMs: number; error: string | null };
   /** Per-host item state summary — flags hosts with broken Zabbix agents */
   agentHealth?: ZabbixAgentHealth[];
 }
@@ -267,33 +273,74 @@ export function RtPilotWorkspace({
         </div>
       </div>
 
-      {/* Cross-tab Zabbix error banner. Pre-2026-04-28 the actual `zabbix.error`
-          string was only rendered inside the Overview tab's Data Sources panel,
-          so a user landing straight on Timeline or Inventory saw an empty
-          heatmap with no explanation. Showing it once at the workspace level
-          guarantees a tab-agnostic signal whenever the upstream fetch failed. */}
-      {zabbix.error && (
-        <div className="bg-red-50 border-b border-red-200 px-6 py-2">
-          <div className="max-w-6xl mx-auto flex items-start gap-3 text-xs">
-            <span className="inline-block px-1.5 py-0.5 rounded bg-red-200 text-red-800 font-semibold tracking-wide" style={{ fontSize: 9 }}>ZABBIX</span>
-            <div className="flex-1 text-red-700 leading-relaxed">
-              <strong>Live data unavailable.</strong> {zabbix.error}
-              {zabbix.cachedAt && (
-                <span className="text-red-600/70">
-                  {" "}— showing cached snapshot from {new Date(zabbix.cachedAt).toLocaleString("lt-LT")}.
-                </span>
-              )}
+      {/* Cross-tab Zabbix error banner. Surfaces failures from any of the
+          per-source fetchers, not just the hosts call — a silent history.get
+          failure (long fetch timed out, item permissions) shows the Timeline
+          empty even when the header says "Zabbix LIVE", so we collect every
+          fetcher's error here and render whichever fired. */}
+      {(() => {
+        type ErrSource = { label: string; error: string };
+        const errors: ErrSource[] = [];
+        if (zabbix.error) errors.push({ label: "hosts", error: zabbix.error });
+        if (zabbix.cpuTrendsMeta?.error) errors.push({ label: "CPU history", error: zabbix.cpuTrendsMeta.error });
+        if (zabbix.procCpuMeta?.error) errors.push({ label: "process CPU", error: zabbix.procCpuMeta.error });
+        // No errors AND we still have an empty trends array? That's the silent
+        // case the auditor flagged — fetchSource returned status="live" with
+        // zero records. Surface it as a soft warning so the user can act.
+        const trendsEmpty = (zabbix.cpuTrends?.length || 0) === 0
+          && !zabbix.cpuTrendsMeta?.error
+          && (zabbix.cpuTrendsMeta?.status === "live" || zabbix.cpuTrendsMeta?.status === "cached");
+        if (errors.length === 0 && !trendsEmpty) return null;
+        return (
+          <div className={`${errors.length > 0 ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"} border-b px-6 py-2`}>
+            <div className="max-w-6xl mx-auto flex items-start gap-3 text-xs">
+              <span
+                className={`inline-block px-1.5 py-0.5 rounded font-semibold tracking-wide ${
+                  errors.length > 0 ? "bg-red-200 text-red-800" : "bg-amber-200 text-amber-800"
+                }`}
+                style={{ fontSize: 9 }}
+              >
+                ZABBIX
+              </span>
+              <div className={`flex-1 leading-relaxed ${errors.length > 0 ? "text-red-700" : "text-amber-700"}`}>
+                {errors.length > 0 ? (
+                  <>
+                    <strong>Live data unavailable.</strong>{" "}
+                    {errors.map((e, i) => (
+                      <span key={e.label}>
+                        {i > 0 && <span className="opacity-50"> · </span>}
+                        <span className="opacity-70">[{e.label}]</span> {e.error}
+                      </span>
+                    ))}
+                    {zabbix.cachedAt && (
+                      <span className="opacity-70">
+                        {" "}— showing cached snapshot from {new Date(zabbix.cachedAt).toLocaleString("lt-LT")}.
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <strong>CPU history empty.</strong> The trend fetch returned
+                    {" "}{zabbix.cpuTrendsMeta?.status === "cached" ? "a cached " : "a "}response
+                    with 0 records — the Timeline heatmap will look blank. Likely causes:
+                    history.get permissions on the API token, or the matched
+                    hosts have no <code>system.cpu.util[,,avg1]</code> items.
+                  </>
+                )}
+              </div>
+              <button
+                type="button"
+                className={`underline underline-offset-2 ${
+                  errors.length > 0 ? "text-red-700 hover:text-red-900" : "text-amber-700 hover:text-amber-900"
+                }`}
+                onClick={handleSync}
+              >
+                Retry
+              </button>
             </div>
-            <button
-              type="button"
-              className="text-red-700 underline underline-offset-2 hover:text-red-900"
-              onClick={handleSync}
-            >
-              Retry
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Tabs */}
       <div className="bg-white border-b border-gray-200 px-6">
