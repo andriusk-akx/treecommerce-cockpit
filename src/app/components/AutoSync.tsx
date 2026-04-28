@@ -7,6 +7,28 @@ export default function AutoSync({ intervalMs = 300000 }: { intervalMs?: number 
   const [nextSync, setNextSync] = useState<number>(intervalMs / 1000);
 
   useEffect(() => {
+    // Define runSync inside the effect so the lint rule doesn't complain
+    // about temporal-dead-zone access (function declared below the effect).
+    async function runSync() {
+      try {
+        const res = await fetch("/api/zabbix/sync", { method: "POST" });
+        const data = await res.json();
+        const now = new Date().toLocaleTimeString("lt-LT");
+        if (data.error) {
+          setLastSync(`${now} — error`);
+        } else {
+          const changes = data.created + data.updated + data.resolved;
+          setLastSync(`${now} — ${changes > 0 ? `${changes} changes` : "no changes"}`);
+          if (changes > 0) {
+            setTimeout(() => window.location.reload(), 500);
+          }
+        }
+        setNextSync(intervalMs / 1000);
+      } catch {
+        setLastSync(`${new Date().toLocaleTimeString("lt-LT")} — connection error`);
+      }
+    }
+
     // Run sync immediately on mount
     runSync();
 
@@ -23,27 +45,6 @@ export default function AutoSync({ intervalMs = 300000 }: { intervalMs?: number 
       clearInterval(countdownTimer);
     };
   }, [intervalMs]);
-
-  async function runSync() {
-    try {
-      const res = await fetch("/api/zabbix/sync", { method: "POST" });
-      const data = await res.json();
-      const now = new Date().toLocaleTimeString("lt-LT");
-      if (data.error) {
-        setLastSync(`${now} — error`);
-      } else {
-        const changes = data.created + data.updated + data.resolved;
-        setLastSync(`${now} — ${changes > 0 ? `${changes} changes` : "no changes"}`);
-        if (changes > 0) {
-          // Reload page to show updated data
-          setTimeout(() => window.location.reload(), 500);
-        }
-      }
-      setNextSync(intervalMs / 1000);
-    } catch {
-      setLastSync(`${new Date().toLocaleTimeString("lt-LT")} — connection error`);
-    }
-  }
 
   function formatCountdown(seconds: number): string {
     const m = Math.floor(seconds / 60);
