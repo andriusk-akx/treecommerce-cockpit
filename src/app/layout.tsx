@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import { prisma } from "@/lib/db";
 import NavLinks from "./components/NavLinks";
 import UserMenu from "./components/UserMenu";
+import { LogoX } from "./components/LogoX";
 import { Suspense } from "react";
 import { getCurrentUser } from "@/lib/auth/sessions";
 import { filterAccessiblePilots } from "@/lib/auth/permissions";
@@ -53,14 +54,17 @@ export default async function RootLayout({
           <header className="bg-white border-b border-gray-200 px-6 py-3">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div>
-                  <h1 className="text-lg font-bold text-gray-900 tracking-tight">
-                    Store X
-                  </h1>
-                  <p className="text-[10px] text-gray-400 -mt-0.5">
-                    Pilot management system
-                  </p>
-                </div>
+                <a href="/" className="flex items-center gap-2.5 text-gray-900 hover:opacity-80 transition-opacity" aria-label="Store X home">
+                  <LogoX size={26} />
+                  <div>
+                    <h1 className="text-lg font-bold text-gray-900 tracking-tight leading-tight">
+                      Store <span className="text-[#0070c9]">X</span>
+                    </h1>
+                    <p className="text-[10px] text-gray-400 -mt-0.5">
+                      Pilot management system
+                    </p>
+                  </div>
+                </a>
                 {activePilots.length > 0 && (
                   <div className="flex items-center gap-1.5 ml-4 pl-4 border-l border-gray-200">
                     {activePilots.map((p) => (
@@ -92,7 +96,10 @@ export default async function RootLayout({
           {children}
         </main>
         <footer className="border-t border-gray-200 px-6 py-3 text-center text-[10px] text-gray-400">
-          Store X &mdash; Consultant&rsquo;s pilot management tool
+          <span className="inline-flex items-center gap-1.5 align-middle">
+            <LogoX size={12} mono />
+            <span>Store X &mdash; Consultant&rsquo;s pilot management tool</span>
+          </span>
           <span className="mx-2 text-gray-300">·</span>
           {/* Version string is concatenated server-side so it ends up as a
               single text node in the DOM (no React comment markers between
