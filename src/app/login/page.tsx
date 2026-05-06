@@ -28,7 +28,7 @@ export default async function LoginPage({ searchParams }: Props) {
           <div className="flex items-center justify-center gap-2 mb-1 text-gray-900">
             <LogoX size={28} />
             <h1 className="text-xl font-bold tracking-tight">
-              Store <span className="text-[#0070c9]">X</span>
+              Store <span className="text-[#14532d]">X</span>
             </h1>
           </div>
           <p className="text-xs text-gray-500">Sign in to continue</p>

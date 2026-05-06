@@ -30,11 +30,14 @@ interface LogoXProps {
 
 export function LogoX({ size = 24, mono = false, accent = false, className, label }: LogoXProps) {
   const useAccent = accent || !mono;
-  // Anthropic-blue / amber pair is too saturated for a brand mark — sticking
-  // with the operational palette (pillActive blue + slate-700) keeps the X
-  // calm next to the heatmap colours.
+  // Brand palette: near-black + deep forest green. Black anchors the mark
+  // (weight, gravitas), green carries identity without ever being loud.
+  // Picked over a brighter emerald or operational blue because the goal is
+  // quietly premium — the green should read as intentional, not decorative.
+  // #14532d ≈ Tailwind green-900: rich enough to feel rooted, dark enough
+  // to coexist with body text at small sizes (favicon, footer chip).
   const primaryStroke = "currentColor";
-  const accentStroke = useAccent ? "#0070c9" : "currentColor";
+  const accentStroke = useAccent ? "#14532d" : "currentColor";
   return (
     <svg
       viewBox="0 0 32 32"
