@@ -53,7 +53,15 @@ export async function GET(req: NextRequest) {
     () => client.request("item.get", {
       output: ["itemid", "key_", "lastvalue"],
       hostids: [hostId],
-      filter: { status: 0, state: 0 },
+      // Filter ONLY by status (item not administratively disabled).
+      // Do NOT filter by state — `state: 0` would exclude items that are
+      // currently ZBX_NOTSUPPORTED but still hold valid history from when
+      // they were healthy. Drill-down is a HISTORICAL query: e.g. SC02
+      // Pavilnionys' perf_counter[\Process(python#1)] is state=1 today,
+      // yet the API has 850 samples >1% on Apr 26 — filtering by current
+      // state hides those samples and makes the day-drill render 0%
+      // Retellect even though Retellect was running heavily that day.
+      filter: { status: 0 },
     }) as Promise<Array<{ itemid: string; key_: string; lastvalue: string }>>,
     60_000,
   )) as Array<{ itemid: string; key_: string; lastvalue: string }>;
