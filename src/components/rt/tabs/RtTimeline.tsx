@@ -178,6 +178,12 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // (custom-granularity state removed — only fixed presets are exposed now.)
   const [customPeriodDays, setCustomPeriodDays] = useState<string>("");
   const [showCustomPeriod, setShowCustomPeriod] = useState(false);
+  // "Hide silent hosts" — hides hosts that haven't sent a single CPU sample
+  // during the selected period. Local state (not in RtFiltersContext) because
+  // the silent-host set depends on the active period; persisting it across
+  // pilots/tabs would be misleading. Auto-disabled when no global trend data
+  // is available (otherwise it would empty the entire table).
+  const [hideEmptyHosts, setHideEmptyHosts] = useState(false);
 
   // Real per-process history fetched when user drills into a host.
   // Categories: retellect (sum python*.cpu), scoApp (spss), db (sql), system (vm).
@@ -388,6 +394,16 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     if (cpuModelFilter !== "all") {
       rows = rows.filter((r) => r.cpuModel === cpuModelFilter);
     }
+    // Silent-host filter: hide rows that produced no CPU samples in the active
+    // period. A host is "silent" when every per-day peak is null AND no
+    // sample-minutes accumulated — covers both "no Zabbix match" and
+    // "matched but agent never reported". Skipped entirely when global trend
+    // data is missing, otherwise the filter would empty the whole table.
+    if (hideEmptyHosts && hasTrendData) {
+      rows = rows.filter(
+        (r) => !(r.peaks.every((p) => p === null) && r.totalMinutes === 0),
+      );
+    }
     return [...rows].sort((a, b) => {
       let cmp = 0;
       if (sortKey === "name") cmp = a.name.localeCompare(b.name);
@@ -403,7 +419,17 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       else if (sortKey === "cpu") cmp = a.currentCpu - b.currentCpu;
       return sortDir === "desc" ? -cmp : cmp;
     });
-  }, [allHostRows, search, retellectInstalled, cpuModelFilter, sortKey, sortDir]);
+  }, [allHostRows, search, retellectInstalled, cpuModelFilter, hideEmptyHosts, hasTrendData, sortKey, sortDir]);
+
+  // Count hosts that haven't reported any CPU sample in the active period.
+  // Surfaced on the "Hide silent" pill so the user knows up-front how many
+  // rows will disappear when they toggle it on.
+  const silentHostCount = useMemo(() => {
+    if (!hasTrendData) return 0;
+    return allHostRows.filter(
+      (r) => r.peaks.every((p) => p === null) && r.totalMinutes === 0,
+    ).length;
+  }, [allHostRows, hasTrendData]);
 
   const stats = useMemo(() => {
     // Stats now use minutesAbove instead of exceedDays. Thresholds: > 60 min
@@ -598,7 +624,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     // Andrius felt it added noise without changing decisions. The same
     // numbers are still computed by `filteredAggregate` and shown per row
     // in the >80% MIN / % columns, so we keep the calc; just no headline.
-    const filtered = storeFilter !== "all" || cpuModelFilter !== "all" || retellectInstalled !== null || search !== "";
+    const filtered = storeFilter !== "all" || cpuModelFilter !== "all" || retellectInstalled !== null || search !== "" || hideEmptyHosts;
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: C.textSec, padding: "4px 0", flexWrap: "wrap" }}>
         <span style={{ fontWeight: 600, color: "#212529" }}>{stats.total} hosts</span>
@@ -759,6 +785,36 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             </button>
           );
         })}
+        {/* "Hide silent hosts" — drops rows that have not sent a single CPU
+            sample within the active period. Disabled when global trend data is
+            missing (the indicator on the right already explains why). The
+            count tells the user up-front how many rows will disappear. */}
+        <button
+          type="button"
+          onClick={() => setHideEmptyHosts((v) => !v)}
+          title={
+            hasTrendData
+              ? `Hide hosts with no CPU samples in the selected period (${silentHostCount} currently silent).`
+              : "No trend data available — silent-host filtering is disabled."
+          }
+          disabled={!hasTrendData}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            padding: "2px 10px", borderRadius: 12, fontSize: 11,
+            cursor: hasTrendData ? "pointer" : "not-allowed",
+            border: hideEmptyHosts ? "1px solid #fbbf24" : "1px solid #dee2e6",
+            background: hideEmptyHosts ? "#fffbeb" : "#fff",
+            color: hideEmptyHosts ? "#92400e" : "#495057",
+            fontWeight: hideEmptyHosts ? 600 : 400,
+            opacity: hasTrendData ? 1 : 0.5,
+          }}
+        >
+          <span style={{
+            width: 8, height: 8, borderRadius: "50%",
+            background: hideEmptyHosts ? "#f59e0b" : "#cbd5e1",
+          }} />
+          Hide silent{silentHostCount > 0 ? ` (${silentHostCount})` : ""}
+        </button>
       </div>
       {compact && <span style={{ fontSize: 10, color: hasTrendData ? "#059669" : "#c9cdd1", marginLeft: "auto" }}>{hasTrendData ? "✓ Live Zabbix trends" : "⚠ No trend data"}</span>}
       </div>
