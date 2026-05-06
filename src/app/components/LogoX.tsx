@@ -30,14 +30,16 @@ interface LogoXProps {
 
 export function LogoX({ size = 24, mono = false, accent = false, className, label }: LogoXProps) {
   const useAccent = accent || !mono;
-  // Brand palette: near-black + deep forest green. Black anchors the mark
-  // (weight, gravitas), green carries identity without ever being loud.
-  // Picked over a brighter emerald or operational blue because the goal is
-  // quietly premium — the green should read as intentional, not decorative.
-  // #14532d ≈ Tailwind green-900: rich enough to feel rooted, dark enough
-  // to coexist with body text at small sizes (favicon, footer chip).
+  // Brand palette: near-black + olive heritage green. Black anchors the
+  // mark (weight, gravitas), olive carries identity without ever being
+  // loud. Picked over Tailwind green-900 (#14532d) and emerald variants
+  // because the goal is quietly premium with a hint of warmth — olive
+  // reads "heritage / boutique" rather than "tech-corporate", which sits
+  // better with a consultant-led product than a saturated forest tone.
+  // #3f4f1f is dark enough to coexist with body text at favicon size and
+  // the footer mono chip without losing legibility.
   const primaryStroke = "currentColor";
-  const accentStroke = useAccent ? "#14532d" : "currentColor";
+  const accentStroke = useAccent ? "#3f4f1f" : "currentColor";
   return (
     <svg
       viewBox="0 0 32 32"

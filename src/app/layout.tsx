@@ -58,7 +58,7 @@ export default async function RootLayout({
                   <LogoX size={26} />
                   <div>
                     <h1 className="text-lg font-bold text-gray-900 tracking-tight leading-tight">
-                      Store <span className="text-[#14532d]">X</span>
+                      Store <span className="text-[#3f4f1f]">X</span>
                     </h1>
                     <p className="text-[10px] text-gray-400 -mt-0.5">
                       Pilot management system
