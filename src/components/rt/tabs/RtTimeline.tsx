@@ -156,7 +156,10 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   //                summary columns; just renders it cell-by-cell so users can
   //                see *for how long* a host stayed in trouble, not only how
   //                high it spiked.
-  const [metric, setMetric] = useState<"peak" | "minAbove">("peak");
+  // Default to "minAbove" — Andrius prefers it because the duration spent above
+  // threshold is more decision-relevant than a one-off peak (a 90% spike that
+  // lasted 30s is noise; 30 min at 75% is a real capacity problem).
+  const [metric, setMetric] = useState<"peak" | "minAbove">("minAbove");
   // Which CPU-model groups are currently expanded. Empty set = all collapsed,
   // showing only headers (per-class summary row with day-by-day MAX). Click
   // a header to drop in / out.
@@ -181,9 +184,12 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // "Hide silent hosts" — hides hosts that haven't sent a single CPU sample
   // during the selected period. Local state (not in RtFiltersContext) because
   // the silent-host set depends on the active period; persisting it across
-  // pilots/tabs would be misleading. Auto-disabled when no global trend data
-  // is available (otherwise it would empty the entire table).
-  const [hideEmptyHosts, setHideEmptyHosts] = useState(false);
+  // pilots/tabs would be misleading. Default ON so the heatmap opens on the
+  // hosts that actually have signal — silent rows usually mean a broken agent
+  // or missing monitoring template, not a real Retellect problem the user is
+  // here to investigate. Auto-skipped when no global trend data is available
+  // (the filter logic gate on hasTrendData prevents emptying the entire table).
+  const [hideEmptyHosts, setHideEmptyHosts] = useState(true);
 
   // Real per-process history fetched when user drills into a host.
   // Categories: retellect (sum python*.cpu), scoApp (spss), db (sql), system (vm).
