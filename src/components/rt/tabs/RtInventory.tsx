@@ -677,24 +677,27 @@ function SortableTh({
  */
 // Host-Inventory-specific copy for the shared DataCoverageBanner.
 const INVENTORY_COVERAGE = {
-  title: "Data coverage: Rimi Zabbix only publishes aggregated CPU at the moment",
+  title: "Data coverage: Rimi Zabbix publishes aggregated CPU + CPU model inventory",
   available: (
     <>
       CPU Cores (system.cpu.num), CPU Load (system.cpu.load[,avg1]), CPU Total %
-      (system.cpu.util[,,avg1]), 14-day history, Python proc telemetry (python.cpu).
+      (system.cpu.util[,,avg1]), 14-day history, Python proc telemetry (python.cpu),
+      <strong> CPU Model</strong> (host.inventory.hardware — populated by SP admin
+      2026-05-06; Dangėrutis SCOs newly added to monitoring).
     </>
   ),
   missing: (
     <>
-      CPU Model, RAM (total + utilization), CPU User %, CPU Sys %, disk usage,
-      per-process SCO CPU/RAM. These columns show &ldquo;—&rdquo;.
+      RAM (total + utilization), CPU User %, CPU Sys %, disk usage,
+      per-process SCO CPU/RAM (blocked on Zabbix agent v2.2 — needs upgrade
+      or custom userparameter). These columns show &ldquo;—&rdquo;.
     </>
   ),
   footer: (
     <>
-      That&apos;s why TOTAL % has data while User/Sys columns are empty —
-      not a bug, a template-level gap. Once Rimi updates the monitoring
-      template, the columns will populate automatically.
+      TOTAL % has data while User/Sys columns are empty — not a bug, a
+      template-level gap. Per-process &ldquo;Others&rdquo; breakdown is
+      blocked until SP admin upgrades agents or ships a custom userparameter.
     </>
   ),
 };

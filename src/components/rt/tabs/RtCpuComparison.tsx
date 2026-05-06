@@ -5,6 +5,7 @@ import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
 import {
   RT_STALE_THRESHOLD_SEC,
   computeCpuTotal,
+  resolveCpuModel,
 } from "./rt-inventory-helpers";
 import { DataCoverageBanner } from "./DataCoverageBanner";
 import { StaleAgeBadge } from "./StaleAgeBadge";
@@ -105,8 +106,18 @@ export function RtCpuComparison({
     let matchedCount = 0;
 
     for (const device of pilot.devices) {
-      const modelRaw = device.cpuModel?.trim();
-      const model = modelRaw && modelRaw !== "—" ? modelRaw : "Unknown";
+      // Resolve CPU model with Zabbix inventory fallback. Rimi prod has
+      // empty Device.cpuModel for the live fleet; once SP admin populated
+      // host.inventory.hardware (2026-05-06), the model now flows through
+      // here so groups stop collapsing into "Unknown".
+      const zHost =
+        zabbixByName.get(device.sourceHostKey || "") ||
+        zabbixByName.get(device.name);
+      const model = resolveCpuModel(
+        device.cpuModel,
+        zHost?.inventory?.cpuModel ?? null,
+        "Unknown",
+      );
       if (model === "Unknown") unknownCount++;
 
       if (!modelMap.has(model)) {
@@ -125,9 +136,6 @@ export function RtCpuComparison({
       const group = modelMap.get(model)!;
       group.hostCount++;
 
-      const zHost =
-        zabbixByName.get(device.sourceHostKey || "") ||
-        zabbixByName.get(device.name);
       const detail = zHost ? cpuDetail.get(zHost.hostId) : null;
       if (zHost) matchedCount++;
 
@@ -209,15 +217,18 @@ export function RtCpuComparison({
             Live CPU Total % (from <code>system.cpu.util[,,avg1]</code> or user+system
             sum) for <strong>{totalMatched}/{totalDevices}</strong> matched hosts;
             <code> system.cpu.num</code> for hosts that publish it.
+            <code>inventory.hardware</code> → CPU Model is now populated by
+            SP admin (2026-05-06) — hosts with the field set are grouped by
+            their real model instead of &ldquo;Unknown&rdquo;.
           </>
         }
         missing={
           <>
-            <code>inventory.hardware</code> → CPU Model: most hosts today
-            return empty, so we group them under &ldquo;Unknown&rdquo;.
             <code>vm.memory.size</code> → RAM GB; per-mode CPU
             (<code>system.cpu.util[,user]</code> /
             <code>[,system]</code>) would give a more accurate peak/avg breakdown.
+            Hosts whose <code>inventory.hardware</code> is still blank
+            continue to fall into &ldquo;Unknown&rdquo;.
           </>
         }
         footer={
@@ -282,7 +293,7 @@ export function RtCpuComparison({
                   {g.model}
                   {g.model === "Unknown" && (
                     <span className="ml-2 text-[10px] text-amber-600 font-normal">
-                      no cpuModel in DB
+                      no cpuModel in DB or Zabbix inventory
                     </span>
                   )}
                 </td>

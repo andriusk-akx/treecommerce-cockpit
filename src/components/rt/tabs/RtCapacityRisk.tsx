@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
+import { resolveCpuModel } from "./rt-inventory-helpers";
 
 export function RtCapacityRisk({ pilot, zabbix }: { pilot: RtPilotData; zabbix: ZabbixData }) {
   const analysis = useMemo(() => {
@@ -25,7 +26,13 @@ export function RtCapacityRisk({ pilot, zabbix }: { pilot: RtPilotData; zabbix: 
       const cpuTotal = detail ? detail.user + detail.system : 0;
       const ramGb = zHost?.memory ? zHost.memory.totalBytes / 1024 / 1024 / 1024 : device.ramGb;
 
-      const groupKey = device.cpuModel || "Unknown";
+      // Prefer Zabbix host.inventory.hardware (now populated by SP admin) over
+      // the empty DB column. Falls through to "Unknown" only if both blank.
+      const groupKey = resolveCpuModel(
+        device.cpuModel,
+        zHost?.inventory?.cpuModel ?? null,
+        "Unknown",
+      );
 
       if (!byGroup.has(groupKey)) byGroup.set(groupKey, { hosts: [], cpuValues: [], cores, ramValues: [] });
       const group = byGroup.get(groupKey)!;

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
-import { computeCpuTotal, formatAgeShort } from "./rt-inventory-helpers";
+import { computeCpuTotal, formatAgeShort, resolveCpuModel } from "./rt-inventory-helpers";
 import { isRetellectRunning } from "./rt-overview-helpers";
 
 export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: ZabbixData }) {
@@ -55,15 +55,21 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // paint and trigger a hydration mismatch (e.g. server "36s" vs client "37s").
   const refMs = nowMs;
 
-  // Group by DB cpuModel (sourced from Excel hardware registry).
-  // Falls back to core count when cpuModel is missing.
+  // Group by CPU model — DB Device.cpuModel first, then Zabbix
+  // host.inventory.hardware (populated by SP admin 2026-05-06), then a
+  // core-count fallback when neither source has a string.
   for (const device of pilot.devices) {
     if (device.status !== "active") continue;
     const zHost = zabbixByName.get(device.sourceHostKey || "") || zabbixByName.get(device.name);
     const detail = zHost ? cpuDetailByHostId.get(zHost.hostId) : null;
     const cores = detail?.numCpus || 0;
-    const groupKey = device.cpuModel
-      ? device.cpuModel
+    const resolvedModel = resolveCpuModel(
+      device.cpuModel,
+      zHost?.inventory?.cpuModel ?? null,
+      "",
+    );
+    const groupKey = resolvedModel
+      ? resolvedModel
       : cores > 0 ? `${cores}-core (model unknown)` : "Unknown";
     if (!cpuModelMap.has(groupKey)) cpuModelMap.set(groupKey, { hosts: 0, cpuValues: [], cores });
     const group = cpuModelMap.get(groupKey)!;
@@ -190,8 +196,16 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   }
   const reportingStoreCount = reportingStoreNames.size;
 
-  // Hardware registry coverage — count devices with cpuModel filled
-  const hwModeledCount = pilot.devices.filter((d) => d.cpuModel && d.cpuModel.trim() !== "").length;
+  // Hardware registry coverage — count devices with a resolvable CPU model,
+  // either from the DB (Excel registry seed) or live Zabbix
+  // host.inventory.hardware. SP admin populated the Zabbix side on
+  // 2026-05-06, so this counter now reflects fleet-wide coverage rather
+  // than just the DB-seeded subset.
+  const hwModeledCount = pilot.devices.filter((d) => {
+    const zHost = zabbixByName.get(d.sourceHostKey || "") || zabbixByName.get(d.name);
+    const resolved = resolveCpuModel(d.cpuModel, zHost?.inventory?.cpuModel ?? null, "");
+    return resolved !== "";
+  }).length;
 
   // ─── Anomaly detection for Key Observations ───────────────────────
   // "Most hosts in this store have Retellect, but one or two don't —
@@ -541,11 +555,11 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           </div>
           <div className="flex items-center gap-2 text-xs">
             <span className={`w-2 h-2 rounded-full ${hwModeledCount > 0 ? "bg-emerald-500" : "bg-gray-400"}`} />
-            <span className="text-gray-700 font-medium">Hardware Registry (Excel)</span>
+            <span className="text-gray-700 font-medium">Hardware Registry (DB + Zabbix inventory)</span>
             <span className={`font-semibold ${hwModeledCount > 0 ? "text-emerald-600" : "text-gray-500"}`}>
               {hwModeledCount > 0 ? "LOADED" : "EMPTY"}
             </span>
-            <span className="text-gray-400">— {hwModeledCount}/{pilot.deviceCount} devices mapped to CPU model · WN Beetle SCO terminal registry, sourced from Intility/Wincor-Nixdorf installation list</span>
+            <span className="text-gray-400">— {hwModeledCount}/{pilot.deviceCount} devices mapped to CPU model · DB seed (Wincor-Nixdorf install list) plus Zabbix host.inventory.hardware (populated by SP admin 2026-05-06)</span>
           </div>
           <div className="flex items-center gap-2 text-xs mt-2">
             <span className="w-2 h-2 rounded-full bg-gray-400" />
