@@ -6,6 +6,7 @@ import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspac
 import { generateIntervalData, type IntervalSlot } from "./rt-timeline-math";
 import { DataCoverageBanner } from "./DataCoverageBanner";
 import { ProcessCategoryReference } from "./ProcessCategoryReference";
+import { RtProcessTrend } from "./RtProcessTrend";
 import { useRtFilters } from "../RtFiltersContext";
 import { resolveCpuModel } from "./rt-inventory-helpers";
 import { isRetellectRunning } from "./rt-overview-helpers";
@@ -1372,6 +1373,17 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             </p>
           </div>
         )}
+        {/* Per-host "Process trend" card — daily CPU dynamics for a chosen
+            process across 14 days, with Retellect ON/OFF day backgrounds.
+            Rendered below the heatmap, default collapsed; expanding without a
+            drilled host shows a prompt that points the user back to the
+            heatmap. With a drilled host, fetches /api/rt/process-trend.
+            Spec: project_rt_process_trend.md. */}
+        <RtProcessTrend
+          hostId={null}
+          displayName={null}
+          threshold={threshold}
+        />
         {/* Process category reference — explains what items map to what
             category. Sits above the data-coverage banner because the user
             asks "what's in DB?" before "what data is missing?". */}
@@ -1416,6 +1428,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
 
   // ═══ WITH DRILL ═══════════════════════════════════════════════════
   return (
+    <>
     <div ref={split.containerRef} style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 200px)", minHeight: 500, marginBottom: -24 }}>
       {/* TOP PANE */}
       <div style={{ height: split.splitPx, minHeight: 120, overflow: "auto", flexShrink: 0 }}>
@@ -1784,5 +1797,16 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         </div>
       </div>
     </div>
+    {/* Per-host "Process trend" card — rendered OUTSIDE the split-pane so the
+        existing top/bottom drag layout stays intact. The card is bound to the
+        drill state (drill.hostId), so the user sees their just-clicked host's
+        14-day trend without a second selector. Default collapsed; expanding
+        triggers a /api/rt/process-trend fetch. Spec: project_rt_process_trend.md. */}
+    <RtProcessTrend
+      hostId={drill.hostId}
+      displayName={drill.displayName}
+      threshold={threshold}
+    />
+    </>
   );
 }
