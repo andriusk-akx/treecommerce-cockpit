@@ -902,8 +902,8 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           style={{ padding: "3px 6px", textAlign: "center", minWidth: 50 }}
           title={
             row.rtDeployed
-              ? "Retellect deployed (host has python.cpu items, sample observed at some point)"
-              : "Retellect not deployed on this host"
+              ? "RT installed — Retellect items configured in this host's Zabbix template"
+              : "RT not installed on this host"
           }
         >
           <span style={{
@@ -914,13 +914,13 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           }} />
         </td>
         <td
-          style={{ padding: "3px 6px", textAlign: "center", minWidth: 50 }}
+          style={{ padding: "3px 6px", textAlign: "center", minWidth: 56 }}
           title={
             row.rtActiveToday
-              ? "Retellect active today (meaningful python.cpu within the last 24 h)"
+              ? "RT active today — meaningful Retellect (python) CPU activity within the last 24 h"
               : row.rtDeployed
-                ? "Retellect deployed but no meaningful activity in the last 24 h"
-                : "Retellect not deployed"
+                ? "RT installed but no meaningful activity in the last 24 h"
+                : "RT not installed on this host"
           }
         >
           <span style={{
@@ -1125,25 +1125,29 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 {/*
                   Retellect column was a single dot mixing two questions:
                   "is it installed?" and "is it active right now?". Split
-                  into two narrower columns 2026-05-07 — Deployed (ever
-                  observed any python.cpu sample) and Active today (last
-                  24 h had meaningful CPU). The "rt" sort key still ranks
-                  by the "Active today" signal, which is the live-status
-                  question users sort on.
+                  into two narrower columns 2026-05-07. Header labels keep
+                  the "RT" prefix so the user knows both columns answer
+                  Retellect-specific questions (the dashboard is general
+                  enough that a bare "Inst"/"Today" pair would be ambiguous):
+                    RT INST  — Retellect items configured in Zabbix template
+                               for this host (ever-installed signal).
+                    RT TODAY — Retellect produced meaningful CPU activity
+                               within the last 24 h.
+                  Both share the "rt" sort key (see toggleSort below).
                 */}
                 <th
                   onClick={() => toggleSort("rt")}
-                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 36 }}
-                  title="Deployed — host has ever reported a python.cpu sample (Retellect was installed on this checkout at some point)."
+                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 50 }}
+                  title="RT installed — Retellect items are configured in this host's Zabbix template (Retellect was deployed on this checkout at some point)."
                 >
-                  Deploy
+                  RT&nbsp;Inst
                 </th>
                 <th
                   onClick={() => toggleSort("rt")}
-                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 36 }}
-                  title="Active today — host had meaningful Retellect (python) CPU activity in the last 24 h."
+                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 56 }}
+                  title="RT active today — Retellect produced meaningful python.cpu activity within the last 24 h."
                 >
-                  Today{sortArrow("rt")}
+                  RT&nbsp;Today{sortArrow("rt")}
                 </th>
                 {dates.map((d, i) => <th key={i} style={{ textAlign: "center", padding: "4px 0", fontSize: 8, fontWeight: 400, color: C.headerText, width: 32, minWidth: 32 }}>{String(d.getDate()).padStart(2, "0")}</th>)}
                 <th onClick={() => toggleSort("exceed")} title={`Minutes ≥ ${threshold}% out of total sampled minutes`} style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
