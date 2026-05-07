@@ -26,6 +26,9 @@ interface DayPoint {
   minutesAbove: number;
   totalSamples: number;
   retellectOn: boolean;
+  /** Backend signals where the day's data came from. "trend" days have
+   *  no honest minutesAbove reading (hourly aggregate ≠ minute counts). */
+  source: "history" | "trend" | "none";
 }
 
 interface CompareSummary {
@@ -108,19 +111,20 @@ interface Props {
   threshold: number;
   /**
    * Period in days from RtFiltersContext (1..365 — heatmap allows custom
-   * windows). The card requests min(periodDays, MAX_TREND_DAYS) so the user
-   * sees what's actually available. When the user picked a larger window
-   * than Zabbix retains, we show a small note explaining the cap so the
-   * mismatch with the heatmap header isn't confusing.
+   * windows). The card mirrors whatever the heatmap is showing exactly.
+   * For periods within Zabbix's ~14 d raw history retention, every day is
+   * `source: "history"` (sample-level accuracy + minutesAbove counter).
+   * Older days fall back to `source: "trend"` (hourly aggregates only —
+   * the minutesAbove metric stops being honest there and the UI hides it).
    */
   periodDays: number;
   /** Initial expanded state. Default false (preserves the heatmap-only workflow). */
   defaultExpanded?: boolean;
 }
 
-// Zabbix raw 1-min history retention on this deployment. Same constant
-// `getCpuHistoryDaily` uses (effectiveDays = Math.min(days, 14)).
-const MAX_TREND_DAYS = 14;
+// Hard upper bound mirrored from the API route. Practically caps at Zabbix's
+// trend retention (~365 d on a typical install).
+const MAX_DAYS = 365;
 
 // ─── Component ──────────────────────────────────────────────────────
 
@@ -135,15 +139,12 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
   const [error, setError] = useState<string | null>(null);
   const [hasData, setHasData] = useState(false);
 
-  // Effective fetch days = min(user's period, Zabbix retention cap). The
-  // heatmap allows custom windows up to 365 d; raw 1-min history is only
-  // retained ~14 d on this Zabbix, so anything beyond that returns empty
-  // days. We clamp here and surface a tiny "capped at 14d" note when the
-  // user asked for more, so the discrepancy with the heatmap header is
-  // honest rather than silent.
-  const requestedDays = Math.max(1, Math.floor(periodDays));
-  const effectiveDays = Math.min(requestedDays, MAX_TREND_DAYS);
-  const isCapped = requestedDays > effectiveDays;
+  // Mirror whatever the heatmap is showing. The API route fetches BOTH
+  // history.get (recent ≤14 d, sample-level) AND trend.get (older days,
+  // hourly aggregate) and merges per day, so any window up to 365 d is
+  // honestly served — the per-day `source` field then tells the UI which
+  // metrics are trustworthy on each day.
+  const effectiveDays = Math.max(1, Math.min(MAX_DAYS, Math.floor(periodDays)));
 
   // Fetch: only when the card is open AND a host is drilled. Closing the
   // card or clearing the drill resets local state so re-opening doesn't
@@ -184,6 +185,13 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
 
   const chosenColor = CATEGORIES.find((c) => c.id === category)!.color;
   const metricLabel = METRICS.find((m) => m.id === metric)!.label;
+
+  // How many days in the response use trend.get hourly aggregates instead
+  // of raw 1-min history. Drives a small "N d hourly-only" header chip and
+  // the per-day dot tooltip so the user knows where Min-≥-threshold readings
+  // start being unavailable.
+  const trendOnlyDayCount = days.filter((d) => d.source === "trend").length;
+  const hasTrendOnlyDays = trendOnlyDayCount > 0;
 
   // Chart layout — fixed pixel dimensions for SVG, scales via parent CSS.
   const chartW = 620;
@@ -234,14 +242,22 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
       return padT + innerH * (1 - (clamped - yMin) / (yMax - yMin));
     };
 
-    const points = days.map((d, i) => ({
-      i,
-      x: xForIdx(i, days.length),
-      y: yForVal(metricValue(d)),
-      mv: metricValue(d),
-      d,
-      hasData: d.totalSamples > 0,
-    }));
+    const points = days.map((d, i) => {
+      // For Min-≥-threshold metric, treat trend-source days as "no data" —
+      // hourly aggregates can't honestly say "X minutes above Y%". The day
+      // still renders as a hollow tick so the gap is visible, just like
+      // genuinely-empty days. Other metrics (avg, peak) work fine on trend.
+      const honestForMetric =
+        metric === "minAbove" ? d.source === "history" : d.source !== "none";
+      return {
+        i,
+        x: xForIdx(i, days.length),
+        y: yForVal(metricValue(d)),
+        mv: metricValue(d),
+        d,
+        hasData: d.totalSamples > 0 && honestForMetric,
+      };
+    });
     const polyPoints = points
       .filter((p) => p.hasData)
       .map((p) => `${p.x},${p.y}`)
@@ -296,12 +312,12 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
               ? `— ${displayName ?? "selected host"} · ${effectiveDays} d`
               : "— pick a host in the heatmap"}
           </span>
-          {hostId && isCapped && (
+          {hostId && hasTrendOnlyDays && (
             <span
-              style={{ fontSize: 10, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "1px 6px" }}
-              title={`Heatmap is showing ${requestedDays} d, but per-process Zabbix history is only retained for ${MAX_TREND_DAYS} d. The trend below covers the available window.`}
+              style={{ fontSize: 10, color: "#475569", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 10, padding: "1px 6px" }}
+              title={`Days older than Zabbix's raw-history window (~14 d) use hourly trend aggregates. avg / peak are still accurate; the "Min ≥ threshold" metric is hidden on those days because hourly aggregates can't honestly answer it.`}
             >
-              capped at {MAX_TREND_DAYS} d
+              {trendOnlyDayCount} d hourly-only
             </span>
           )}
         </div>
@@ -488,7 +504,7 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
                   <g key={`pt-${p.d.date}`}>
                     {p.hasData ? (
                       <circle cx={p.x} cy={p.y} r={2.8} fill={chosenColor}>
-                        <title>{`${p.d.date} · ${metricLabel}: ${formatVal(p.mv, yIsTime)} · Retellect ${p.d.retellectOn ? "ON" : "OFF"} (${p.d.totalSamples} samples)`}</title>
+                        <title>{`${p.d.date} · ${metricLabel}: ${formatVal(p.mv, yIsTime)} · Retellect ${p.d.retellectOn ? "ON" : "OFF"} · ${p.d.source === "trend" ? `${p.d.totalSamples} hourly aggregates` : `${p.d.totalSamples} 1-min samples`}`}</title>
                       </circle>
                     ) : (
                       // No-data marker: small hollow circle near baseline so

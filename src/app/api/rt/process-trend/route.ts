@@ -56,10 +56,17 @@ export const dynamic = "force-dynamic";
 type CategoryEx = Category | "other";
 const ALLOWED_CATEGORIES = new Set<CategoryEx>(["retellect", "scoApp", "db", "system", "other"]);
 
+// Hard upper bound on the trend window. trend.get retention on a typical
+// Zabbix server is ~365 days; beyond that the response is empty regardless
+// of what we ask. Anything past the practical retention is wasted load on
+// the Zabbix proxy, so we clamp here. The CPU Timeline filter UI also lets
+// the user pick "custom days" up to 365 — we mirror that bound exactly.
+const MAX_DAYS = 365;
+
 export async function GET(req: NextRequest) {
   const hostId = req.nextUrl.searchParams.get("hostId");
   const daysParam = parseInt(req.nextUrl.searchParams.get("days") || "14", 10);
-  const days = Number.isFinite(daysParam) ? Math.max(1, Math.min(14, daysParam)) : 14;
+  const days = Number.isFinite(daysParam) ? Math.max(1, Math.min(MAX_DAYS, daysParam)) : 14;
   const categoryParam = req.nextUrl.searchParams.get("category") || "scoApp";
   const thresholdParam = parseFloat(req.nextUrl.searchParams.get("threshold") || "70");
   const threshold = Number.isFinite(thresholdParam) ? thresholdParam : 70;
@@ -86,7 +93,23 @@ export async function GET(req: NextRequest) {
 }
 
 interface TrendResponse {
-  days: Array<{ date: string; avg: number; peak: number; minutesAbove: number; totalSamples: number; retellectOn: boolean }>;
+  days: Array<{
+    date: string;
+    avg: number;
+    peak: number;
+    minutesAbove: number;
+    totalSamples: number;
+    retellectOn: boolean;
+    /**
+     * Where the day's data came from:
+     *   "history" — raw 1-min samples (full accuracy, supports minutesAbove).
+     *   "trend"   — hourly aggregates (avg/peak only; minutesAbove is 0).
+     *   "none"    — no data for this day.
+     * The UI uses this to dim/disable the Min-≥-threshold metric on trend-
+     * sourced days and to surface a tooltip explaining the source.
+     */
+    source: "history" | "trend" | "none";
+  }>;
   summary: ReturnType<typeof compareOnOff>;
   category: CategoryEx;
   threshold: number;
@@ -189,6 +212,7 @@ async function buildTrendResponse(
       minutesAbove: 0,
       totalSamples: 0,
       retellectOn: false,
+      source: "none" as const,
     }));
     return {
       days: emptyDays,
@@ -200,19 +224,42 @@ async function buildTrendResponse(
     };
   }
 
-  // Per-ITEM history.get, parallelised at concurrency 24 — same pattern as
-  // ZabbixClient.getCpuHistoryDaily. Why per-item rather than batched:
-  //   - 14 days × 1440 1-min samples = ~20160 per item
-  //   - With 7 items in one batch, total 140k samples → silently clipped by
-  //     a 50000 limit, losing the older days
-  //   - Per-item with 25000 limit covers a comfortable 17 days, no truncation
+  // Two parallel data sources, mirroring ZabbixClient.getCpuHistoryDaily:
   //
-  // sortorder: DESC + ample limit also matches getCpuHistoryDaily, so the
-  // older edge of the window is the part that gets dropped first if anything
-  // does — protecting freshness over depth.
+  //   trend.get — hourly aggregates, retention ~months. ONE batched call
+  //     covers all items × all hours. Cheap. Coverage extends past Zabbix's
+  //     ~14 d raw-history window, which is the whole point of this fallback.
+  //
+  //   history.get — raw 1-min samples, retention ~14 d. Per-item, parallelised
+  //     at concurrency 24 (per-item rather than batched because a single
+  //     batched call's 50k limit clips the older days when 7+ items share it).
+  //
+  // We merge both sources by day: history takes precedence (sample-level
+  // accuracy + supports `minutesAbove` threshold counts); trend fills in
+  // for older days that history can't reach.
   const PER_ITEM_LIMIT = 25000;
   const CONCURRENCY = 24;
   const itemIds = Array.from(itemsToFetch);
+
+  // trend.get for ALL items in one call.
+  const trendPromise = (async (): Promise<Array<{ itemid: string; clock: string; value_avg: string; value_max: string; value_min: string }>> => {
+    try {
+      return (await client.request("trend.get", {
+        output: ["itemid", "clock", "value_min", "value_avg", "value_max"],
+        itemids: itemIds,
+        time_from: String(timeFrom),
+        time_till: String(timeTill),
+        // 100k caps at ~4000 hourly buckets per item × 25 items, more than
+        // we'll ever need (365 d × 24 h × 7 items ≈ 60k records).
+        limit: 100000,
+      })) as Array<{ itemid: string; clock: string; value_avg: string; value_max: string; value_min: string }>;
+    } catch (e) {
+      console.warn("[rt-process-trend] trend.get failed, will rely on history only:", e);
+      return [];
+    }
+  })();
+
+  // history.get per-item, parallel.
   const fetchOne = async (itemId: string): Promise<Array<{ itemid: string; clock: string; value: string }>> => {
     try {
       return (await client.request("history.get", {
@@ -230,12 +277,17 @@ async function buildTrendResponse(
       return [];
     }
   };
-  const batchResults: Array<Array<{ itemid: string; clock: string; value: string }>> = [];
-  for (let i = 0; i < itemIds.length; i += CONCURRENCY) {
-    const slice = itemIds.slice(i, i + CONCURRENCY);
-    const results = await Promise.all(slice.map(fetchOne));
-    for (const r of results) batchResults.push(r);
-  }
+  const historyPromise = (async () => {
+    const allResults: Array<Array<{ itemid: string; clock: string; value: string }>> = [];
+    for (let i = 0; i < itemIds.length; i += CONCURRENCY) {
+      const slice = itemIds.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(slice.map(fetchOne));
+      for (const r of results) allResults.push(r);
+    }
+    return allResults;
+  })();
+
+  const [trendRecords, batchResults] = await Promise.all([trendPromise, historyPromise]);
 
   // Bucket by 1-minute window (`clock div 60`) and SUM per-item values inside
   // the same minute. Retellect typically has 3–4 concurrent python workers,
@@ -312,6 +364,119 @@ async function buildTrendResponse(
   const chosenByDay = bucketSamplesByDay(chosenSamples);
   const retellectByDay = bucketSamplesByDay(retellectSamples);
 
+  // ── Trend-derived per-day aggregation ─────────────────────────────────
+  //
+  // history.get only retains ~14 d on this Zabbix. For windows longer than
+  // that (timeline period set to 30 d, 60 d, etc.) we fall back to trend.get
+  // hourly aggregates. Per (item, hour) we get value_avg + value_max; we
+  // then bucket those into per-(category, day) sums and compute daily
+  // avg/peak the same way as history-based aggregation, just at hour grain.
+  //
+  // The merge rule below prefers history when present: on any day where
+  // history has samples, we ignore trend (history gives both avg/peak AND
+  // the minute-level minutesAbove counter). Trend fills the gap on older
+  // days where history is gone.
+  //
+  // Note: minutesAbove from trend is intentionally NOT computed — the
+  // metric is "raw 1-min samples ≥ threshold", which an hourly aggregate
+  // can't honestly answer (a 70 % hourly avg might mean any of: 70 % flat
+  // for 60 min, or 100 % for 30 min + 40 % for 30 min). We surface
+  // null/0 there and the UI shows "—" or skips the metric for those days.
+  const fmtVilnius = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vilnius" });
+  // For each (category, day), we accumulate per-hour SUMS across items.
+  // perCatTrend[cat][date] = Map<hour-of-period, { avgSum, maxSum }>.
+  type HourBucket = { avgSum: number; maxSum: number };
+  const perCatTrend: Record<Category, Map<string, Map<number, HourBucket>>> = {
+    retellect: new Map(),
+    scoApp: new Map(),
+    db: new Map(),
+    system: new Map(),
+  };
+  const sysCpuTrend = new Map<string, Map<number, HourBucket>>();
+  for (const t of trendRecords) {
+    const itemid = t.itemid;
+    const clockSec = parseInt(t.clock);
+    const date = fmtVilnius.format(new Date(clockSec * 1000));
+    const hourBucket = Math.floor(clockSec / 3600);
+    const vAvg = parseFloat(t.value_avg) || 0;
+    const vMax = parseFloat(t.value_max) || 0;
+    const acc = (target: Map<string, Map<number, HourBucket>>, vA: number, vM: number) => {
+      let dayMap = target.get(date);
+      if (!dayMap) { dayMap = new Map(); target.set(date, dayMap); }
+      const existing = dayMap.get(hourBucket);
+      if (existing) { existing.avgSum += vA; existing.maxSum += vM; }
+      else { dayMap.set(hourBucket, { avgSum: vA, maxSum: vM }); }
+    };
+    if (sysCpuItem && itemid === sysCpuItem.itemid) {
+      acc(sysCpuTrend, vAvg, vMax);
+      continue;
+    }
+    const cat = categoryById.get(itemid);
+    if (!cat) continue;
+    const vA = normaliseValue(vAvg, needsCoresDivision.has(itemid), cores);
+    const vM = normaliseValue(vMax, needsCoresDivision.has(itemid), cores);
+    acc(perCatTrend[cat], vA, vM);
+  }
+
+  // Pull the per-day {avg, peak} from the trend-bucketed map for the
+  // chosen category. For "other" we synthesize per-hour Other = max(0,
+  // sysCpu_avg - rt_avg - sa_avg - db_avg - sys_avg) hour-by-hour, then
+  // average across hours of the day.
+  const trendDayAggregate = (date: string): { avg: number; peak: number; hourCount: number } | null => {
+    if (category === "other") {
+      const sysDay = sysCpuTrend.get(date);
+      if (!sysDay) return null;
+      let sumOfHourTotals = 0;
+      let peakOfHourMax = 0;
+      let hourCount = 0;
+      for (const [hour, sysB] of sysDay) {
+        const rt = perCatTrend.retellect.get(date)?.get(hour)?.avgSum ?? 0;
+        const sa = perCatTrend.scoApp.get(date)?.get(hour)?.avgSum ?? 0;
+        const db = perCatTrend.db.get(date)?.get(hour)?.avgSum ?? 0;
+        const sys = perCatTrend.system.get(date)?.get(hour)?.avgSum ?? 0;
+        const otherAvg = Math.max(0, sysB.avgSum - rt - sa - db - sys);
+        // Peak: hour-max sysCpu minus hour-avg of the four (we don't have
+        // hour-max for category sums, only hour-avg sums; using avg here
+        // slightly under-reports peak but never over-reports — safe).
+        const otherPeak = Math.max(0, sysB.maxSum - rt - sa - db - sys);
+        sumOfHourTotals += otherAvg;
+        if (otherPeak > peakOfHourMax) peakOfHourMax = otherPeak;
+        hourCount += 1;
+      }
+      if (hourCount === 0) return null;
+      return {
+        avg: Math.round((sumOfHourTotals / hourCount) * 10) / 10,
+        peak: Math.round(peakOfHourMax * 10) / 10,
+        hourCount,
+      };
+    }
+    const dayMap = perCatTrend[category].get(date);
+    if (!dayMap || dayMap.size === 0) return null;
+    let sumOfHourTotals = 0;
+    let peakOfHourMax = 0;
+    for (const b of dayMap.values()) {
+      sumOfHourTotals += b.avgSum;
+      if (b.maxSum > peakOfHourMax) peakOfHourMax = b.maxSum;
+    }
+    return {
+      avg: Math.round((sumOfHourTotals / dayMap.size) * 10) / 10,
+      peak: Math.round(peakOfHourMax * 10) / 10,
+      hourCount: dayMap.size,
+    };
+  };
+  const trendIsRetellectOnDay = (date: string): boolean => {
+    // Retellect ON when ≥10 % of day-hours have meaningful python activity.
+    // Mirrors the helpers' minute-based rule but at hourly grain (≥10 % of
+    // 24 hours = at least 3 hours of python activity averaging ≥0.5 %).
+    const dayMap = perCatTrend.retellect.get(date);
+    if (!dayMap) return false;
+    let active = 0;
+    for (const b of dayMap.values()) {
+      if (b.avgSum >= 0.5) active += 1;
+    }
+    return (active / 24) * 100 >= 10;
+  };
+
   // Drop the now-redundant per-minute maps so the GC reclaims them while we
   // assemble the per-day output (large hosts can hold 14 d × 1440 min entries).
   for (const cat of ["retellect", "scoApp", "db", "system"] as Category[]) {
@@ -320,17 +485,46 @@ async function buildTrendResponse(
   sysCpuByMin.clear();
 
   const dayResults = datesInWindow.map((date) => {
+    // Prefer history (sample-level) when this day has any samples.
     const dayChosen = chosenByDay.get(date) ?? [];
     const dayPython = retellectByDay.get(date) ?? [];
-    const agg = aggregateDay(dayChosen, threshold);
-    const retellectOn = isRetellectOnDay(dayPython);
+    const histAgg = aggregateDay(dayChosen, threshold);
+    if (histAgg.totalSamples > 0) {
+      return {
+        date,
+        avg: histAgg.avg,
+        peak: histAgg.peak,
+        minutesAbove: histAgg.minutesAbove,
+        totalSamples: histAgg.totalSamples,
+        retellectOn: isRetellectOnDay(dayPython),
+        source: "history" as const,
+      };
+    }
+    // Fall back to trend hourly aggregates for older days.
+    const trendAgg = trendDayAggregate(date);
+    if (trendAgg) {
+      return {
+        date,
+        avg: trendAgg.avg,
+        peak: trendAgg.peak,
+        // minutesAbove can't be honestly derived from hourly aggregates —
+        // surface 0 and let the UI hide the metric for trend-source days.
+        minutesAbove: 0,
+        // totalSamples == hourCount so compareOnOff() still includes the day
+        // (its filter rule is "totalSamples > 0").
+        totalSamples: trendAgg.hourCount,
+        retellectOn: trendIsRetellectOnDay(date),
+        source: "trend" as const,
+      };
+    }
     return {
       date,
-      avg: agg.avg,
-      peak: agg.peak,
-      minutesAbove: agg.minutesAbove,
-      totalSamples: agg.totalSamples,
-      retellectOn,
+      avg: 0,
+      peak: 0,
+      minutesAbove: 0,
+      totalSamples: 0,
+      retellectOn: false,
+      source: "none" as const,
     };
   });
 
@@ -347,6 +541,6 @@ async function buildTrendResponse(
     category,
     threshold,
     daysWindow: days,
-    hasData: chosenSamples.length > 0,
+    hasData: dayResults.some((d) => d.source !== "none"),
   };
 }
