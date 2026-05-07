@@ -110,6 +110,11 @@ export class ZabbixClient {
     // the dashboard has a runtime fallback when `Device.cpuModel` is null in
     // the DB. Empty arrays come back for hosts whose `inventory_mode = -1`,
     // which we handle gracefully via `mapHostInventory`.
+    // 5-minute TTL: host topology + inventory only changes on Zabbix
+    // template updates or new agent installs — both rare events. The 6
+    // parallel page fetchers all hit `getHosts` first; without a long TTL,
+    // every page navigation older than 30 s pays the host.get round-trip
+    // again. Was the default 30 s before perf pass 2026-05-07.
     return cached(
       "zabbix:host.get",
       async () => {
@@ -127,6 +132,7 @@ export class ZabbixClient {
         }
         return hosts;
       },
+      5 * 60_000,
     );
   }
 
@@ -187,6 +193,10 @@ export class ZabbixClient {
     if (hostIds.length === 0) return [];
     // Cache key encodes the input parameters so different searches don't collide.
     const key = `zabbix:item.get:${search || "*"}:${hostIds.slice().sort().join(",")}`;
+    // 5-min TTL — item registry only changes when SP redeploys the Zabbix
+    // template (new metric keys, new processes added). 4 separate searches
+    // (system.cpu, proc, .cpu, system.cpu.util) fire on every page load —
+    // each is now reused across navigations within 5 min.
     return cached(key, () =>
       this.request("item.get", {
         output: ["itemid", "hostid", "name", "key_", "lastvalue", "units", "lastclock", "value_type", "state", "status"],
@@ -195,6 +205,7 @@ export class ZabbixClient {
         filter: { status: 0, state: 0 },
         sortfield: "name",
       }),
+      5 * 60_000,
     );
   }
 
@@ -221,6 +232,10 @@ export class ZabbixClient {
   ): Promise<{ hostId: string; totalEnabled: number; supported: number; unsupported: number; sampleErrors: string[] }[]> {
     if (hostIds.length === 0) return [];
     const cacheKey = `zabbix:agentHealth:${hostIds.slice().sort().join(",")}`;
+    // 60s TTL — agent state DOES change minute-by-minute (agents come and
+    // go), but the dashboard's Data Health tab tolerates ~1 min staleness.
+    // Was the default 30s; longer would mean a recently-recovered agent
+    // takes too long to switch from "broken" to "healthy" in the UI.
     return cached(cacheKey, async () => {
       const items = (await this.request("item.get", {
         output: ["itemid", "hostid", "key_", "state", "error"],
@@ -485,6 +500,12 @@ export class ZabbixClient {
   async getProcessCpuItems(hostIds: string[]): Promise<ProcessCpuItem[]> {
     if (hostIds.length === 0) return [];
     const cacheKey = `zabbix:procCpuItems:${hostIds.slice().sort().join(",")}`;
+    // 60s TTL — careful balance: this response carries `lastvalue` and
+    // `lastClock` that the Overview tab's "is Retellect running" check
+    // reads as the live signal. Bumping much past 60 s would stall the
+    // freshness reading (Zabbix native sample rate is 60 s, so 60 s cache
+    // matches the underlying cadence). Was the default 30 s; bumping to
+    // 60 s saves ~150–300 ms on every navigation within the same minute.
     const raw = (await cached(
       cacheKey,
       () =>
@@ -495,6 +516,7 @@ export class ZabbixClient {
           filter: { status: 0, state: 0 },
           sortfield: "key_",
         }),
+      60_000,
     )) as Array<Record<string, unknown>>;
     const result: ProcessCpuItem[] = [];
     for (const it of raw) {
@@ -523,7 +545,11 @@ export class ZabbixClient {
 
   /** Get resource metrics (CPU, RAM, Disk, Network) for all monitored hosts */
   async getResourceMetrics(): Promise<any[]> {
-    return cached("zabbix:resourceMetrics", () => this._getResourceMetricsUncached());
+    // 60s TTL — same reasoning as getProcessCpuItems: the response carries
+    // live `lastvalue`/`lastclock` for CPU util, memory, disk. Native Zabbix
+    // sample cadence is 60 s on this template, so 60 s cache matches the
+    // underlying refresh rate without staleness penalty.
+    return cached("zabbix:resourceMetrics", () => this._getResourceMetricsUncached(), 60_000);
   }
 
   private async _getResourceMetricsUncached(): Promise<any[]> {
