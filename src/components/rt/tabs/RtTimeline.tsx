@@ -850,10 +850,10 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           padding: "3px 6px", fontFamily: "'SF Mono','Cascadia Code',monospace", fontSize: 11,
           fontWeight: sel ? 600 : 400, whiteSpace: "nowrap",
           color: sel ? C.pillActive : "#343a40",
-          maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis",
+          minWidth: 70, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis",
         }} title={rowTitle}>{row.name}</td>
-        <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={row.cpuModel}>{row.cpuModel}</td>
-        <td style={{ padding: "3px 6px", textAlign: "center" }} title={row.rtActive ? "Retellect running (live python.cpu)" : "Retellect not detected on this host"}>
+        <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", minWidth: 110, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={row.cpuModel}>{row.cpuModel}</td>
+        <td style={{ padding: "3px 6px", textAlign: "center", minWidth: 60 }} title={row.rtActive ? "Retellect running (live python.cpu)" : "Retellect not detected on this host"}>
           <span style={{
             display: "inline-block", width: 8, height: 8, borderRadius: "50%",
             background: row.rtActive ? "#10b981" : "transparent",
@@ -1028,11 +1028,22 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 <th onClick={() => toggleSort("store")} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 0, background: C.headerBg, zIndex: 10, cursor: "pointer", userSelect: "none" }}>
                   Store{sortArrow("store")}
                 </th>
-                <th onClick={() => toggleSort("name")} style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
+                {/*
+                  Explicit minWidth on Host / CPU / Retellect headers (and the
+                  matching <td>s in renderHostRow) is REQUIRED — without it the
+                  table-layout: auto algorithm collapses these columns to 0 px
+                  when the day grid + sticky Store + right summary columns
+                  already exceed the container width. Symptom: header shows
+                  only "STORE", individual rows show only the store name with
+                  no host/CPU/retellect content visible. With 30 day cells × 32
+                  px = 960 px alone, narrow viewports (< ~1320 px after sidebar)
+                  trigger the collapse on `width: 100%` tables.
+                */}
+                <th onClick={() => toggleSort("name")} style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none", minWidth: 70 }}>
                   Host{sortArrow("name")}
                 </th>
-                <th style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap" }}>CPU</th>
-                <th onClick={() => toggleSort("rt")} style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none" }} title="Whether Retellect is installed on this host (DB flag)">
+                <th style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", minWidth: 110 }}>CPU</th>
+                <th onClick={() => toggleSort("rt")} style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 60 }} title="Whether Retellect is installed on this host (DB flag)">
                   Retellect{sortArrow("rt")}
                 </th>
                 {dates.map((d, i) => <th key={i} style={{ textAlign: "center", padding: "4px 0", fontSize: 8, fontWeight: 400, color: C.headerText, width: 32, minWidth: 32 }}>{String(d.getDate()).padStart(2, "0")}</th>)}
