@@ -5,6 +5,8 @@ import {
   aggregateRetellectCpu,
   summarizeHardwareClasses,
   isRetellectRunning,
+  isRetellectDeployed,
+  isRetellectActiveToday,
   RETELLECT_CPU_THRESHOLD,
 } from "./rt-overview-helpers";
 
@@ -273,6 +275,83 @@ describe("isRetellectRunning", () => {
     expect(isRetellectRunning({
       freshestMs: refMs - 301_000,
       refMs,
+      totalCpu: 5,
+    })).toBe(false);
+  });
+});
+
+// ─── isRetellectDeployed ──────────────────────────────────────────
+
+describe("isRetellectDeployed", () => {
+  it("false when host has never reported a python.cpu sample", () => {
+    expect(isRetellectDeployed(0)).toBe(false);
+  });
+
+  it("true even when the most recent sample is ancient (Retellect once-deployed)", () => {
+    // 30 days ago — clearly not running today, but the host DOES carry
+    // python.cpu items because Retellect was once deployed there.
+    const longAgo = Date.now() - 30 * 24 * 3600_000;
+    expect(isRetellectDeployed(longAgo)).toBe(true);
+  });
+
+  it("true for a freshly-reported sample", () => {
+    expect(isRetellectDeployed(Date.now() - 1000)).toBe(true);
+  });
+
+  it("rejects negative timestamps (defensive)", () => {
+    expect(isRetellectDeployed(-1)).toBe(false);
+  });
+});
+
+// ─── isRetellectActiveToday ───────────────────────────────────────
+
+describe("isRetellectActiveToday", () => {
+  const refMs = Date.UTC(2026, 4, 7, 12, 0, 0);
+
+  it("true when last sample is within 24h AND CPU above threshold", () => {
+    expect(isRetellectActiveToday({
+      freshestMs: refMs - 12 * 3600_000, // 12h ago
+      refMs,
+      totalCpu: 5,
+    })).toBe(true);
+  });
+
+  it("true at the exact 24h boundary (still inside the window)", () => {
+    expect(isRetellectActiveToday({
+      freshestMs: refMs - 24 * 3600_000,
+      refMs,
+      totalCpu: 5,
+    })).toBe(true);
+  });
+
+  it("false when last sample is older than 24h", () => {
+    expect(isRetellectActiveToday({
+      freshestMs: refMs - 25 * 3600_000,
+      refMs,
+      totalCpu: 5,
+    })).toBe(false);
+  });
+
+  it("false when CPU is below threshold (idle)", () => {
+    expect(isRetellectActiveToday({
+      freshestMs: refMs - 1 * 3600_000,
+      refMs,
+      totalCpu: 0.005, // below 0.01
+    })).toBe(false);
+  });
+
+  it("false when freshestMs is 0 (never reported)", () => {
+    expect(isRetellectActiveToday({
+      freshestMs: 0,
+      refMs,
+      totalCpu: 5,
+    })).toBe(false);
+  });
+
+  it("false when refMs is 0 (SSR / pre-mount)", () => {
+    expect(isRetellectActiveToday({
+      freshestMs: refMs - 1000,
+      refMs: 0,
       totalCpu: 5,
     })).toBe(false);
   });

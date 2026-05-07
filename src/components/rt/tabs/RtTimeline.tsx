@@ -9,7 +9,7 @@ import { ProcessCategoryReference } from "./ProcessCategoryReference";
 import { RtProcessTrend } from "./RtProcessTrend";
 import { useRtFilters } from "../RtFiltersContext";
 import { resolveCpuModel } from "./rt-inventory-helpers";
-import { isRetellectRunning } from "./rt-overview-helpers";
+import { isRetellectRunning, isRetellectDeployed, isRetellectActiveToday } from "./rt-overview-helpers";
 
 // Heatmap is a per-DAY peak view, so periods shorter than 1 day make no sense.
 // Trend retention on this Zabbix is ~5–7 days for trend.get and 14 days for
@@ -344,11 +344,28 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         // fresh (<5 min) AND CPU% > 1.0. We capture this on the row so the
         // filter, sort, and the column dot all switch from DB flag to telemetry.
         const rt = zHost ? retellectByHost.get(zHost.hostId) : undefined;
+        const refMs = Date.now();
+        // Three independent signals on the same telemetry:
+        //   rtActive       — running RIGHT NOW (≤5 min since last sample,
+        //                    summed CPU above noise floor). Drives the
+        //                    "Retellect On" filter pill.
+        //   rtDeployed     — host has EVER reported a python.cpu sample,
+        //                    independent of CPU value. Means Retellect was
+        //                    once installed on this checkout.
+        //   rtActiveToday  — produced meaningful CPU readings TODAY (last
+        //                    24 h). Useful per-row signal for the 14-day
+        //                    heatmap; "right now" is too narrow there.
         const rtActive = isRetellectRunning({
           freshestMs: rt?.freshestMs ?? 0,
-          refMs: Date.now(),
+          refMs,
           totalCpu: rt?.cpuTotal ?? 0,
           freshSec: RT_FILTER_FRESH_SEC,
+        });
+        const rtDeployed = isRetellectDeployed(rt?.freshestMs ?? 0);
+        const rtActiveToday = isRetellectActiveToday({
+          freshestMs: rt?.freshestMs ?? 0,
+          refMs,
+          totalCpu: rt?.cpuTotal ?? 0,
         });
         // Resolution order:
         //   1. Device.cpuModel (DB — sourced from Excel hardware registry)
@@ -368,7 +385,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             : cores > 0
               ? `${cores}-core (model unknown)`
               : "—";
-        return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: resolvedCpuModel, deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, rtActive, currentCpu: Math.round(cpuTotal * 10) / 10, cores, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedDays, minutesAbove, totalMinutes };
+        return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: resolvedCpuModel, deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, rtActive, rtDeployed, rtActiveToday, currentCpu: Math.round(cpuTotal * 10) / 10, cores, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedDays, minutesAbove, totalMinutes };
       });
   }, [pilot, zabbixByName, cpuDetail, trendByHostDate, retellectByHost, storeFilter, threshold, periodDays, dates, hasTrendData]);
 
@@ -415,7 +432,15 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       let cmp = 0;
       if (sortKey === "name") cmp = a.name.localeCompare(b.name);
       else if (sortKey === "store") cmp = a.storeName.localeCompare(b.storeName);
-      else if (sortKey === "rt") cmp = (a.rtActive ? 1 : 0) - (b.rtActive ? 1 : 0);
+      else if (sortKey === "rt") {
+        // Two-level sort: Today active first (most relevant), then Deployed
+        // — so a "deployed but idle" host ranks above a "never-deployed" host
+        // when "Today" is sorted desc. Matches user expectation when they
+        // click the column header.
+        const aKey = (a.rtActiveToday ? 2 : 0) + (a.rtDeployed ? 1 : 0);
+        const bKey = (b.rtActiveToday ? 2 : 0) + (b.rtDeployed ? 1 : 0);
+        cmp = aKey - bKey;
+      }
       else if (sortKey === "type") cmp = a.deviceType.localeCompare(b.deviceType);
       else if (sortKey === "exceed") cmp = a.minutesAbove - b.minutesAbove;
       else if (sortKey === "exceedPct") {
@@ -853,11 +878,45 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           minWidth: 70, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis",
         }} title={rowTitle}>{row.name}</td>
         <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", minWidth: 110, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={row.cpuModel}>{row.cpuModel}</td>
-        <td style={{ padding: "3px 6px", textAlign: "center", minWidth: 60 }} title={row.rtActive ? "Retellect running (live python.cpu)" : "Retellect not detected on this host"}>
+        {/*
+          Two-dot Retellect indicator (split 2026-05-07):
+            - "Deploy" — filled green when host has EVER reported python.cpu
+              (= Retellect was installed at some point).
+            - "Today" — filled green only if Retellect produced meaningful
+              CPU readings in the last 24 h. Logically a SUBSET of Deploy,
+              so when "Today" is on, "Deploy" must also be on.
+          A host with Deploy=on, Today=off means: Retellect was once installed
+          here but is currently idle / not running.
+        */}
+        <td
+          style={{ padding: "3px 6px", textAlign: "center", minWidth: 50 }}
+          title={
+            row.rtDeployed
+              ? "Retellect deployed (host has python.cpu items, sample observed at some point)"
+              : "Retellect not deployed on this host"
+          }
+        >
           <span style={{
             display: "inline-block", width: 8, height: 8, borderRadius: "50%",
-            background: row.rtActive ? "#10b981" : "transparent",
-            border: row.rtActive ? "none" : "1px solid #cbd5e1",
+            background: row.rtDeployed ? "#0ea5e9" : "transparent",
+            border: row.rtDeployed ? "none" : "1px solid #cbd5e1",
+            verticalAlign: "middle",
+          }} />
+        </td>
+        <td
+          style={{ padding: "3px 6px", textAlign: "center", minWidth: 50 }}
+          title={
+            row.rtActiveToday
+              ? "Retellect active today (meaningful python.cpu within the last 24 h)"
+              : row.rtDeployed
+                ? "Retellect deployed but no meaningful activity in the last 24 h"
+                : "Retellect not deployed"
+          }
+        >
+          <span style={{
+            display: "inline-block", width: 8, height: 8, borderRadius: "50%",
+            background: row.rtActiveToday ? "#10b981" : "transparent",
+            border: row.rtActiveToday ? "none" : "1px solid #cbd5e1",
             verticalAlign: "middle",
           }} />
         </td>
@@ -1043,8 +1102,28 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   Host{sortArrow("name")}
                 </th>
                 <th style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", minWidth: 110 }}>CPU</th>
-                <th onClick={() => toggleSort("rt")} style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 60 }} title="Whether Retellect is installed on this host (DB flag)">
-                  Retellect{sortArrow("rt")}
+                {/*
+                  Retellect column was a single dot mixing two questions:
+                  "is it installed?" and "is it active right now?". Split
+                  into two narrower columns 2026-05-07 — Deployed (ever
+                  observed any python.cpu sample) and Active today (last
+                  24 h had meaningful CPU). The "rt" sort key still ranks
+                  by the "Active today" signal, which is the live-status
+                  question users sort on.
+                */}
+                <th
+                  onClick={() => toggleSort("rt")}
+                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 50 }}
+                  title="Deployed — host has ever reported a python.cpu sample (Retellect was installed on this checkout at some point)."
+                >
+                  Deploy
+                </th>
+                <th
+                  onClick={() => toggleSort("rt")}
+                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 50 }}
+                  title="Active today — host had meaningful Retellect (python) CPU activity in the last 24 h."
+                >
+                  Today{sortArrow("rt")}
                 </th>
                 {dates.map((d, i) => <th key={i} style={{ textAlign: "center", padding: "4px 0", fontSize: 8, fontWeight: 400, color: C.headerText, width: 32, minWidth: 32 }}>{String(d.getDate()).padStart(2, "0")}</th>)}
                 <th onClick={() => toggleSort("exceed")} title={`Minutes ≥ ${threshold}% out of total sampled minutes`} style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
@@ -1149,7 +1228,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                       background: "#f1f5f9",
                       cursor: "pointer",
                     }} onClick={() => toggleGroup(groupName)}>
-                      <td colSpan={4} style={{
+                      <td colSpan={5} style={{
                         padding: "6px 10px",
                         position: "sticky", left: 0, background: "#f1f5f9", zIndex: 10,
                       }}>

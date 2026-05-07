@@ -56,6 +56,44 @@ export function isRetellectRunning(input: {
   return totalCpu > RETELLECT_CPU_THRESHOLD;
 }
 
+/**
+ * Has Retellect ever been observed on this host? True when the host has
+ * EVER reported a python.cpu sample — independent of CPU value. The
+ * Zabbix template only adds python.cpu items to hosts where Retellect was
+ * deployed, so a non-zero `freshestMs` means "Retellect was deployed and
+ * has emitted at least one sample at some point" = the indicator the user
+ * cares about for "this checkout has Retellect installed".
+ *
+ * Crucially this DOES NOT check totalCpu — an idle Retellect that hasn't
+ * processed a transaction in days still reports 0 % readings, and we
+ * still want to count those hosts as deployed. Use `isRetellectRunning`
+ * (or `isRetellectActiveToday`) when you want the activity signal.
+ */
+export function isRetellectDeployed(freshestMs: number): boolean {
+  return freshestMs > 0;
+}
+
+/**
+ * Did Retellect produce meaningful CPU readings TODAY (last 24 h)?
+ *
+ * Rule: same shape as `isRetellectRunning` but with a 24-hour freshness
+ * window instead of 5 min. Suitable for the per-row "today active" dot
+ * in the 14-day heatmap, where "right now" is too narrow a question.
+ *
+ * Same RETELLECT_CPU_THRESHOLD (0.01 %) — captures actual workloads while
+ * filtering out floor-zero noise.
+ */
+export function isRetellectActiveToday(input: {
+  freshestMs: number;
+  refMs: number;
+  totalCpu: number;
+}): boolean {
+  return isRetellectRunning({
+    ...input,
+    freshSec: 24 * 3600,
+  });
+}
+
 /** Format Retellect CPU value for display. Below 0.05 (rounds to 0.0%) → "0%". Above → "X.X%" with min 0.1. */
 export function formatRetellectCpu(rtCpuTotal: number): string {
   if (rtCpuTotal <= 0) return "0%";
