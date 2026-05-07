@@ -1,6 +1,8 @@
+import { Suspense } from "react";
 import { prisma } from "@/lib/db";
 import { notFound, redirect } from "next/navigation";
 import { RtPilotWorkspace } from "@/components/rt/RtPilotWorkspace";
+import type { RtPilotData, ZabbixData } from "@/components/rt/RtPilotWorkspace";
 import { getZabbixClient } from "@/lib/zabbix/client";
 import { fetchSource } from "@/lib/data-source";
 import type { ProcessCategory } from "@/lib/zabbix/types";
@@ -72,6 +74,162 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
     if (d.sourceHostKey) expectedHostKeys.add(d.sourceHostKey);
     if (d.name) expectedHostKeys.add(d.name);
   }
+
+  // ── Streaming split (perf pass 2026-05-07) ──────────────────────────
+  //
+  // The 6 parallel Zabbix fetches below (resources, cpu detail, proc
+  // items, proc cpu, cpu history, agent health) are the slow path —
+  // 1.5–3 s on a fully cold cache. Previously the page awaited them all
+  // before returning ANY HTML, leaving the user staring at the previous
+  // route for the whole window.
+  //
+  // We now build the pilot client payload first (no Zabbix dependency),
+  // kick off `loadZabbixDataPayload` WITHOUT awaiting, and render a
+  // Suspense boundary whose async child awaits the promise. Next.js
+  // streams the page shell to the client immediately and the workspace
+  // content swaps in when the data resolves. The route also has a
+  // sibling `loading.tsx` covering the Phase 1 (auth + DB pilot fetch)
+  // window so the user sees a populated layout from click 0.
+  const pilotData: RtPilotData = buildPilotData(pilot);
+  const zabbixDataPromise = loadZabbixDataPayload(pilotId, expectedHostKeys);
+
+  return (
+    <Suspense fallback={<ZabbixLoadingFallback pilot={pilotData} />}>
+      <RtPilotPageContent
+        pilot={pilotData}
+        zabbixDataPromise={zabbixDataPromise}
+        initialTab={tab || "overview"}
+        allowedTabs={Array.from(allowedTabs)}
+      />
+    </Suspense>
+  );
+}
+
+// ─── Phase 2 child: awaits the heavy zabbix promise, mounts workspace ──
+async function RtPilotPageContent({
+  pilot,
+  zabbixDataPromise,
+  initialTab,
+  allowedTabs,
+}: {
+  pilot: RtPilotData;
+  zabbixDataPromise: Promise<ZabbixData>;
+  initialTab: string;
+  allowedTabs: string[];
+}) {
+  const zabbix = await zabbixDataPromise;
+  return (
+    <RtPilotWorkspace
+      pilot={pilot}
+      zabbix={zabbix}
+      initialTab={initialTab}
+      allowedTabs={allowedTabs}
+    />
+  );
+}
+
+// ─── Suspense fallback while zabbix data is loading ────────────────────
+//
+// Distinct from loading.tsx: that fires during the FULL transition
+// (auth + DB pilot fetch). This one fires once the page shell has
+// streamed and only the zabbix-dependent chunk is still pending. Showing
+// the pilot header here gives users confirmation they landed on the
+// right page even before the heavy data lands.
+function ZabbixLoadingFallback({ pilot }: { pilot: RtPilotData }) {
+  return (
+    <div>
+      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "16px 24px" }}>
+        <div style={{ maxWidth: 1152, margin: "0 auto" }}>
+          <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
+            Home / Retellect /{" "}
+            <span style={{ color: "#475569", fontWeight: 500 }}>{pilot.name}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: "#111827", margin: 0 }}>
+              {pilot.name}
+            </h1>
+            <span
+              style={{
+                fontSize: 11,
+                padding: "3px 10px",
+                borderRadius: 10,
+                background: "#fef3c7",
+                color: "#92400e",
+                fontWeight: 500,
+              }}
+            >
+              loading data…
+            </span>
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: 24, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>
+        Fetching live Zabbix data for {pilot.deviceCount}{" "}
+        {pilot.deviceCount === 1 ? "device" : "devices"}…
+      </div>
+    </div>
+  );
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────
+
+// Define the Prisma pilot row shape inline — pulling Prisma generated types
+// here would need a regenerate after every schema change for marginal value.
+// The shape matches the `include` block above; if that changes, this
+// signature changes too.
+type PrismaPilotRow = NonNullable<Awaited<ReturnType<typeof prisma.pilot.findUnique>>> & {
+  client: { name: string; code: string };
+  devices: Array<{
+    id: string;
+    name: string;
+    sourceHostKey: string | null;
+    cpuModel: string | null;
+    ramGb: number | null;
+    retellectEnabled: boolean;
+    retellectConfidence: string | null;
+    status: string;
+    deviceType: string;
+    os: string | null;
+    store: { name: string } | null;
+  }>;
+  stores: Array<{ id: string; name: string; code: string }>;
+  _count: { devices: number; incidents: number; stores: number };
+};
+
+function buildPilotData(pilot: PrismaPilotRow): RtPilotData {
+  return {
+    id: pilot.id,
+    name: pilot.name,
+    shortCode: pilot.shortCode,
+    status: pilot.status,
+    clientName: pilot.client.name,
+    goalSummary: pilot.goalSummary,
+    notes: pilot.notes,
+    deviceCount: pilot._count.devices,
+    incidentCount: pilot._count.incidents,
+    storeCount: pilot._count.stores,
+    stores: pilot.stores.map((s) => ({
+      id: s.id,
+      name: s.name,
+      code: s.code,
+    })),
+    devices: pilot.devices.map((d) => ({
+      id: d.id,
+      name: d.name,
+      sourceHostKey: d.sourceHostKey,
+      storeName: d.store?.name ?? "—",
+      cpuModel: d.cpuModel ?? "—",
+      ramGb: d.ramGb ?? 0,
+      retellectEnabled: d.retellectEnabled,
+      retellectConfidence: d.retellectConfidence,
+      status: d.status,
+      deviceType: d.deviceType,
+      os: d.os,
+    })),
+  };
+}
+
+async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<string>): Promise<ZabbixData> {
   const [
     zabbixResult,
     zabbixCpuDetailResult,
@@ -224,40 +382,8 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
   const cpuHistory = zabbixHistoryResult.data || [];
   const agentHealth = zabbixAgentHealthResult.data || [];
 
-  // Serialize pilot data for client component
-  const pilotData = {
-    id: pilot.id,
-    name: pilot.name,
-    shortCode: pilot.shortCode,
-    status: pilot.status,
-    clientName: pilot.client.name,
-    goalSummary: pilot.goalSummary,
-    notes: pilot.notes,
-    deviceCount: pilot._count.devices,
-    incidentCount: pilot._count.incidents,
-    storeCount: pilot._count.stores,
-    stores: pilot.stores.map((s) => ({
-      id: s.id,
-      name: s.name,
-      code: s.code,
-    })),
-    devices: pilot.devices.map((d) => ({
-      id: d.id,
-      name: d.name,
-      sourceHostKey: d.sourceHostKey,
-      storeName: d.store?.name ?? "—",
-      cpuModel: d.cpuModel ?? "—",
-      ramGb: d.ramGb ?? 0,
-      retellectEnabled: d.retellectEnabled,
-      retellectConfidence: d.retellectConfidence,
-      status: d.status,
-      deviceType: d.deviceType,
-      os: d.os,
-    })),
-  };
-
   // Build Zabbix live data payload
-  const zabbixData = {
+  return {
     status: zabbixResult.status,
     fetchMs: zabbixResult.fetchMs,
     cachedAt: zabbixResult.cachedAt,
@@ -332,13 +458,4 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
       sampleErrors: string[];
     }>,
   };
-
-  return (
-    <RtPilotWorkspace
-      pilot={pilotData}
-      zabbix={zabbixData}
-      initialTab={tab || "overview"}
-      allowedTabs={Array.from(allowedTabs)}
-    />
-  );
 }
