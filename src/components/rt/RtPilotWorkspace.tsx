@@ -155,6 +155,14 @@ export interface ZabbixData {
   cpuTrendsMeta?: { status: "live" | "cached" | "unavailable"; fetchMs: number; error: string | null };
   /** Per-host item state summary — flags hosts with broken Zabbix agents */
   agentHealth?: ZabbixAgentHealth[];
+  /**
+   * Strict registry: hostIds with Retellect items configured in their
+   * Zabbix template, regardless of current state (state=1 / lastclock=0
+   * still count). Used by Timeline's "Deploy" column dot so a deployed-
+   * but-idle host (e.g. agent can no longer read perf-counters) is not
+   * indistinguishable from a host that was never deployed.
+   */
+  retellectDeployedHostIds?: string[];
 }
 
 // ─── Constants ──────────────────────────────────────────────────────

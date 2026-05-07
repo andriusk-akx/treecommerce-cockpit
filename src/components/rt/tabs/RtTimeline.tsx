@@ -237,7 +237,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     return result;
   }, [periodDays]);
 
-  const { zabbixByName, cpuDetail, trendByHostDate, retellectByHost } = useMemo(() => {
+  const { zabbixByName, cpuDetail, trendByHostDate, retellectByHost, deployedHostIds } = useMemo(() => {
     const byName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
     const detail = new Map<string, { user: number; system: number; total: number; numCpus: number }>();
     for (const item of zabbix.cpuDetail) {
@@ -272,7 +272,12 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         rtMap.set(proc.hostId, { cpuTotal: cpuValue, freshestMs: lastMs });
       }
     }
-    return { zabbixByName: byName, cpuDetail: detail, trendByHostDate: trendMap, retellectByHost: rtMap };
+    // Strict registry signal — hostIds with Retellect items configured in
+    // their Zabbix template, regardless of state. The page passes this as
+    // an array (so it survives the JSON cache layer); we re-hydrate to a
+    // Set here so per-row lookups are O(1).
+    const deployedSet = new Set<string>(zabbix.retellectDeployedHostIds ?? []);
+    return { zabbixByName: byName, cpuDetail: detail, trendByHostDate: trendMap, retellectByHost: rtMap, deployedHostIds: deployedSet };
   }, [zabbix]);
 
   // Single source of truth lives in rt-overview-helpers.ts (`isRetellectRunning`,
@@ -345,23 +350,28 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         // filter, sort, and the column dot all switch from DB flag to telemetry.
         const rt = zHost ? retellectByHost.get(zHost.hostId) : undefined;
         const refMs = Date.now();
-        // Three independent signals on the same telemetry:
+        // Three independent signals layered on top of each other:
+        //
         //   rtActive       — running RIGHT NOW (≤5 min since last sample,
         //                    summed CPU above noise floor). Drives the
         //                    "Retellect On" filter pill.
-        //   rtDeployed     — host has EVER reported a python.cpu sample,
-        //                    independent of CPU value. Means Retellect was
-        //                    once installed on this checkout.
+        //   rtDeployed     — Retellect items configured in the Zabbix
+        //                    template for this host. Either telemetry has
+        //                    seen samples (freshestMs > 0) OR the strict
+        //                    registry says items exist regardless of state
+        //                    — covers Pavilnonys SCO2 case where 8 python
+        //                    items exist as state=1 (unsupported, no samples).
         //   rtActiveToday  — produced meaningful CPU readings TODAY (last
-        //                    24 h). Useful per-row signal for the 14-day
-        //                    heatmap; "right now" is too narrow there.
+        //                    24 h). Subset of rtDeployed.
         const rtActive = isRetellectRunning({
           freshestMs: rt?.freshestMs ?? 0,
           refMs,
           totalCpu: rt?.cpuTotal ?? 0,
           freshSec: RT_FILTER_FRESH_SEC,
         });
-        const rtDeployed = isRetellectDeployed(rt?.freshestMs ?? 0);
+        const rtDeployed =
+          (zHost ? deployedHostIds.has(zHost.hostId) : false) ||
+          isRetellectDeployed(rt?.freshestMs ?? 0);
         const rtActiveToday = isRetellectActiveToday({
           freshestMs: rt?.freshestMs ?? 0,
           refMs,

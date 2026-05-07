@@ -543,6 +543,67 @@ export class ZabbixClient {
     return result;
   }
 
+  /**
+   * Find which hosts have Retellect deployed in their Zabbix template,
+   * regardless of whether the items are currently collecting samples.
+   *
+   * Why: a host can have python.cpu items in `status: 0` (enabled) but
+   * `state: 1` (ZBX_NOTSUPPORTED) — that's the agent failing to read the
+   * counters because Retellect isn't actually running. The python items
+   * still exist in the template though, which is the user-meaningful
+   * "Retellect was deployed here" signal. Pavilnonys SCO2 (2026-05-07) is
+   * the canonical example: 8 python items registered, every one state=1
+   * with lastclock=0.
+   *
+   * `getProcessCpuItems` filters those out (it powers the LIVE retellect
+   * signal in the Overview tab, which needs freshness). This method does
+   * NOT filter by state — it answers a strict registry question, so a
+   * deployed-but-idle host shows up here.
+   *
+   * Returns the set of hostIds with at least one Retellect-pattern item
+   * registered. Light-weight: items search for "python" + key suffix
+   * checks client-side; one round trip per call.
+   */
+  async getRetellectDeployedHostIds(hostIds: string[]): Promise<Set<string>> {
+    if (hostIds.length === 0) return new Set();
+    const cacheKey = `zabbix:retellectDeployedHostIds:${hostIds.slice().sort().join(",")}`;
+    return (await cached(
+      cacheKey,
+      async () => {
+        // Two complementary searches because Zabbix's `search` is a single
+        // AND clause — we want python.cpu (custom keys) OR perf_counter
+        // \Process(python*) (Windows perfcounter style). Run them in
+        // parallel; either match counts as "deployed".
+        const [byCpuKey, byPerfKey] = await Promise.all([
+          this.request("item.get", {
+            output: ["hostid"],
+            hostids: hostIds,
+            // search: substring match. ".cpu" alone would also catch
+            // system.cpu.* items, so we additionally restrict to keys
+            // starting with "python" via the search field.
+            search: { key_: "python" },
+            // status: 0 = administratively enabled. NO state filter — this
+            // is the whole point of the method.
+            filter: { status: 0 },
+          }) as Promise<Array<{ hostid: string; key_?: string }>>,
+          this.request("item.get", {
+            output: ["hostid", "key_"],
+            hostids: hostIds,
+            search: { key_: "Process(python" },
+            filter: { status: 0 },
+          }) as Promise<Array<{ hostid: string; key_?: string }>>,
+        ]);
+        const out = new Set<string>();
+        for (const it of byCpuKey) out.add(String(it.hostid));
+        for (const it of byPerfKey) out.add(String(it.hostid));
+        return out;
+      },
+      // 5-min TTL — item registry is the same cadence as getItems(); only
+      // changes on Zabbix template redeploy.
+      5 * 60_000,
+    ));
+  }
+
   /** Get resource metrics (CPU, RAM, Disk, Network) for all monitored hosts */
   async getResourceMetrics(): Promise<any[]> {
     // 60s TTL — same reasoning as getProcessCpuItems: the response carries

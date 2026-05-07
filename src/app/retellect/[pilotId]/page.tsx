@@ -237,6 +237,7 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
     zabbixProcCpuResult,
     zabbixHistoryResult,
     zabbixAgentHealthResult,
+    zabbixDeployedHostIds,
   ] = await Promise.all([
     fetchSource(`zabbix-rt-resources-${pilotId}`, {
       source: "zabbix",
@@ -373,6 +374,30 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
         return await client.getAgentHealthSummary(Array.from(matchedHostIds));
       },
     }),
+    // Strict registry signal: which hosts have Retellect items registered
+    // in their Zabbix template, regardless of whether those items are
+    // currently collecting samples. Drives the "Deploy" indicator dot, which
+    // must light up for hosts where Retellect was deployed but the agent
+    // can no longer read perf-counters (e.g. Pavilnonys SCO2 — 8 python
+    // items, all state=ZBX_NOTSUPPORTED, lastclock=0).
+    fetchSource(`zabbix-rt-deployed-hostids-${pilotId}`, {
+      source: "zabbix",
+      label: "Zabbix Retellect Deployment Map",
+      env: "prod",
+      fetcher: async (): Promise<string[]> => {
+        const client = getZabbixClient();
+        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
+        const matchedHostIds = new Set<string>();
+        for (const h of allHosts) {
+          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
+        }
+        if (matchedHostIds.size === 0) return [];
+        const deployed = await client.getRetellectDeployedHostIds(Array.from(matchedHostIds));
+        // Serialise as array — JSON-friendly so the disk cache layer in
+        // fetchSource can persist it.
+        return Array.from(deployed);
+      },
+    }),
   ]);
 
   const zabbixHosts = zabbixResult.data || [];
@@ -381,6 +406,7 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
   const procCpuItems = zabbixProcCpuResult.data || [];
   const cpuHistory = zabbixHistoryResult.data || [];
   const agentHealth = zabbixAgentHealthResult.data || [];
+  const deployedHostIds = zabbixDeployedHostIds.data || [];
 
   // Build Zabbix live data payload
   return {
@@ -457,5 +483,12 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
       unsupported: number;
       sampleErrors: string[];
     }>,
+    // Strict-registry "Retellect deployed" set — hostIds with python items
+    // configured in the Zabbix template, regardless of whether those items
+    // are currently collecting samples. The Timeline's Deploy column reads
+    // this so deployed-but-broken hosts (perfcounter not readable, agent
+    // misconfigured) still show as deployed instead of looking identical
+    // to never-deployed hosts.
+    retellectDeployedHostIds: deployedHostIds as string[],
   };
 }
