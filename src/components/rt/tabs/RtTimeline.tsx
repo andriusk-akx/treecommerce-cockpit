@@ -1078,7 +1078,17 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       )}
       <div style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 6, overflow: "hidden", position: "relative" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          {/*
+            Table width strategy 2026-05-07: 'min-width: 100%' + 'width: max-content'
+            so the table fills the wrapper when content is narrower than the viewport
+            (small periods like 7 d) but grows to its natural content width when wider
+            (30 d / 60 d). The wrapper's overflowX: auto then provides the horizontal
+            scroll naturally. With the prior 'width: 100%' the browser kept trying to
+            fit min-content into the viewport, occasionally squashing day cells below
+            the 32 px hint when the left columns + summary couldn't compress further —
+            which is the bug where '30 d period' dropped the per-day cell visualisation.
+          */}
+          <table style={{ minWidth: "100%", width: "max-content", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: C.headerBg }}>
                 {/* New ordering per user feedback: Store → Host → CPU → Retellect.
@@ -1113,14 +1123,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 */}
                 <th
                   onClick={() => toggleSort("rt")}
-                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 50 }}
+                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 36 }}
                   title="Deployed — host has ever reported a python.cpu sample (Retellect was installed on this checkout at some point)."
                 >
                   Deploy
                 </th>
                 <th
                   onClick={() => toggleSort("rt")}
-                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 50 }}
+                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 36 }}
                   title="Active today — host had meaningful Retellect (python) CPU activity in the last 24 h."
                 >
                   Today{sortArrow("rt")}
