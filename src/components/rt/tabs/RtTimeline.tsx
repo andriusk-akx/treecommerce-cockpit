@@ -136,7 +136,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // inside RtFiltersContext on read).
   const granularity = filters.granularity;
   const retellectInstalled = filters.retellectInstalled;
-  const setRetellectInstalled = (v: boolean | null) => setFilter("retellectInstalled", v);
+  const setRetellectInstalled = (v: "today" | "installed" | null) => setFilter("retellectInstalled", v);
   // chartMode kept in filter context for backwards-compat with stored prefs;
   // chart now has a single visualisation (line) so we don't read it.
 
@@ -413,17 +413,18 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       const q = search.toLowerCase();
       rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.deviceType.toLowerCase().includes(q) || r.cpuModel.toLowerCase().includes(q));
     }
-    // Two separate pills now: "Retellect On" and "Retellect Off". They are
-    // mutually exclusive in the UI (clicking one deactivates the other), so
-    // only three states reach this filter:
-    //   true   — show hosts where Retellect is currently active (rtActive)
-    //   false  — show hosts where it is not
-    //   null   — no filter
-    // Telemetry-based, not DB flag (see RT-BACKFILL backlog).
-    if (retellectInstalled === true) {
-      rows = rows.filter((r) => r.rtActive);
-    } else if (retellectInstalled === false) {
-      rows = rows.filter((r) => !r.rtActive);
+    // Two mutually-exclusive Retellect filter pills (post-2026-05-07):
+    //   "today"     — show only hosts that produced meaningful Retellect
+    //                 (python.cpu) activity within the last 24 h.
+    //   "installed" — show only hosts where Retellect items are configured
+    //                 in the Zabbix template, regardless of activity.
+    //                 This is a SUPERSET of "today" — picking it surfaces
+    //                 deployed-but-idle hosts that "today" would hide.
+    //   null        — no filter.
+    if (retellectInstalled === "today") {
+      rows = rows.filter((r) => r.rtActiveToday);
+    } else if (retellectInstalled === "installed") {
+      rows = rows.filter((r) => r.rtDeployed);
     }
     if (cpuModelFilter !== "all") {
       rows = rows.filter((r) => r.cpuModel === cpuModelFilter);
@@ -793,15 +794,19 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       </div>
       <div style={{ width: 1, height: 16, background: C.border }} />
       <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }} title="Filter by Retellect telemetry">Filter</span>
-      {/* Two mutually-exclusive Retellect filter pills:
-          • "Retellect On"  — only hosts with live python.cpu telemetry (rtActive)
-          • "Retellect Off" — only hosts WITHOUT live telemetry
-          Clicking the active one deselects (returns to "show all"). Telemetry-
-          based, not DB.retellectEnabled (see RT-BACKFILL backlog). */}
+      {/* Two mutually-exclusive Retellect filter pills (post-2026-05-07):
+          • "Retellect Today"      — only hosts with meaningful python.cpu
+                                     activity within the last 24 h
+                                     (matches the RT TODAY column dot).
+          • "Retellect Installed"  — only hosts where Retellect items are
+                                     configured in the Zabbix template,
+                                     regardless of current activity (matches
+                                     the RT INST column dot — superset of Today).
+          Clicking the active one deselects (returns to "show all"). */}
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
         {([
-          { id: true as const, label: "Retellect On", dot: "#10b981", bgActive: "#ecfdf5", borderActive: "#a7f3d0", textActive: "#065f46", tip: "Show only hosts where Retellect is installed (live python.cpu telemetry within the last 2h)." },
-          { id: false as const, label: "Retellect Off", dot: "#94a3b8", bgActive: "#f1f5f9", borderActive: "#cbd5e1", textActive: "#334155", tip: "Show only hosts WITHOUT live Retellect telemetry." },
+          { id: "today" as const, label: "Retellect Today", dot: "#10b981", bgActive: "#ecfdf5", borderActive: "#a7f3d0", textActive: "#065f46", tip: "Show only hosts with meaningful Retellect (python.cpu) activity in the last 24 h. Matches the RT TODAY column dot." },
+          { id: "installed" as const, label: "Retellect Installed", dot: "#0ea5e9", bgActive: "#eff6ff", borderActive: "#bfdbfe", textActive: "#1e40af", tip: "Show only hosts where Retellect items are configured in the Zabbix template (deployment registry — includes deployed-but-idle hosts). Matches the RT INST column dot." },
         ]).map((p) => {
           const active = retellectInstalled === p.id;
           return (

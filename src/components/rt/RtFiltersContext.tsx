@@ -23,8 +23,21 @@ export interface DashboardFilters {
   cpuModel: string;
   /** Free-text search over host name / device type / CPU model. */
   search: string;
-  /** Retellect-installed filter. null = no filter, true = only installed, false = only not installed. */
-  retellectInstalled: boolean | null;
+  /**
+   * Retellect filter pill state.
+   *   "today"     → show only hosts with meaningful Retellect (python.cpu)
+   *                 activity in the last 24 h. Strict subset of "installed".
+   *   "installed" → show only hosts where Retellect items are configured
+   *                 in the Zabbix template (regardless of current activity).
+   *   null        → no filter.
+   *
+   * Was `boolean | null` until 2026-05-07 when the negative-filter pill
+   * ("Retellect Off") was replaced with a positive-filter pill
+   * ("Retellect Installed"). The localStorage migration in the provider
+   * below collapses any pre-migration boolean value to `null` rather than
+   * trying to guess intent.
+   */
+  retellectInstalled: "today" | "installed" | null;
   /** Timeline period — preset id ("14d", "30d", "90d") or numeric custom days as string. */
   period: string;
   /** Timeline threshold (used by heatmap colour and exceed count). */
@@ -55,7 +68,7 @@ const FILTER_LABELS: Array<{
   { key: "store", label: "Store", format: (v) => String(v) },
   { key: "cpuModel", label: "CPU", format: (v) => String(v) },
   { key: "search", label: "Search", format: (v) => `"${String(v)}"` },
-  { key: "retellectInstalled", label: "Retellect", format: (v) => v === true ? "installed" : v === false ? "not installed" : "" },
+  { key: "retellectInstalled", label: "Retellect", format: (v) => v === "today" ? "active today" : v === "installed" ? "installed" : "" },
   { key: "period", label: "Period", format: (v) => /^\d+$/.test(String(v)) ? `${v}d` : String(v) },
   { key: "threshold", label: "Threshold", format: (v) => `${v}%` },
   { key: "granularity", label: "Granularity", format: (v) => `${v}min` },
@@ -108,6 +121,21 @@ export function RtFiltersProvider({ pilotId, children }: ProviderProps) {
       // {1, 60} set back to the default (1).
       if (merged.granularity !== 1 && merged.granularity !== 60) {
         merged.granularity = defaultFilters.granularity;
+      }
+      // Migration 2026-05-07: retellectInstalled was `boolean | null`; the
+      // pill bar replaced the negative "Off" filter with a positive
+      // "Installed" filter, and the type widened to "today" | "installed"
+      // | null. Pre-migration localStorage payloads still carry booleans —
+      // collapse them all to null rather than trying to guess intent
+      // (`true` "On" semantically maps to "today", but the user may
+      // genuinely want the wider "installed" filter post-migration; safer
+      // to start clean than silently keep a different filter state).
+      if (
+        merged.retellectInstalled !== null &&
+        merged.retellectInstalled !== "today" &&
+        merged.retellectInstalled !== "installed"
+      ) {
+        merged.retellectInstalled = null;
       }
       return merged;
     } catch {
