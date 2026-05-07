@@ -1383,6 +1383,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           hostId={null}
           displayName={null}
           threshold={threshold}
+          periodDays={periodDays}
         />
         {/* Process category reference — explains what items map to what
             category. Sits above the data-coverage banner because the user
@@ -1806,6 +1807,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       hostId={drill.hostId}
       displayName={drill.displayName}
       threshold={threshold}
+      periodDays={periodDays}
     />
     </>
   );

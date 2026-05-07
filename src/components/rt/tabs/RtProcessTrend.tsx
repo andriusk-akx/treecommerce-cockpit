@@ -54,11 +54,19 @@ interface ApiResponse {
 // Categories mirror the existing CPU Timeline drill-down (RtTimeline.tsx).
 // Order: SCO App first because it's the canonical "Retellect impact" lens
 // for the SP admin investigation that drove this card's design.
+//
+// "Other" mirrors the same bucket the drill-down shows beneath the four
+// monitored processes — it's `system.cpu.util - (retellect + scoApp + db +
+// system)` per minute, i.e. the CPU consumed by processes we don't track
+// by name (kernel, services, IBM BigFix endpoint mgmt before it was
+// categorised, antivirus, etc.). Useful when the user wants to see whether
+// the "non-monitored" bucket is the actual mover.
 const CATEGORIES = [
   { id: "scoApp", label: "SCO App (sp.sss)", color: "#f59f00" },
   { id: "retellect", label: "Retellect (python)", color: "#fa5252" },
   { id: "db", label: "DB (sqlservr)", color: "#9775fa" },
   { id: "system", label: "System (vmware-vmx)", color: "#0c8feb" },
+  { id: "other", label: "Other (host − monitored)", color: "#94a3b8" },
 ] as const;
 type CategoryId = typeof CATEGORIES[number]["id"];
 
@@ -98,13 +106,25 @@ interface Props {
   displayName: string | null;
   /** Threshold from RtFiltersContext — drives Min≥threshold metric + chart guide line. */
   threshold: number;
+  /**
+   * Period in days from RtFiltersContext (1..365 — heatmap allows custom
+   * windows). The card requests min(periodDays, MAX_TREND_DAYS) so the user
+   * sees what's actually available. When the user picked a larger window
+   * than Zabbix retains, we show a small note explaining the cap so the
+   * mismatch with the heatmap header isn't confusing.
+   */
+  periodDays: number;
   /** Initial expanded state. Default false (preserves the heatmap-only workflow). */
   defaultExpanded?: boolean;
 }
 
+// Zabbix raw 1-min history retention on this deployment. Same constant
+// `getCpuHistoryDaily` uses (effectiveDays = Math.min(days, 14)).
+const MAX_TREND_DAYS = 14;
+
 // ─── Component ──────────────────────────────────────────────────────
 
-export function RtProcessTrend({ hostId, displayName, threshold, defaultExpanded = false }: Props) {
+export function RtProcessTrend({ hostId, displayName, threshold, periodDays, defaultExpanded = false }: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [category, setCategory] = useState<CategoryId>("scoApp");
   const [metric, setMetric] = useState<MetricId>("avg");
@@ -114,6 +134,16 @@ export function RtProcessTrend({ hostId, displayName, threshold, defaultExpanded
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasData, setHasData] = useState(false);
+
+  // Effective fetch days = min(user's period, Zabbix retention cap). The
+  // heatmap allows custom windows up to 365 d; raw 1-min history is only
+  // retained ~14 d on this Zabbix, so anything beyond that returns empty
+  // days. We clamp here and surface a tiny "capped at 14d" note when the
+  // user asked for more, so the discrepancy with the heatmap header is
+  // honest rather than silent.
+  const requestedDays = Math.max(1, Math.floor(periodDays));
+  const effectiveDays = Math.min(requestedDays, MAX_TREND_DAYS);
+  const isCapped = requestedDays > effectiveDays;
 
   // Fetch: only when the card is open AND a host is drilled. Closing the
   // card or clearing the drill resets local state so re-opening doesn't
@@ -128,7 +158,7 @@ export function RtProcessTrend({ hostId, displayName, threshold, defaultExpanded
     setLoading(true);
     setError(null);
     fetch(
-      `/api/rt/process-trend?hostId=${encodeURIComponent(hostId)}&days=14&category=${category}&threshold=${threshold}`,
+      `/api/rt/process-trend?hostId=${encodeURIComponent(hostId)}&days=${effectiveDays}&category=${category}&threshold=${threshold}`,
     )
       .then((r) => r.json() as Promise<ApiResponse>)
       .then((d) => {
@@ -150,7 +180,7 @@ export function RtProcessTrend({ hostId, displayName, threshold, defaultExpanded
       })
       .finally(() => { if (!aborted) setLoading(false); });
     return () => { aborted = true; };
-  }, [expanded, hostId, category, threshold]);
+  }, [expanded, hostId, category, threshold, effectiveDays]);
 
   const chosenColor = CATEGORIES.find((c) => c.id === category)!.color;
   const metricLabel = METRICS.find((m) => m.id === metric)!.label;
@@ -263,9 +293,17 @@ export function RtProcessTrend({ hostId, displayName, threshold, defaultExpanded
           </span>
           <span style={{ fontSize: 11, color: C.textSec }}>
             {hostId
-              ? `— ${displayName ?? "selected host"} · 14 d`
+              ? `— ${displayName ?? "selected host"} · ${effectiveDays} d`
               : "— pick a host in the heatmap"}
           </span>
+          {hostId && isCapped && (
+            <span
+              style={{ fontSize: 10, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "1px 6px" }}
+              title={`Heatmap is showing ${requestedDays} d, but per-process Zabbix history is only retained for ${MAX_TREND_DAYS} d. The trend below covers the available window.`}
+            >
+              capped at {MAX_TREND_DAYS} d
+            </span>
+          )}
         </div>
         {expanded && hostId && (
           <span style={{ fontSize: 10, color: C.textDim }}>
@@ -712,5 +750,6 @@ function categoryItemHint(c: CategoryId): string {
   if (c === "retellect") return "python.cpu / python1.cpu / …";
   if (c === "scoApp") return "spss.cpu / sp.sss.cpu";
   if (c === "db") return "sql.cpu / sqlservr.cpu";
-  return "vm.cpu / vmware-vmx.cpu";
+  if (c === "system") return "vm.cpu / vmware-vmx.cpu";
+  return "system.cpu.util[,,avg1] (needed for Other = host − monitored)";
 }

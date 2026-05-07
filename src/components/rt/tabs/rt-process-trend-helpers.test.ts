@@ -248,6 +248,59 @@ describe("compareOnOff", () => {
   });
 });
 
+// ─── "Other" derivation (host CPU − monitored sum) ─────────────────
+//
+// This is the formula the API route applies per-minute when the user picks
+// the "Other" category. Tested here as a pure function of the sysCpu and
+// per-category per-minute values so we have a regression guard if anyone
+// ever moves the math out of the route.
+
+function deriveOtherPerMinute(
+  sysCpu: number,
+  rt: number,
+  sa: number,
+  db: number,
+  sys: number,
+): number {
+  return Math.max(0, sysCpu - rt - sa - db - sys);
+}
+
+describe("deriveOtherPerMinute", () => {
+  it("returns sysCpu when no categories are present (all CPU is 'other')", () => {
+    expect(deriveOtherPerMinute(40, 0, 0, 0, 0)).toBe(40);
+  });
+
+  it("subtracts a single category cleanly", () => {
+    // SCO App at 25%, host CPU 27% → other = 2%.
+    expect(deriveOtherPerMinute(27, 0, 25, 0, 0)).toBe(2);
+  });
+
+  it("subtracts all four categories", () => {
+    // 4-python retellect 20%, spss 15%, sql 5%, vm 3%, host 50% → other = 7%.
+    expect(deriveOtherPerMinute(50, 20, 15, 5, 3)).toBe(7);
+  });
+
+  it("clamps at 0 when monitored exceeds host (rounding noise / overlap)", () => {
+    // Per-process metrics can briefly sum higher than system.cpu.util
+    // (rounding error or item value overlap). Negative "other" is meaningless
+    // for the user — they'd see "-3% other" and panic. Clamp at 0.
+    expect(deriveOtherPerMinute(50, 30, 25, 0, 0)).toBe(0);
+  });
+
+  it("handles zero host CPU gracefully", () => {
+    expect(deriveOtherPerMinute(0, 0, 0, 0, 0)).toBe(0);
+    expect(deriveOtherPerMinute(0, 5, 0, 0, 0)).toBe(0);
+  });
+
+  it("handles realistic Pavilnonys-style minute (Retellect ON heavy day)", () => {
+    // SCO2 at hour 18, Retellect ON: sysCpu 65%, retellect 23%, scoApp 32%,
+    // sql 4%, vm 2%. Other = 65 - 61 = 4%. Realistic — matches the SP admin's
+    // hour-18 probe ("23% raw vs 27% sysCpu", with the gap mostly being
+    // categorised system + small "other").
+    expect(deriveOtherPerMinute(65, 23, 32, 4, 2)).toBe(4);
+  });
+});
+
 // ─── listDateRange ─────────────────────────────────────────────────
 
 describe("listDateRange", () => {

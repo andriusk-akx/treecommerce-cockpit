@@ -46,7 +46,15 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED_CATEGORIES = new Set<Category>(["retellect", "scoApp", "db", "system"]);
+/**
+ * Local extension of Category. "other" is computed by the route itself
+ * (host CPU − sum of monitored processes) so it never appears in the
+ * shared `chooseTelemetrySources` taxonomy. Keep the math module's
+ * Category union unchanged — other modules read it as the canonical
+ * "what kinds of processes do we track" set.
+ */
+type CategoryEx = Category | "other";
+const ALLOWED_CATEGORIES = new Set<CategoryEx>(["retellect", "scoApp", "db", "system", "other"]);
 
 export async function GET(req: NextRequest) {
   const hostId = req.nextUrl.searchParams.get("hostId");
@@ -59,13 +67,13 @@ export async function GET(req: NextRequest) {
   if (!hostId) {
     return NextResponse.json({ error: "hostId required" }, { status: 400 });
   }
-  if (!ALLOWED_CATEGORIES.has(categoryParam as Category)) {
+  if (!ALLOWED_CATEGORIES.has(categoryParam as CategoryEx)) {
     return NextResponse.json(
       { error: `category must be one of ${Array.from(ALLOWED_CATEGORIES).join(", ")}` },
       { status: 400 },
     );
   }
-  const category = categoryParam as Category;
+  const category = categoryParam as CategoryEx;
 
   // Cache the entire response shape for 120 s so the same (host, category,
   // threshold) doesn't re-hit Zabbix when the user toggles the card open/closed
@@ -80,7 +88,7 @@ export async function GET(req: NextRequest) {
 interface TrendResponse {
   days: Array<{ date: string; avg: number; peak: number; minutesAbove: number; totalSamples: number; retellectOn: boolean }>;
   summary: ReturnType<typeof compareOnOff>;
-  category: Category;
+  category: CategoryEx;
   threshold: number;
   daysWindow: number;
   hasData: boolean;
@@ -89,7 +97,7 @@ interface TrendResponse {
 async function buildTrendResponse(
   hostId: string,
   days: number,
-  category: Category,
+  category: CategoryEx,
   threshold: number,
 ): Promise<TrendResponse> {
   const client = getZabbixClient();
@@ -119,19 +127,32 @@ async function buildTrendResponse(
   // chooseTelemetrySources gives us:
   //   - categoryById: itemId → Category for ALL recognised processes
   //   - needsCoresDivision: which itemIds are perf_counter (need /cores)
-  // We need TWO subsets:
-  //   - chosen-category items (the user-selected metric to chart)
+  // We need three subsets, all derivable from the same map:
+  //   - chosen-category items (when the chart category is one of the four)
   //   - retellect items (always — used to classify Retellect ON/OFF per day)
+  //   - sysCpu item (only when category === "other", to compute the
+  //     `host − monitored` derivation; also fetched whenever it's available
+  //     because it's a single tiny extra item)
   const { categoryById, needsCoresDivision } = chooseTelemetrySources(
     allItems.map((it) => ({ itemid: it.itemid, key_: it.key_ })),
   );
 
-  const chosenItemIds = new Set<string>();
-  const retellectItemIds = new Set<string>();
+  const itemIdsByCategory: Record<Category, Set<string>> = {
+    retellect: new Set<string>(),
+    scoApp: new Set<string>(),
+    db: new Set<string>(),
+    system: new Set<string>(),
+  };
   for (const [itemid, cat] of categoryById) {
-    if (cat === category) chosenItemIds.add(itemid);
-    if (cat === "retellect") retellectItemIds.add(itemid);
+    itemIdsByCategory[cat].add(itemid);
   }
+
+  // sysCpu item — only meaningful when category === "other" (to derive
+  // host − sum), but cheap to fetch unconditionally so we always have it
+  // available for future "show host CPU as reference line" features.
+  const sysCpuItem = allItems.find(
+    (it) => it.key_ === "system.cpu.util[,,avg1]" || it.key_ === "system.cpu.util",
+  );
 
   // Date window: cover the last `days` days starting at midnight UTC of the
   // earliest day so we capture the full first-day window in Vilnius local.
@@ -143,10 +164,23 @@ async function buildTrendResponse(
 
   const datesInWindow = listDateRange(days);
 
-  // If the host has neither chosen-category nor retellect items we can short-
-  // circuit to a fully empty response. The chart will still render the date
-  // axis (datesInWindow) but with all zeros and no ON-bands.
-  const itemsToFetch = new Set<string>([...chosenItemIds, ...retellectItemIds]);
+  // What items do we actually need to hit Zabbix for?
+  //   - "Other" needs ALL category items (to subtract their sum) PLUS sysCpu
+  //   - Other categories need just that category's items
+  //   - Retellect items always (classifier)
+  const itemsToFetch = new Set<string>(itemIdsByCategory.retellect);
+  if (category === "other") {
+    for (const cat of ["retellect", "scoApp", "db", "system"] as Category[]) {
+      for (const id of itemIdsByCategory[cat]) itemsToFetch.add(id);
+    }
+    if (sysCpuItem) itemsToFetch.add(sysCpuItem.itemid);
+  } else {
+    for (const id of itemIdsByCategory[category]) itemsToFetch.add(id);
+  }
+
+  // If we have nothing to fetch we can short-circuit to a fully empty response.
+  // The chart will still render the date axis (datesInWindow) but with all
+  // zeros and no ON-bands.
   if (itemsToFetch.size === 0) {
     const emptyDays = datesInWindow.map((date) => ({
       date,
@@ -203,8 +237,6 @@ async function buildTrendResponse(
     for (const r of results) batchResults.push(r);
   }
 
-  // Split records into chosen-category (charted) and retellect (classifier).
-  //
   // Bucket by 1-minute window (`clock div 60`) and SUM per-item values inside
   // the same minute. Retellect typically has 3–4 concurrent python workers,
   // each emitting at 1-min cadence on slightly offset seconds. Treating each
@@ -218,35 +250,62 @@ async function buildTrendResponse(
   // so the sum is a no-op — same number you'd get from the existing drill-
   // down endpoint. The semantics only diverge for retellect with multiple
   // python workers, which is the correct direction to diverge.
-  type MinSum = Map<number, number>; // minuteBucket → summed value
-  const chosenByMin: MinSum = new Map();
-  const retellectByMin: MinSum = new Map();
+  //
+  // For category === "other", we keep four parallel per-category maps and a
+  // sysCpu map. Other = max(0, sysCpu - rt - sa - db - sys) per minute.
+  type MinSum = Map<number, number>;
+  const perCatByMin: Record<Category, MinSum> = {
+    retellect: new Map(),
+    scoApp: new Map(),
+    db: new Map(),
+    system: new Map(),
+  };
+  const sysCpuByMin: MinSum = new Map();
+
   for (const records of batchResults) {
     for (const r of records) {
       const itemid = r.itemid;
       const clockSec = parseInt(r.clock);
       const minBucket = Math.floor(clockSec / 60);
       const raw = parseFloat(r.value) || 0;
+      // sysCpu is "% of host" already; never needs /cores division.
+      if (sysCpuItem && itemid === sysCpuItem.itemid) {
+        sysCpuByMin.set(minBucket, raw);
+        continue;
+      }
+      const cat = categoryById.get(itemid);
+      if (!cat) continue;
       const v = normaliseValue(raw, needsCoresDivision.has(itemid), cores);
-      if (chosenItemIds.has(itemid)) {
-        chosenByMin.set(minBucket, (chosenByMin.get(minBucket) ?? 0) + v);
-      }
-      // A single item can contribute to BOTH chosen and retellect series when
-      // the user picked category="retellect" — that's fine, each series tracks
-      // its own use.
-      if (retellectItemIds.has(itemid)) {
-        retellectByMin.set(minBucket, (retellectByMin.get(minBucket) ?? 0) + v);
-      }
+      const map = perCatByMin[cat];
+      map.set(minBucket, (map.get(minBucket) ?? 0) + v);
     }
   }
 
-  // Materialise into RawSample arrays. Clock is the minute-bucket start (sec).
+  // Build the chart series.
+  //   - Standard categories: read perCatByMin[category].
+  //   - "Other": for each minute we have sysCpu for, value =
+  //       max(0, sysCpu - sum(perCatByMin[*][min])). Minutes without a
+  //       sysCpu sample are dropped (we can't compute "other" without it).
   const chosenSamples: RawSample[] = [];
-  for (const [min, value] of chosenByMin) {
-    chosenSamples.push({ clock: min * 60, value });
+  if (category === "other") {
+    for (const [min, sysVal] of sysCpuByMin) {
+      const rt = perCatByMin.retellect.get(min) ?? 0;
+      const sa = perCatByMin.scoApp.get(min) ?? 0;
+      const db = perCatByMin.db.get(min) ?? 0;
+      const sys = perCatByMin.system.get(min) ?? 0;
+      const other = Math.max(0, sysVal - rt - sa - db - sys);
+      chosenSamples.push({ clock: min * 60, value: other });
+    }
+  } else {
+    for (const [min, value] of perCatByMin[category]) {
+      chosenSamples.push({ clock: min * 60, value });
+    }
   }
+
+  // Retellect series for ON/OFF classification — always read from python
+  // workers regardless of which chart category is active.
   const retellectSamples: RawSample[] = [];
-  for (const [min, value] of retellectByMin) {
+  for (const [min, value] of perCatByMin.retellect) {
     retellectSamples.push({ clock: min * 60, value });
   }
 
@@ -255,8 +314,10 @@ async function buildTrendResponse(
 
   // Drop the now-redundant per-minute maps so the GC reclaims them while we
   // assemble the per-day output (large hosts can hold 14 d × 1440 min entries).
-  chosenByMin.clear();
-  retellectByMin.clear();
+  for (const cat of ["retellect", "scoApp", "db", "system"] as Category[]) {
+    perCatByMin[cat].clear();
+  }
+  sysCpuByMin.clear();
 
   const dayResults = datesInWindow.map((date) => {
     const dayChosen = chosenByDay.get(date) ?? [];
