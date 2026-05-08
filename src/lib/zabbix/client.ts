@@ -544,25 +544,33 @@ export class ZabbixClient {
   }
 
   /**
-   * Find which hosts have Retellect deployed in their Zabbix template,
-   * regardless of whether the items are currently collecting samples.
+   * Find which hosts have Retellect *actually deployed* — i.e. python.cpu
+   * items configured AND at least one of them has reported a sample at
+   * some point in its lifetime (`lastclock > 0`).
    *
-   * Why: a host can have python.cpu items in `status: 0` (enabled) but
-   * `state: 1` (ZBX_NOTSUPPORTED) — that's the agent failing to read the
-   * counters because Retellect isn't actually running. The python items
-   * still exist in the template though, which is the user-meaningful
-   * "Retellect was deployed here" signal. Pavilnonys SCO2 (2026-05-07) is
-   * the canonical example: 8 python items registered, every one state=1
-   * with lastclock=0.
+   * Why the `lastclock > 0` filter matters: SP's Zabbix template applies
+   * the python.cpu items to a broader fleet of SCO hosts as a "ready for
+   * Retellect" baseline — they exist in the template even on hosts that
+   * never had Retellect installed. On those hosts every item sits at
+   * `state: 1` (ZBX_NOTSUPPORTED) with `lastclock: 0` — meaning the
+   * perfcounter has never been readable, which only happens if the
+   * Retellect process never ran on that host.
    *
-   * `getProcessCpuItems` filters those out (it powers the LIVE retellect
-   * signal in the Overview tab, which needs freshness). This method does
-   * NOT filter by state — it answers a strict registry question, so a
-   * deployed-but-idle host shows up here.
+   * Including those would put a "deployed" dot on every host in the
+   * pilot, which is what the user reported. The `lastclock > 0` floor
+   * keeps:
+   *   - currently active hosts (state=0, lastclock=now)
+   *   - previously-active-now-broken hosts (state=1, lastclock=old)
+   *
+   * …and excludes:
+   *   - never-deployed hosts (state=1, lastclock=0)
+   *
+   * which matches the intuitive "Retellect was once running here" question.
    *
    * Returns the set of hostIds with at least one Retellect-pattern item
-   * registered. Light-weight: items search for "python" + key suffix
-   * checks client-side; one round trip per call.
+   * that has ever collected a sample. Light-weight: one batched item.get
+   * call (split in two only because Zabbix `search` is a single AND clause
+   * and we want python.cpu keys OR perf_counter[Process(python*)] keys).
    */
   async getRetellectDeployedHostIds(hostIds: string[]): Promise<Set<string>> {
     if (hostIds.length === 0) return new Set();
@@ -570,32 +578,34 @@ export class ZabbixClient {
     return (await cached(
       cacheKey,
       async () => {
-        // Two complementary searches because Zabbix's `search` is a single
-        // AND clause — we want python.cpu (custom keys) OR perf_counter
-        // \Process(python*) (Windows perfcounter style). Run them in
-        // parallel; either match counts as "deployed".
         const [byCpuKey, byPerfKey] = await Promise.all([
           this.request("item.get", {
-            output: ["hostid"],
+            output: ["hostid", "lastclock"],
             hostids: hostIds,
-            // search: substring match. ".cpu" alone would also catch
-            // system.cpu.* items, so we additionally restrict to keys
-            // starting with "python" via the search field.
             search: { key_: "python" },
-            // status: 0 = administratively enabled. NO state filter — this
-            // is the whole point of the method.
             filter: { status: 0 },
-          }) as Promise<Array<{ hostid: string; key_?: string }>>,
+          }) as Promise<Array<{ hostid: string; lastclock?: string }>>,
           this.request("item.get", {
-            output: ["hostid", "key_"],
+            output: ["hostid", "lastclock"],
             hostids: hostIds,
             search: { key_: "Process(python" },
             filter: { status: 0 },
-          }) as Promise<Array<{ hostid: string; key_?: string }>>,
+          }) as Promise<Array<{ hostid: string; lastclock?: string }>>,
         ]);
         const out = new Set<string>();
-        for (const it of byCpuKey) out.add(String(it.hostid));
-        for (const it of byPerfKey) out.add(String(it.hostid));
+        // Only count hosts where at least one python item has actually
+        // emitted a sample (lastclock > 0). Items present with lastclock=0
+        // are template scaffolding, not evidence of deployment.
+        const hasReceivedSample = (it: { lastclock?: string }) => {
+          const lc = parseInt(String(it.lastclock ?? "0"));
+          return Number.isFinite(lc) && lc > 0;
+        };
+        for (const it of byCpuKey) {
+          if (hasReceivedSample(it)) out.add(String(it.hostid));
+        }
+        for (const it of byPerfKey) {
+          if (hasReceivedSample(it)) out.add(String(it.hostid));
+        }
         return out;
       },
       // 5-min TTL — item registry is the same cadence as getItems(); only
