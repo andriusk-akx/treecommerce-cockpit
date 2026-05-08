@@ -70,6 +70,11 @@ const CATEGORIES = [
   { id: "db", label: "DB (sqlservr)", color: "#9775fa" },
   { id: "system", label: "System (vmware-vmx)", color: "#0c8feb" },
   { id: "other", label: "Other (host − monitored)", color: "#94a3b8" },
+  // "totalCpu" is the host-level CPU utilisation (system.cpu.util[,,avg1])
+  // — the same value `sysCpuMax` / `sysCpuAvg` already drive in the
+  // intra-day drill-down. Useful as a top-line "is this host busy at all?"
+  // baseline against which the per-process slices can be compared.
+  { id: "totalCpu", label: "Total host CPU", color: "#0f172a" },
 ] as const;
 type CategoryId = typeof CATEGORIES[number]["id"];
 
@@ -135,6 +140,9 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
 
   const [days, setDays] = useState<DayPoint[]>([]);
   const [summary, setSummary] = useState<CompareSummary | null>(null);
+  // Index of the chart point the cursor is currently over. Drives the
+  // hover tooltip shown above the chart. -1 = not hovering.
+  const [hoveredIdx, setHoveredIdx] = useState<number>(-1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasData, setHasData] = useState(false);
@@ -421,13 +429,19 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
                 )}
               </div>
 
-              {/* SVG chart */}
+              {/* SVG chart wrapped in a relative-positioned container so
+                  the hover tooltip below can absolutely-position itself
+                  next to the active data point. The tooltip uses the
+                  point's x as a percentage of the SVG viewBox width — so
+                  it stays aligned even when the SVG scales responsively. */}
+              <div style={{ position: "relative" }}>
               <svg
                 viewBox={`0 0 ${chartW} ${chartH}`}
                 xmlns="http://www.w3.org/2000/svg"
                 style={{ width: "100%", height: chartH, display: "block" }}
                 role="img"
                 aria-label={`Per-day ${metricLabel} of ${CATEGORIES.find((c) => c.id === category)!.label} on ${displayName ?? "selected host"}, with Retellect ON/OFF day backgrounds.`}
+                onMouseLeave={() => setHoveredIdx(-1)}
               >
                 {/* Day backgrounds (Retellect ON/OFF bands). One rect per day,
                     each centred on its x-position so the user can map cell →
@@ -500,17 +514,39 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
                     strokeLinejoin="round"
                   />
                 )}
-                {chartPoints.map((p) => (
-                  <g key={`pt-${p.d.date}`}>
+                {chartPoints.map((p, i) => (
+                  <g
+                    key={`pt-${p.d.date}`}
+                    onMouseEnter={() => setHoveredIdx(i)}
+                    style={{ cursor: "default" }}
+                  >
+                    {/* Invisible hover-target — wide enough to make the
+                        small dots forgiving to hover. Sits BEHIND the
+                        visible mark so visuals don't change. */}
+                    <rect
+                      x={p.x - (innerW / Math.max(1, chartPoints.length - 1)) / 2}
+                      y={padT}
+                      width={Math.max(8, innerW / Math.max(1, chartPoints.length - 1))}
+                      height={innerH}
+                      fill="transparent"
+                      pointerEvents="all"
+                    />
                     {p.hasData ? (
-                      <circle cx={p.x} cy={p.y} r={2.8} fill={chosenColor}>
-                        <title>{`${p.d.date} · ${metricLabel}: ${formatVal(p.mv, yIsTime)} · Retellect ${p.d.retellectOn ? "ON" : "OFF"} · ${p.d.source === "trend" ? `${p.d.totalSamples} hourly aggregates` : `${p.d.totalSamples} 1-min samples`}`}</title>
+                      <circle
+                        cx={p.x}
+                        cy={p.y}
+                        r={hoveredIdx === i ? 4.2 : 2.8}
+                        fill={chosenColor}
+                        // Native SVG title is the keyboard-only fallback;
+                        // the visible HTML tooltip below is the primary UX.
+                      >
+                        <title>{`${p.d.date} · ${metricLabel}: ${formatVal(p.mv, yIsTime)} · Retellect ${p.d.retellectOn ? "ON" : "OFF"}`}</title>
                       </circle>
                     ) : (
                       // No-data marker: small hollow circle near baseline so
                       // the user can see "we have a date here, just no data"
                       // instead of a missing tick.
-                      <circle cx={p.x} cy={padT + innerH - 2} r={2} fill="#fff" stroke={C.textDim} strokeWidth={0.8}>
+                      <circle cx={p.x} cy={padT + innerH - 2} r={hoveredIdx === i ? 3 : 2} fill="#fff" stroke={C.textDim} strokeWidth={0.8}>
                         <title>{`${p.d.date} · no samples`}</title>
                       </circle>
                     )}
@@ -533,6 +569,67 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
                   ) : null
                 ))}
               </svg>
+
+              {/* Hover tooltip — single absolute-positioned card aligned
+                  to the active data point's x (as a percentage of the
+                  SVG viewBox). React rebuilds it on every hoveredIdx
+                  change, so updates feel instant. We position the
+                  tooltip ABOVE the chart's centre line by default; if
+                  the hovered point's x is on the right half of the
+                  chart, we flip the card to the left of the cursor so
+                  it doesn't overflow the container. */}
+              {hoveredIdx >= 0 && hoveredIdx < chartPoints.length && (() => {
+                const hp = chartPoints[hoveredIdx];
+                const xPct = (hp.x / chartW) * 100;
+                const flipLeft = xPct > 60;
+                return (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 4,
+                      left: `${xPct}%`,
+                      transform: flipLeft ? "translateX(calc(-100% - 6px))" : "translateX(6px)",
+                      pointerEvents: "none",
+                      background: "#fff",
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 6,
+                      padding: "6px 10px",
+                      fontSize: 11,
+                      color: "#212529",
+                      whiteSpace: "nowrap",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                      zIndex: 5,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: 2 }}>{hp.d.date}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{
+                        display: "inline-block", width: 8, height: 8, borderRadius: "50%",
+                        background: chosenColor,
+                      }} />
+                      <span style={{ color: C.textSec }}>{metricLabel}:</span>
+                      <span style={{ fontFamily: "'SF Mono','Cascadia Code',monospace", fontWeight: 600 }}>
+                        {hp.d.totalSamples > 0 ? formatVal(hp.mv, yIsTime) : "—"}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>
+                      Retellect{" "}
+                      <span style={{ color: hp.d.retellectOn ? C.onSecondary : C.offSecondary, fontWeight: 600 }}>
+                        {hp.d.retellectOn ? "ON" : "OFF"}
+                      </span>
+                      {hp.d.totalSamples > 0 && (
+                        <span style={{ marginLeft: 6 }}>
+                          · {hp.d.source === "trend" ? `${hp.d.totalSamples} hourly` : `${hp.d.totalSamples} samples`}
+                        </span>
+                      )}
+                      {hp.d.totalSamples === 0 && (
+                        <span style={{ marginLeft: 6 }}>· no samples</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+              </div>
 
               {/* A/B compare row */}
               {summary && (
@@ -767,5 +864,6 @@ function categoryItemHint(c: CategoryId): string {
   if (c === "scoApp") return "spss.cpu / sp.sss.cpu";
   if (c === "db") return "sql.cpu / sqlservr.cpu";
   if (c === "system") return "vm.cpu / vmware-vmx.cpu";
+  if (c === "totalCpu") return "system.cpu.util[,,avg1] (host-level CPU utilisation)";
   return "system.cpu.util[,,avg1] (needed for Other = host − monitored)";
 }

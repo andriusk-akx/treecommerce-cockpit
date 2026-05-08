@@ -53,8 +53,8 @@ export const dynamic = "force-dynamic";
  * Category union unchanged — other modules read it as the canonical
  * "what kinds of processes do we track" set.
  */
-type CategoryEx = Category | "other";
-const ALLOWED_CATEGORIES = new Set<CategoryEx>(["retellect", "scoApp", "db", "system", "other"]);
+type CategoryEx = Category | "other" | "totalCpu";
+const ALLOWED_CATEGORIES = new Set<CategoryEx>(["retellect", "scoApp", "db", "system", "other", "totalCpu"]);
 
 // Hard upper bound on the trend window. trend.get retention on a typical
 // Zabbix server is ~365 days; beyond that the response is empty regardless
@@ -188,14 +188,18 @@ async function buildTrendResponse(
   const datesInWindow = listDateRange(days);
 
   // What items do we actually need to hit Zabbix for?
-  //   - "Other" needs ALL category items (to subtract their sum) PLUS sysCpu
-  //   - Other categories need just that category's items
-  //   - Retellect items always (classifier)
+  //   - "Other"    — ALL category items (to subtract their sum) PLUS sysCpu.
+  //   - "Total CPU" — just sysCpu (host-level CPU utilisation).
+  //   - Specific categories — just that category's items.
+  //   - Retellect items always come along (the ON/OFF classifier needs them
+  //     regardless of which series is being charted).
   const itemsToFetch = new Set<string>(itemIdsByCategory.retellect);
   if (category === "other") {
     for (const cat of ["retellect", "scoApp", "db", "system"] as Category[]) {
       for (const id of itemIdsByCategory[cat]) itemsToFetch.add(id);
     }
+    if (sysCpuItem) itemsToFetch.add(sysCpuItem.itemid);
+  } else if (category === "totalCpu") {
     if (sysCpuItem) itemsToFetch.add(sysCpuItem.itemid);
   } else {
     for (const id of itemIdsByCategory[category]) itemsToFetch.add(id);
@@ -338,6 +342,8 @@ async function buildTrendResponse(
   //   - "Other": for each minute we have sysCpu for, value =
   //       max(0, sysCpu - sum(perCatByMin[*][min])). Minutes without a
   //       sysCpu sample are dropped (we can't compute "other" without it).
+  //   - "Total CPU": sysCpu samples directly (host-level utilisation,
+  //       independent of monitored process breakdown).
   const chosenSamples: RawSample[] = [];
   if (category === "other") {
     for (const [min, sysVal] of sysCpuByMin) {
@@ -347,6 +353,10 @@ async function buildTrendResponse(
       const sys = perCatByMin.system.get(min) ?? 0;
       const other = Math.max(0, sysVal - rt - sa - db - sys);
       chosenSamples.push({ clock: min * 60, value: other });
+    }
+  } else if (category === "totalCpu") {
+    for (const [min, value] of sysCpuByMin) {
+      chosenSamples.push({ clock: min * 60, value });
     }
   } else {
     for (const [min, value] of perCatByMin[category]) {
@@ -448,6 +458,21 @@ async function buildTrendResponse(
         avg: Math.round((sumOfHourTotals / hourCount) * 10) / 10,
         peak: Math.round(peakOfHourMax * 10) / 10,
         hourCount,
+      };
+    }
+    if (category === "totalCpu") {
+      const dayMap = sysCpuTrend.get(date);
+      if (!dayMap || dayMap.size === 0) return null;
+      let sumOfHourAvgs = 0;
+      let peakOfHourMax = 0;
+      for (const b of dayMap.values()) {
+        sumOfHourAvgs += b.avgSum;
+        if (b.maxSum > peakOfHourMax) peakOfHourMax = b.maxSum;
+      }
+      return {
+        avg: Math.round((sumOfHourAvgs / dayMap.size) * 10) / 10,
+        peak: Math.round(peakOfHourMax * 10) / 10,
+        hourCount: dayMap.size,
       };
     }
     const dayMap = perCatTrend[category].get(date);
