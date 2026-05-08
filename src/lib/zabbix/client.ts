@@ -545,32 +545,31 @@ export class ZabbixClient {
 
   /**
    * Find which hosts have Retellect *actually deployed* — i.e. python.cpu
-   * items configured AND at least one of them has reported a sample at
-   * some point in its lifetime (`lastclock > 0`).
+   * items configured AND at least one of them has produced trend history
+   * in the last 14 days.
    *
-   * Why the `lastclock > 0` filter matters: SP's Zabbix template applies
-   * the python.cpu items to a broader fleet of SCO hosts as a "ready for
-   * Retellect" baseline — they exist in the template even on hosts that
-   * never had Retellect installed. On those hosts every item sits at
-   * `state: 1` (ZBX_NOTSUPPORTED) with `lastclock: 0` — meaning the
-   * perfcounter has never been readable, which only happens if the
-   * Retellect process never ran on that host.
+   * Why trend history rather than `lastclock > 0`: when a Zabbix item
+   * transitions to ZBX_NOTSUPPORTED, the agent resets `item.lastclock` to
+   * 0 (verified live 2026-05-08). So a host whose Retellect ran healthily
+   * for weeks and then the perfcounter broke ends up with lastclock=0 on
+   * every item — indistinguishable, by lastclock alone, from a host that
+   * never ran Retellect at all. trend.get's 14-day history survives that
+   * transition: as long as the items emitted ANY records (zero or non-
+   * zero) before they broke, the trend table still has those rows.
    *
-   * Including those would put a "deployed" dot on every host in the
-   * pilot, which is what the user reported. The `lastclock > 0` floor
-   * keeps:
-   *   - currently active hosts (state=0, lastclock=now)
-   *   - previously-active-now-broken hosts (state=1, lastclock=old)
+   * Pavilnonys SCO2 (canonical 2026-05-08 case): 8 python items, all
+   * state=1, all lastclock=0, BUT 1284 trend records from 2026-04-24 to
+   * 2026-05-01 with 577 non-zero values. Clearly deployed; clearly
+   * stopped working a week ago. The trend-history check correctly says
+   * "deployed"; the prior lastclock check incorrectly said "never".
    *
-   * …and excludes:
-   *   - never-deployed hosts (state=1, lastclock=0)
+   * Excludes: hosts where the template registers python items but NO
+   * trend record ever existed for them — i.e. the items have always been
+   * ZBX_NOTSUPPORTED with no historical samples. That's the "never
+   * deployed" template-scaffolding case the user reported earlier.
    *
-   * which matches the intuitive "Retellect was once running here" question.
-   *
-   * Returns the set of hostIds with at least one Retellect-pattern item
-   * that has ever collected a sample. Light-weight: one batched item.get
-   * call (split in two only because Zabbix `search` is a single AND clause
-   * and we want python.cpu keys OR perf_counter[Process(python*)] keys).
+   * Cost: two item.get calls (registry, returning itemid+hostid) + one
+   * batched trend.get over the last 14 d for those itemids. Cached 5 min.
    */
   async getRetellectDeployedHostIds(hostIds: string[]): Promise<Set<string>> {
     if (hostIds.length === 0) return new Set();
@@ -578,38 +577,51 @@ export class ZabbixClient {
     return (await cached(
       cacheKey,
       async () => {
+        // Step 1: item registry — all python.cpu / perf_counter[Process(python*)]
+        // items on the matched hosts (status=0, NO state filter).
         const [byCpuKey, byPerfKey] = await Promise.all([
           this.request("item.get", {
-            output: ["hostid", "lastclock"],
+            output: ["itemid", "hostid"],
             hostids: hostIds,
             search: { key_: "python" },
             filter: { status: 0 },
-          }) as Promise<Array<{ hostid: string; lastclock?: string }>>,
+          }) as Promise<Array<{ itemid: string; hostid: string }>>,
           this.request("item.get", {
-            output: ["hostid", "lastclock"],
+            output: ["itemid", "hostid"],
             hostids: hostIds,
             search: { key_: "Process(python" },
             filter: { status: 0 },
-          }) as Promise<Array<{ hostid: string; lastclock?: string }>>,
+          }) as Promise<Array<{ itemid: string; hostid: string }>>,
         ]);
+        const itemHostMap = new Map<string, string>();
+        for (const it of byCpuKey) itemHostMap.set(String(it.itemid), String(it.hostid));
+        for (const it of byPerfKey) itemHostMap.set(String(it.itemid), String(it.hostid));
+        if (itemHostMap.size === 0) return new Set<string>();
+
+        // Step 2: trend.get over the last 14 days for those items. Any
+        // record at all (even zero-valued) is evidence the host ran
+        // Retellect telemetry at some point in the window.
+        const itemIds = Array.from(itemHostMap.keys());
+        const timeFrom = Math.floor(Date.now() / 1000) - 14 * 24 * 3600;
+        const trends = (await this.request("trend.get", {
+          output: ["itemid"],
+          itemids: itemIds,
+          time_from: String(timeFrom),
+          // 100k caps at ~12k itemids × 24 h × 14 d / max items per pilot —
+          // Rimi pilot has ~115 hosts × 8 items = ~920 items, well under
+          // the ceiling.
+          limit: 100000,
+        })) as Array<{ itemid: string }>;
+
         const out = new Set<string>();
-        // Only count hosts where at least one python item has actually
-        // emitted a sample (lastclock > 0). Items present with lastclock=0
-        // are template scaffolding, not evidence of deployment.
-        const hasReceivedSample = (it: { lastclock?: string }) => {
-          const lc = parseInt(String(it.lastclock ?? "0"));
-          return Number.isFinite(lc) && lc > 0;
-        };
-        for (const it of byCpuKey) {
-          if (hasReceivedSample(it)) out.add(String(it.hostid));
-        }
-        for (const it of byPerfKey) {
-          if (hasReceivedSample(it)) out.add(String(it.hostid));
+        for (const t of trends) {
+          const hostId = itemHostMap.get(String(t.itemid));
+          if (hostId) out.add(hostId);
         }
         return out;
       },
-      // 5-min TTL — item registry is the same cadence as getItems(); only
-      // changes on Zabbix template redeploy.
+      // 5-min TTL — item registry + 14-day trend window only changes on
+      // Zabbix template redeploy or as data ages out at the day boundary.
       5 * 60_000,
     ));
   }
