@@ -8,6 +8,7 @@
   "scripts": {
     "version:generate": "tsx scripts/generate-version.ts",
     "auth:unlock": "tsx scripts/unlock-user.ts",
+    "seed:testlab": "tsx scripts/seed_testlab_host.ts",
     "predev": "npm run version:generate",
     "prebuild": "npm run version:generate",
     "dev": "next dev --webpack",

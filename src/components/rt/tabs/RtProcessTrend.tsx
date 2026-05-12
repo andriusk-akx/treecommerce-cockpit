@@ -58,17 +58,26 @@ interface ApiResponse {
 // Order: SCO App first because it's the canonical "Retellect impact" lens
 // for the SP admin investigation that drove this card's design.
 //
-// "Other" mirrors the same bucket the drill-down shows beneath the four
-// monitored processes — it's `system.cpu.util - (retellect + scoApp + db +
-// system)` per minute, i.e. the CPU consumed by processes we don't track
-// by name (kernel, services, IBM BigFix endpoint mgmt before it was
-// categorised, antivirus, etc.). Useful when the user wants to see whether
-// the "non-monitored" bucket is the actual mover.
+// "Other" mirrors the same bucket the drill-down shows beneath the named
+// processes — `system.cpu.util - (retellect + scoApp + db + system +
+// besclient + elastic + osCore)` per minute. On hosts with the full
+// 2026-05-12 telemetry this is what's genuinely unattributed (antivirus,
+// scheduled tasks, processes outside the template). On hosts without
+// BESClient / Elastic / kernel-CPU items the residual also still absorbs
+// those cycles — useful for spotting where the new monitoring needs to
+// roll out next.
 const CATEGORIES = [
   { id: "scoApp", label: "SCO App (sp.sss)", color: "#f59f00" },
   { id: "retellect", label: "Retellect (python)", color: "#fa5252" },
   { id: "db", label: "DB (sqlservr)", color: "#9775fa" },
   { id: "system", label: "System (vmware-vmx)", color: "#0c8feb" },
+  // 2026-05-12 — SP admin pulled BESClient, Elastic and the Windows OS
+  // kernel out of "Other" on testlab_SPUB-P-SCO150. Each gets its own
+  // dropdown option here so the user can trend any of them across days.
+  // Hosts without the new items return zero series (UI shows "no data").
+  { id: "besclient", label: "BESClient (BigFix)", color: "#10b981" },
+  { id: "elastic", label: "Elastic (agent)", color: "#a3e635" },
+  { id: "osCore", label: "OS Core (kernel)", color: "#f97316" },
   { id: "other", label: "Other (host − monitored)", color: "#94a3b8" },
   // "totalCpu" is the host-level CPU utilisation (system.cpu.util[,,avg1])
   // — the same value `sysCpuMax` / `sysCpuAvg` already drive in the
@@ -864,6 +873,9 @@ function categoryItemHint(c: CategoryId): string {
   if (c === "scoApp") return "spss.cpu / sp.sss.cpu";
   if (c === "db") return "sql.cpu / sqlservr.cpu";
   if (c === "system") return "vm.cpu / vmware-vmx.cpu";
+  if (c === "besclient") return "besclient.cpu / perf_counter[\\Process(besclient)]";
+  if (c === "elastic") return "elastic.cpu / perf_counter[\\Process(elastic-agent)]";
+  if (c === "osCore") return "system.cpu.util[,system] (kernel-mode CPU)";
   if (c === "totalCpu") return "system.cpu.util[,,avg1] (host-level CPU utilisation)";
   return "system.cpu.util[,,avg1] (needed for Other = host − monitored)";
 }

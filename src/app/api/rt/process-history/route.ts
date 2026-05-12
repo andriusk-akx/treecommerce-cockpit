@@ -22,6 +22,13 @@ interface HourlyBucket {
   scoApp: number;
   db: number;
   system: number;
+  besclient: number;
+  elastic: number;
+  /** osCore is normally fed from `system.cpu.util[,system]` (kernel-mode CPU
+   *  at host scope) rather than from a named process. The route accumulates
+   *  it into the same bucket so all 7 categories average through a single
+   *  `averageSlot()` call. */
+  osCore: number;
   // Per-category sample counts. Categories are averaged independently because
   // items inside a slot can fire at slightly different timestamps (e.g. spss
   // at 18:23:09, sql at 18:23:10) — using a shared "unique timestamps" divisor
@@ -31,10 +38,23 @@ interface HourlyBucket {
   countS: number;
   countD: number;
   countSys: number;
+  countBes: number;
+  countEla: number;
+  countOs: number;
   // system.cpu.util[,,avg1] samples in this slot — kept separate so we can
   // surface the "true" overall CPU as a reference line in the UI alongside
   // the per-process breakdown (which only counts monitored processes).
   sysCpuValues: number[];
+}
+
+function emptyBucket(): HourlyBucket {
+  return {
+    retellect: 0, scoApp: 0, db: 0, system: 0,
+    besclient: 0, elastic: 0, osCore: 0,
+    countR: 0, countS: 0, countD: 0, countSys: 0,
+    countBes: 0, countEla: 0, countOs: 0,
+    sysCpuValues: [],
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -76,6 +96,12 @@ export async function GET(req: NextRequest) {
   const sysCpuItem = allItems.find(
     (it) => it.key_ === "system.cpu.util[,,avg1]" || it.key_ === "system.cpu.util"
   );
+  // Windows kernel-mode CPU (host scope). 2026-05-12: SP admin deployed
+  // this item on testlab_SPUB-P-SCO150 so the previously-anonymous "Other"
+  // bucket can be split into BESClient / Elastic / Windows OS core. Hosts
+  // without this item simply have osCore = 0 and the residual stays in
+  // "free" / Other as before.
+  const sysKernelItem = allItems.find((it) => it.key_ === "system.cpu.util[,system]");
   const numCpuItem = allItems.find((it) => it.key_ === "system.cpu.num");
   // Cores known? Default to 1 so we never divide by zero. Modern SCO hosts
   // are 4-core; older ones may be 2.
@@ -145,6 +171,20 @@ export async function GET(req: NextRequest) {
         limit: 50000,
       }) as Promise<Array<{ clock: string; value: string }>>)
     : null;
+  // Kernel-mode CPU fetched in parallel — fills the osCore bucket. Hosts
+  // that don't publish this item simply skip the merge step and osCore stays 0.
+  const sysKernelPromise: Promise<Array<{ clock: string; value: string }>> | null = sysKernelItem
+    ? (client.request("history.get", {
+        output: ["itemid", "clock", "value"],
+        itemids: [sysKernelItem.itemid],
+        history: 0,
+        time_from: String(timeFrom),
+        time_till: String(timeTill),
+        sortfield: "clock",
+        sortorder: "ASC",
+        limit: 50000,
+      }) as Promise<Array<{ clock: string; value: string }>>)
+    : null;
 
   const batchResults = await Promise.all(batchPromises.map((p) => p.catch((e) => {
     console.warn("[rt-process-history] batch failed:", e);
@@ -166,7 +206,7 @@ export async function GET(req: NextRequest) {
         const slotKey = `${yyyy}-${mm}-${dd}T${hh}:${mmm}`;
         let b = buckets.get(slotKey);
         if (!b) {
-          b = { retellect: 0, scoApp: 0, db: 0, system: 0, countR: 0, countS: 0, countD: 0, countSys: 0, sysCpuValues: [] };
+          b = emptyBucket();
           buckets.set(slotKey, b);
         }
         // perf_counter values are "% of one core" — convert to "% of host".
@@ -178,6 +218,9 @@ export async function GET(req: NextRequest) {
         else if (cat === "scoApp") b.countS++;
         else if (cat === "db") b.countD++;
         else if (cat === "system") b.countSys++;
+        else if (cat === "besclient") b.countBes++;
+        else if (cat === "elastic") b.countEla++;
+        else if (cat === "osCore") b.countOs++;
       }
     }
   }
@@ -202,13 +245,45 @@ export async function GET(req: NextRequest) {
         const slotKey = `${yyyy}-${mm}-${dd}T${hh}:${mmm}`;
         let b = buckets.get(slotKey);
         if (!b) {
-          b = { retellect: 0, scoApp: 0, db: 0, system: 0, countR: 0, countS: 0, countD: 0, countSys: 0, sysCpuValues: [] };
+          b = emptyBucket();
           buckets.set(slotKey, b);
         }
         b.sysCpuValues.push(value);
       }
     } catch (e) {
       console.warn("[rt-process-history] system.cpu.util fetch failed:", e);
+    }
+  }
+
+  // Kernel-mode CPU → osCore bucket. Same slot-key calc as above; we
+  // intentionally don't sample-count this against perf_counter items
+  // (countOs) using the per-item path because the kernel series is host-
+  // scoped and has its own cadence.
+  if (sysKernelPromise) {
+    try {
+      const kernelRecords = await sysKernelPromise;
+      for (const r of kernelRecords) {
+        const tsSec = parseInt(r.clock);
+        const value = parseFloat(r.value) || 0;
+        const dt = new Date(tsSec * 1000);
+        const yyyy = dt.getFullYear();
+        const mm = String(dt.getMonth() + 1).padStart(2, "0");
+        const dd = String(dt.getDate()).padStart(2, "0");
+        const hh = String(dt.getHours()).padStart(2, "0");
+        const minBucket = Math.floor(dt.getMinutes() / granularityMin) * granularityMin;
+        const mmm = String(minBucket).padStart(2, "0");
+        const slotKey = `${yyyy}-${mm}-${dd}T${hh}:${mmm}`;
+        let b = buckets.get(slotKey);
+        if (!b) {
+          b = emptyBucket();
+          buckets.set(slotKey, b);
+        }
+        // Kernel CPU is already "% of host" (no cores division).
+        b.osCore += value;
+        b.countOs++;
+      }
+    } catch (e) {
+      console.warn("[rt-process-history] system.cpu.util[,system] fetch failed:", e);
     }
   }
 
@@ -234,7 +309,23 @@ export async function GET(req: NextRequest) {
   // Emit slots for the entire calendar day at the requested granularity.
   // 60min → 24 slots, 15min → 96 slots, 5min → 288 slots, etc.
   const slotsPerDay = Math.floor(1440 / granularityMin);
-  const slots: Array<{ slot: number; hourKey: string; hour: number; minute: number; label: string; retellect: number; scoApp: number; db: number; system: number; free: number; sysCpuAvg: number | null; sysCpuMax: number | null }> = [];
+  const slots: Array<{
+    slot: number;
+    hourKey: string;
+    hour: number;
+    minute: number;
+    label: string;
+    retellect: number;
+    scoApp: number;
+    db: number;
+    system: number;
+    besclient: number;
+    elastic: number;
+    osCore: number;
+    free: number;
+    sysCpuAvg: number | null;
+    sysCpuMax: number | null;
+  }> = [];
   let baseDay: string;
   if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     baseDay = dateStr;
@@ -268,13 +359,22 @@ export async function GET(req: NextRequest) {
           scoApp: b.scoApp,
           db: b.db,
           system: b.system,
+          besclient: b.besclient,
+          elastic: b.elastic,
+          osCore: b.osCore,
           countR: b.countR,
           countS: b.countS,
           countD: b.countD,
           countSys: b.countSys,
+          countBes: b.countBes,
+          countEla: b.countEla,
+          countOs: b.countOs,
         })
-      : { retellect: 0, scoApp: 0, db: 0, system: 0, free: 100 };
-    const { retellect: r, scoApp: sa, db: dbv, system: sys } = avg;
+      : {
+          retellect: 0, scoApp: 0, db: 0, system: 0,
+          besclient: 0, elastic: 0, osCore: 0, free: 100,
+        };
+    const { retellect: r, scoApp: sa, db: dbv, system: sys, besclient: bes, elastic: ela, osCore: os } = avg;
     const sysCpuVals = b?.sysCpuValues ?? [];
     const sysCpuAvg = sysCpuVals.length
       ? Math.round((sysCpuVals.reduce((acc, v) => acc + v, 0) / sysCpuVals.length) * 10) / 10
@@ -292,10 +392,18 @@ export async function GET(req: NextRequest) {
       scoApp: sa,
       db: dbv,
       system: sys,
-      free: Math.max(0, 100 - r - sa - dbv - sys),
+      besclient: bes,
+      elastic: ela,
+      osCore: os,
+      free: Math.max(0, 100 - r - sa - dbv - sys - bes - ela - os),
       sysCpuAvg,
       sysCpuMax,
     });
   }
-  return NextResponse.json({ slots, hasSysCpu: !!sysCpuItem, daySummary });
+  return NextResponse.json({
+    slots,
+    hasSysCpu: !!sysCpuItem,
+    hasOsCore: !!sysKernelItem,
+    daySummary,
+  });
 }

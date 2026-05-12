@@ -30,6 +30,11 @@ const C = {
   belowBg: "#e0effe", belowText: "#868e96",
   thresholdBg: "#fbbf24", highBg: "#f59f00", criticalBg: "#ef4444", exceededText: "#fff",
   retellect: "#fa5252", scoApp: "#f59f00", db: "#9775fa", system: "#0c8feb", free: "#e0effe",
+  // 2026-05-12: three new buckets carved out of "Other" after SP admin
+  // deployed BESClient / Elastic / kernel-CPU items on testlab_SPUB-P-SCO150.
+  // Colors chosen to be visually distinct from the four original categories
+  // while staying in the cool/warm palette of the heatmap.
+  besclient: "#10b981", elastic: "#a3e635", osCore: "#f97316",
   pillActive: "#0070c9", border: "#e9ecef", headerBg: "#f1f3f5", headerText: "#868e96",
   textSec: "#6c757d", okGreen: "#059669",
   riskRedBg: "#fef2f2", riskRedText: "#b91c1c",
@@ -48,7 +53,10 @@ const PROCESSES = [
   { key: "retellect" as const, label: "Retellect", color: C.retellect },
   { key: "scoApp" as const, label: "SCO App", color: C.scoApp },
   { key: "db" as const, label: "DB (SQL)", color: C.db },
-  { key: "system" as const, label: "System", color: C.system },
+  { key: "system" as const, label: "System (VM host)", color: C.system },
+  { key: "besclient" as const, label: "BESClient", color: C.besclient },
+  { key: "elastic" as const, label: "Elastic", color: C.elastic },
+  { key: "osCore" as const, label: "OS Core", color: C.osCore },
   { key: "free" as const, label: "Free", color: C.free, border: true },
 ];
 
@@ -199,7 +207,12 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   //   only counts monitored processes, while system.cpu.util counts everything).
   type ProcessSlot = {
     slot: number; hourKey: string; hour: number; minute: number; label: string;
-    retellect: number; scoApp: number; db: number; system: number; free: number;
+    retellect: number; scoApp: number; db: number; system: number;
+    /** 2026-05-12: three new buckets fed by SP admin's BESClient / Elastic /
+     *  kernel-CPU items deployed on testlab_SPUB-P-SCO150. Always present in
+     *  the response (zero on hosts that don't publish the new items). */
+    besclient: number; elastic: number; osCore: number;
+    free: number;
     sysCpuAvg: number | null; sysCpuMax: number | null;
   };
   const [drillIntervals, setDrillIntervals] = useState<ProcessSlot[] | null>(null);
@@ -556,13 +569,22 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     const sa = raw.scoApp;
     const dbv = raw.db;
     const sys = raw.system;
+    // 2026-05-12: clamp to 0 so hosts on legacy API responses (no besclient /
+    // elastic / osCore fields) still flow through without producing NaN. The
+    // server now always emits these fields; this is defensive plumbing.
+    const bes = raw.besclient ?? 0;
+    const ela = raw.elastic ?? 0;
+    const os = raw.osCore ?? 0;
     return {
       ...raw,
       retellect: r,
       scoApp: sa,
       db: dbv,
       system: sys,
-      free: Math.max(0, 100 - r - sa - dbv - sys),
+      besclient: bes,
+      elastic: ela,
+      osCore: os,
+      free: Math.max(0, 100 - r - sa - dbv - sys - bes - ela - os),
     };
   }, []);
 
@@ -1397,7 +1419,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // uses the slot averages; whatever isn't accounted for by tracked processes
   // is shown as "Other" so the bar always sums to host CPU honestly.
   const hourDetailPanel = selSlotData && (() => {
-    const monitoredSum = selSlotData.retellect + selSlotData.scoApp + selSlotData.db + selSlotData.system;
+    // Sum all 7 monitored buckets so "Other" only reflects genuinely
+    // unattributed CPU. Before 2026-05-12 this was 4 buckets and "Other"
+    // also held BESClient + Elastic + kernel — now those have their own
+    // bars and Other shrinks accordingly on hosts that publish the new
+    // items (testlab_SPUB-P-SCO150 first).
+    const monitoredSum =
+      selSlotData.retellect + selSlotData.scoApp + selSlotData.db + selSlotData.system
+      + selSlotData.besclient + selSlotData.elastic + selSlotData.osCore;
     const hostCpu = selSlotData.sysCpuMax ?? selSlotData.sysCpuAvg ?? monitoredSum;
     const other = Math.max(0, hostCpu - monitoredSum);
     const otherFresh = selSlotData.sysCpuMax !== null;
@@ -1764,7 +1793,9 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                     const isSelected = selectedSlot === s.slot;
                     const sysMax = rawSlot.sysCpuMax;
                     const sysAvg = rawSlot.sysCpuAvg;
-                    const tot = s.retellect + s.scoApp + s.db + s.system;
+                    const tot =
+                      s.retellect + s.scoApp + s.db + s.system
+                      + s.besclient + s.elastic + s.osCore;
                     return (
                       <div key={s.slot}
                         onClick={() => {
@@ -1780,7 +1811,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                           flex: "1 1 0%", cursor: "pointer", position: "relative",
                           background: isSelected ? "rgba(0,112,201,0.06)" : "transparent",
                         }}
-                        title={`${s.label}\nHost CPU: ${sysMax !== null ? Math.round(sysMax) + "% (max)" : "—"}${sysAvg !== null ? " · " + Math.round(sysAvg) + "% (avg)" : ""}\nMonitored processes: ${Math.round(tot)}%  (Retellect ${Math.round(s.retellect)}% · SCO ${Math.round(s.scoApp)}% · DB ${Math.round(s.db)}% · System ${Math.round(s.system)}%)`}
+                        title={`${s.label}\nHost CPU: ${sysMax !== null ? Math.round(sysMax) + "% (max)" : "—"}${sysAvg !== null ? " · " + Math.round(sysAvg) + "% (avg)" : ""}\nMonitored processes: ${Math.round(tot)}%  (Retellect ${Math.round(s.retellect)}% · SCO ${Math.round(s.scoApp)}% · DB ${Math.round(s.db)}% · System ${Math.round(s.system)}% · BESClient ${Math.round(s.besclient)}% · Elastic ${Math.round(s.elastic)}% · OS Core ${Math.round(s.osCore)}%)`}
                       />
                     );
                   })}
@@ -1887,7 +1918,10 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 {!selSlotData && peakSlot && (
                   <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "4px 12px" }}>
                     <span style={{ fontSize: 12, color: "#92400e" }}>
-                      <strong>Process activity peak:</strong> {peakSlotNorm ? Math.round(peakSlotNorm.retellect + peakSlotNorm.scoApp + peakSlotNorm.db + peakSlotNorm.system) : 0}% at {peakSlot.label} · Retellect ~{peakSlotNorm ? Math.round(peakSlotNorm.retellect) : 0}% · Headroom ~{peakSlotNorm ? Math.round(peakSlotNorm.free) : 0}%
+                      <strong>Process activity peak:</strong> {peakSlotNorm ? Math.round(
+                        peakSlotNorm.retellect + peakSlotNorm.scoApp + peakSlotNorm.db + peakSlotNorm.system
+                        + peakSlotNorm.besclient + peakSlotNorm.elastic + peakSlotNorm.osCore
+                      ) : 0}% at {peakSlot.label} · Retellect ~{peakSlotNorm ? Math.round(peakSlotNorm.retellect) : 0}% · Headroom ~{peakSlotNorm ? Math.round(peakSlotNorm.free) : 0}%
                     </span>
                     <span style={{ fontSize: 10, color: "#a16207", marginLeft: 8, fontStyle: "italic" }}>
                       ({granularity}min avg — timeline cell shows daily instantaneous max)

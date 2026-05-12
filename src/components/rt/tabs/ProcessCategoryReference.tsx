@@ -48,13 +48,36 @@ export function ProcessCategoryReference() {
       notes: "Microsoft SQL Server (sqlservr process). Local DB instance for the SCO host.",
     },
     {
-      category: "System",
+      category: "System (VM host)",
       color: "#0ea5e9",
       items: [
         { primary: "perf_counter[\\Process(vmware-vmx)]", aliases: ["vm.cpu"] },
-        { primary: "perf_counter[\\Process(besclient)]" },
       ],
-      notes: "VMware host process for the SCO VM (vmware-vmx) plus IBM BigFix endpoint management client (besclient). Does not include kernel work — kernel CPU is in 'Other' until system.cpu.util[,system] is deployed.",
+      notes: "VMware host process for the SCO VM (vmware-vmx). Before 2026-05-12 this bucket also lumped in BESClient — BESClient now has its own row so the BigFix cost is readable directly.",
+    },
+    {
+      category: "BESClient",
+      color: "#10b981",
+      items: [
+        { primary: "perf_counter[\\Process(besclient)]", aliases: ["besclient.cpu"] },
+      ],
+      notes: "IBM BigFix endpoint management client. Pulled out of \"System\" 2026-05-12 after SP admin detailed the Other bucket on testlab_SPUB-P-SCO150 — BigFix is a SP-stack standard so it appears on every Rimi SCO and was the largest hidden contributor to Other.",
+    },
+    {
+      category: "Elastic",
+      color: "#a3e635",
+      items: [
+        { primary: "perf_counter[\\Process(elastic-agent)]", aliases: ["elastic.cpu", "elasticsearch.cpu", "elastic-agent.cpu"] },
+      ],
+      notes: "Elastic agent / Elasticsearch worker (used by SP for log shipping and telemetry collection). Added 2026-05-12 when SP admin enabled per-process monitoring on testlab — fed via perf_counter or *.cpu depending on what the StrongPoint template publishes on a given host.",
+    },
+    {
+      category: "OS Core",
+      color: "#f97316",
+      items: [
+        { primary: "system.cpu.util[,system]" },
+      ],
+      notes: "Windows kernel-mode CPU at host scope — interrupts, scheduler, I/O completion, driver work. Sourced directly from system.cpu.util[,system], not from a process. Empty on hosts that don't publish the kernel-CPU item (most Rimi prod hosts as of 2026-05-12); enabled on testlab_SPUB-P-SCO150 as the pilot host.",
     },
     {
       category: "Other",
@@ -62,7 +85,7 @@ export function ProcessCategoryReference() {
       items: [
         { primary: "(everything in system.cpu.util not above)" },
       ],
-      notes: "Computed as host CPU minus the four categories. Captures: Windows kernel work (interrupts, scheduler, I/O wait), OS services (svchost, lsass, audit), antivirus, scheduled tasks, and any process Zabbix doesn't track by name on this host (e.g. NHSTW32, cs300sd, UDMServer have items but rarely fire; anything outside that list is invisible).",
+      notes: "Computed as host CPU minus the named categories above. On hosts with the full 2026-05-12 telemetry (kernel CPU + BESClient + Elastic) this should be small — anything left in Other is genuinely unattributed (antivirus, scheduled tasks, processes outside the template's named list). On hosts without the new items, Other still includes kernel work + BigFix + Elastic, same as before.",
     },
   ];
 
@@ -122,10 +145,12 @@ export function ProcessCategoryReference() {
         <strong>Known coverage gaps</strong> (pending StrongPoint admin):
         no Retellect helper / service item exists in the template — if
         Retellect deploys auxiliary processes, they are invisible;
-        no <code>system.cpu.util[,user/system/iowait]</code> kernel split
-        deployed fleet-wide (only one experimental host has it); no LLD
-        <code className="ml-1">proc.cpu.util[*]</code> auto-discovery, so any
-        process not in the list above lands in &ldquo;Other&rdquo;.
+        BESClient / Elastic / OS Core items are deployed on
+        <code className="ml-1">testlab_SPUB-P-SCO150</code> only as of
+        2026-05-12, fleet rollout still pending so production Rimi SCOs
+        keep those cycles inside &ldquo;Other&rdquo;; no LLD{" "}
+        <code>proc.cpu.util[*]</code> auto-discovery, so any process not in
+        the list above lands in &ldquo;Other&rdquo;.
       </div>
     </div>
   );

@@ -25,7 +25,25 @@
  *      it must NOT come back.
  */
 
-export type Category = "retellect" | "scoApp" | "db" | "system";
+export type Category =
+  | "retellect"
+  | "scoApp"
+  | "db"
+  | "system"
+  | "besclient"
+  | "elastic"
+  | "osCore";
+
+/** Categories that come from named processes (chooseTelemetrySources). `osCore`
+ *  is NOT in this set because Windows OS kernel work doesn't have a single
+ *  process name — it's sourced from `system.cpu.util[,system]` (kernel CPU)
+ *  by the route, not from `categorise()`.
+ *
+ *  Named `HistoryProcessCategory` (not `ProcessCategory`) to avoid colliding
+ *  with `ProcessCategory` from `@/lib/zabbix/types`, which uses a different
+ *  taxonomy ("sco" / "hw" / "sys") for the procCpu Zabbix items. The two
+ *  category systems describe different data and must stay separate. */
+export type HistoryProcessCategory = Exclude<Category, "osCore">;
 
 export interface RawItem {
   itemid: string;
@@ -41,20 +59,45 @@ export function normalizeProcName(name: string): string {
  * Map a normalised process name to the user-facing category.
  * Returns null for processes the cockpit doesn't track (peripheral drivers).
  *
- * `besclient` (IBM BigFix endpoint management client) was added 2026-04-28
- * after a SP testlab snapshot revealed it consistently consuming CPU on
- * SCO hosts. BigFix is a SP-stack standard so it almost certainly runs on
- * the Rimi prod fleet too; categorising it here shrinks the "Other" bucket
- * by attributing the cycles to the System category. Awaiting prod snapshot
- * before deciding whether to also categorise teamviewer / vmware-vmx-related
- * processes / Defender (MsMpEng); those decisions live in CAT-2/CAT-3 if
- * needed.
+ * 2026-04-28 — `besclient` (IBM BigFix) was first lumped into "system" after
+ * a SP testlab snapshot showed it consistently consuming CPU on SCO hosts.
+ *
+ * 2026-05-12 — SP admin deployed finer monitoring on testlab host
+ * (testlab_SPUB-P-SCO150) that detailed the previously-anonymous "Other"
+ * bucket into three named sub-categories: BESClient, Elastic agent, and
+ * Windows OS kernel work. `besclient` is now its OWN category (moved out of
+ * "system" so users can read the BigFix cost directly), and `elastic-agent`
+ * / `elasticsearch` / similar names map to "elastic". The Windows kernel
+ * ("System" process, PID 4) maps to "osCore" but is normally sourced from
+ * the kernel-CPU item `system.cpu.util[,system]` rather than a process key
+ * — the categorise() route is kept here so a host that DOES publish a
+ * perf_counter for the "System" process still lands in the right bucket.
+ *
+ * "system" category is preserved for the VM host process (vmware-vmx) and
+ * any other VM-runtime supervisor — labelled "System (VM host)" in the UI
+ * to disambiguate from the new osCore bucket.
+ *
+ * osCore is intentionally NOT reachable from this function: Windows kernel
+ * CPU comes from the host-scope item `system.cpu.util[,system]`, not from
+ * a process name, and the route fetches it via a dedicated path. Routing
+ * a hypothetical `perf_counter[\Process(System)]` here would double-count
+ * against the kernel item on hosts that publish both.
  */
-export function categorise(procName: string): Category | null {
+export function categorise(procName: string): HistoryProcessCategory | null {
   if (/^python\d*$/.test(procName)) return "retellect";
   if (procName === "spss" || procName === "sp.sss" || procName === "sp") return "scoApp";
   if (procName === "sql" || procName === "sqlservr") return "db";
-  if (procName === "vm" || procName === "vmware-vmx" || procName === "besclient") return "system";
+  if (procName === "vm" || procName === "vmware-vmx") return "system";
+  if (procName === "besclient") return "besclient";
+  if (
+    procName === "elastic" ||
+    procName === "elastic-agent" ||
+    procName === "elasticagent" ||
+    procName === "elasticsearch" ||
+    procName === "elasticagentexe"
+  ) {
+    return "elastic";
+  }
   return null;
 }
 
@@ -69,7 +112,7 @@ export function categorise(procName: string): Category | null {
  *   - Items unrecognised by `categorise()` are silently dropped.
  */
 export function chooseTelemetrySources(allItems: RawItem[]): {
-  categoryById: Map<string, Category>;
+  categoryById: Map<string, HistoryProcessCategory>;
   needsCoresDivision: Set<string>;
 } {
   const isCpuKey = (k: string) =>
@@ -80,9 +123,9 @@ export function chooseTelemetrySources(allItems: RawItem[]): {
   const cpuItems = allItems.filter((it) => isCpuKey(it.key_));
   const perfItems = allItems.filter((it) => isPerfProcKey(it.key_));
 
-  const categoryById = new Map<string, Category>();
+  const categoryById = new Map<string, HistoryProcessCategory>();
   const needsCoresDivision = new Set<string>();
-  const perfByProc = new Map<string, { itemid: string; cat: Category }>();
+  const perfByProc = new Map<string, { itemid: string; cat: HistoryProcessCategory }>();
 
   for (const it of perfItems) {
     const m = it.key_.match(/\\Process\(([^)]+)\)/);
@@ -113,10 +156,30 @@ export interface SlotBucket {
   scoApp: number;
   db: number;
   system: number;
+  besclient: number;
+  elastic: number;
+  osCore: number;
   countR: number;
   countS: number;
   countD: number;
   countSys: number;
+  countBes: number;
+  countEla: number;
+  countOs: number;
+}
+
+export interface SlotAverages {
+  retellect: number;
+  scoApp: number;
+  db: number;
+  system: number;
+  besclient: number;
+  elastic: number;
+  osCore: number;
+  /** Remainder after every named category is subtracted from 100. Clamped ≥0
+   *  so a slot where monitored sums overshoot host CPU (rare, perf_counter
+   *  rounding) never renders a negative bar. */
+  free: number;
 }
 
 /**
@@ -128,18 +191,24 @@ export interface SlotBucket {
  *
  * Returns rounded values to match what the API serialises to the client.
  */
-export function averageSlot(b: SlotBucket): {
-  retellect: number;
-  scoApp: number;
-  db: number;
-  system: number;
-  free: number;
-} {
+export function averageSlot(b: SlotBucket): SlotAverages {
   const r = b.countR > 0 ? Math.round((b.retellect / b.countR) * 10) / 10 : 0;
   const sa = b.countS > 0 ? Math.round((b.scoApp / b.countS) * 10) / 10 : 0;
   const dbv = b.countD > 0 ? Math.round((b.db / b.countD) * 10) / 10 : 0;
   const sys = b.countSys > 0 ? Math.round((b.system / b.countSys) * 10) / 10 : 0;
-  return { retellect: r, scoApp: sa, db: dbv, system: sys, free: Math.max(0, 100 - r - sa - dbv - sys) };
+  const bes = b.countBes > 0 ? Math.round((b.besclient / b.countBes) * 10) / 10 : 0;
+  const ela = b.countEla > 0 ? Math.round((b.elastic / b.countEla) * 10) / 10 : 0;
+  const os = b.countOs > 0 ? Math.round((b.osCore / b.countOs) * 10) / 10 : 0;
+  return {
+    retellect: r,
+    scoApp: sa,
+    db: dbv,
+    system: sys,
+    besclient: bes,
+    elastic: ela,
+    osCore: os,
+    free: Math.max(0, 100 - r - sa - dbv - sys - bes - ela - os),
+  };
 }
 
 /**

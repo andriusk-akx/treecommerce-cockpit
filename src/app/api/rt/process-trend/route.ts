@@ -34,6 +34,7 @@ import {
   chooseTelemetrySources,
   normaliseValue,
   type Category,
+  type HistoryProcessCategory,
 } from "../process-history/math";
 import {
   bucketSamplesByDay,
@@ -54,7 +55,19 @@ export const dynamic = "force-dynamic";
  * "what kinds of processes do we track" set.
  */
 type CategoryEx = Category | "other" | "totalCpu";
-const ALLOWED_CATEGORIES = new Set<CategoryEx>(["retellect", "scoApp", "db", "system", "other", "totalCpu"]);
+const ALLOWED_CATEGORIES = new Set<CategoryEx>([
+  "retellect", "scoApp", "db", "system",
+  "besclient", "elastic", "osCore",
+  "other", "totalCpu",
+]);
+
+/** Process-backed categories — used to build itemIdsByCategory and to enumerate
+ *  what "other" subtracts from the host CPU. Excludes osCore (kernel-CPU
+ *  signal sourced from system.cpu.util[,system], not from a process item)
+ *  even though osCore is a member of the broader Category union. */
+const PROCESS_CATEGORIES: HistoryProcessCategory[] = [
+  "retellect", "scoApp", "db", "system", "besclient", "elastic",
+];
 
 // Hard upper bound on the trend window. trend.get retention on a typical
 // Zabbix server is ~365 days; beyond that the response is empty regardless
@@ -160,11 +173,13 @@ async function buildTrendResponse(
     allItems.map((it) => ({ itemid: it.itemid, key_: it.key_ })),
   );
 
-  const itemIdsByCategory: Record<Category, Set<string>> = {
+  const itemIdsByCategory: Record<HistoryProcessCategory, Set<string>> = {
     retellect: new Set<string>(),
     scoApp: new Set<string>(),
     db: new Set<string>(),
     system: new Set<string>(),
+    besclient: new Set<string>(),
+    elastic: new Set<string>(),
   };
   for (const [itemid, cat] of categoryById) {
     itemIdsByCategory[cat].add(itemid);
@@ -176,6 +191,11 @@ async function buildTrendResponse(
   const sysCpuItem = allItems.find(
     (it) => it.key_ === "system.cpu.util[,,avg1]" || it.key_ === "system.cpu.util",
   );
+  // Kernel-CPU item (host-scope system-mode utilisation). 2026-05-12: SP
+  // admin deployed this on testlab_SPUB-P-SCO150 so the "osCore" bucket has
+  // a real signal source. Hosts without this item just get an empty osCore
+  // series — the chart renders an empty line, which is honest.
+  const sysKernelItem = allItems.find((it) => it.key_ === "system.cpu.util[,system]");
 
   // Date window: cover the last `days` days starting at midnight UTC of the
   // earliest day so we capture the full first-day window in Vilnius local.
@@ -188,21 +208,28 @@ async function buildTrendResponse(
   const datesInWindow = listDateRange(days);
 
   // What items do we actually need to hit Zabbix for?
-  //   - "Other"    — ALL category items (to subtract their sum) PLUS sysCpu.
+  //   - "Other"    — ALL process-category items (to subtract their sum) PLUS
+  //                  sysCpu and the kernel-CPU item (sysKernel feeds osCore).
   //   - "Total CPU" — just sysCpu (host-level CPU utilisation).
-  //   - Specific categories — just that category's items.
+  //   - "osCore"   — just the kernel-CPU item.
+  //   - Specific process category — just that category's items.
   //   - Retellect items always come along (the ON/OFF classifier needs them
   //     regardless of which series is being charted).
   const itemsToFetch = new Set<string>(itemIdsByCategory.retellect);
   if (category === "other") {
-    for (const cat of ["retellect", "scoApp", "db", "system"] as Category[]) {
+    for (const cat of PROCESS_CATEGORIES) {
       for (const id of itemIdsByCategory[cat]) itemsToFetch.add(id);
     }
     if (sysCpuItem) itemsToFetch.add(sysCpuItem.itemid);
+    if (sysKernelItem) itemsToFetch.add(sysKernelItem.itemid);
   } else if (category === "totalCpu") {
     if (sysCpuItem) itemsToFetch.add(sysCpuItem.itemid);
+  } else if (category === "osCore") {
+    if (sysKernelItem) itemsToFetch.add(sysKernelItem.itemid);
   } else {
-    for (const id of itemIdsByCategory[category]) itemsToFetch.add(id);
+    // category is one of the process-backed categories at this point.
+    const procCat = category as HistoryProcessCategory;
+    for (const id of itemIdsByCategory[procCat]) itemsToFetch.add(id);
   }
 
   // If we have nothing to fetch we can short-circuit to a fully empty response.
@@ -310,13 +337,16 @@ async function buildTrendResponse(
   // For category === "other", we keep four parallel per-category maps and a
   // sysCpu map. Other = max(0, sysCpu - rt - sa - db - sys) per minute.
   type MinSum = Map<number, number>;
-  const perCatByMin: Record<Category, MinSum> = {
+  const perCatByMin: Record<HistoryProcessCategory, MinSum> = {
     retellect: new Map(),
     scoApp: new Map(),
     db: new Map(),
     system: new Map(),
+    besclient: new Map(),
+    elastic: new Map(),
   };
   const sysCpuByMin: MinSum = new Map();
+  const sysKernelByMin: MinSum = new Map();
 
   for (const records of batchResults) {
     for (const r of records) {
@@ -327,6 +357,12 @@ async function buildTrendResponse(
       // sysCpu is "% of host" already; never needs /cores division.
       if (sysCpuItem && itemid === sysCpuItem.itemid) {
         sysCpuByMin.set(minBucket, raw);
+        continue;
+      }
+      // Kernel CPU (osCore) — also "% of host"; stored separately so the
+      // "other" derivation can subtract it alongside the process buckets.
+      if (sysKernelItem && itemid === sysKernelItem.itemid) {
+        sysKernelByMin.set(minBucket, raw);
         continue;
       }
       const cat = categoryById.get(itemid);
@@ -351,15 +387,22 @@ async function buildTrendResponse(
       const sa = perCatByMin.scoApp.get(min) ?? 0;
       const db = perCatByMin.db.get(min) ?? 0;
       const sys = perCatByMin.system.get(min) ?? 0;
-      const other = Math.max(0, sysVal - rt - sa - db - sys);
+      const bes = perCatByMin.besclient.get(min) ?? 0;
+      const ela = perCatByMin.elastic.get(min) ?? 0;
+      const osc = sysKernelByMin.get(min) ?? 0;
+      const other = Math.max(0, sysVal - rt - sa - db - sys - bes - ela - osc);
       chosenSamples.push({ clock: min * 60, value: other });
     }
   } else if (category === "totalCpu") {
     for (const [min, value] of sysCpuByMin) {
       chosenSamples.push({ clock: min * 60, value });
     }
+  } else if (category === "osCore") {
+    for (const [min, value] of sysKernelByMin) {
+      chosenSamples.push({ clock: min * 60, value });
+    }
   } else {
-    for (const [min, value] of perCatByMin[category]) {
+    for (const [min, value] of perCatByMin[category as HistoryProcessCategory]) {
       chosenSamples.push({ clock: min * 60, value });
     }
   }
@@ -396,13 +439,16 @@ async function buildTrendResponse(
   // For each (category, day), we accumulate per-hour SUMS across items.
   // perCatTrend[cat][date] = Map<hour-of-period, { avgSum, maxSum }>.
   type HourBucket = { avgSum: number; maxSum: number };
-  const perCatTrend: Record<Category, Map<string, Map<number, HourBucket>>> = {
+  const perCatTrend: Record<HistoryProcessCategory, Map<string, Map<number, HourBucket>>> = {
     retellect: new Map(),
     scoApp: new Map(),
     db: new Map(),
     system: new Map(),
+    besclient: new Map(),
+    elastic: new Map(),
   };
   const sysCpuTrend = new Map<string, Map<number, HourBucket>>();
+  const sysKernelTrend = new Map<string, Map<number, HourBucket>>();
   for (const t of trendRecords) {
     const itemid = t.itemid;
     const clockSec = parseInt(t.clock);
@@ -419,6 +465,10 @@ async function buildTrendResponse(
     };
     if (sysCpuItem && itemid === sysCpuItem.itemid) {
       acc(sysCpuTrend, vAvg, vMax);
+      continue;
+    }
+    if (sysKernelItem && itemid === sysKernelItem.itemid) {
+      acc(sysKernelTrend, vAvg, vMax);
       continue;
     }
     const cat = categoryById.get(itemid);
@@ -440,15 +490,18 @@ async function buildTrendResponse(
       let peakOfHourMax = 0;
       let hourCount = 0;
       for (const [hour, sysB] of sysDay) {
-        const rt = perCatTrend.retellect.get(date)?.get(hour)?.avgSum ?? 0;
-        const sa = perCatTrend.scoApp.get(date)?.get(hour)?.avgSum ?? 0;
-        const db = perCatTrend.db.get(date)?.get(hour)?.avgSum ?? 0;
+        const rt  = perCatTrend.retellect.get(date)?.get(hour)?.avgSum ?? 0;
+        const sa  = perCatTrend.scoApp.get(date)?.get(hour)?.avgSum ?? 0;
+        const db  = perCatTrend.db.get(date)?.get(hour)?.avgSum ?? 0;
         const sys = perCatTrend.system.get(date)?.get(hour)?.avgSum ?? 0;
-        const otherAvg = Math.max(0, sysB.avgSum - rt - sa - db - sys);
-        // Peak: hour-max sysCpu minus hour-avg of the four (we don't have
+        const bes = perCatTrend.besclient.get(date)?.get(hour)?.avgSum ?? 0;
+        const ela = perCatTrend.elastic.get(date)?.get(hour)?.avgSum ?? 0;
+        const osc = sysKernelTrend.get(date)?.get(hour)?.avgSum ?? 0;
+        const otherAvg = Math.max(0, sysB.avgSum - rt - sa - db - sys - bes - ela - osc);
+        // Peak: hour-max sysCpu minus hour-avg of the rest (we don't have
         // hour-max for category sums, only hour-avg sums; using avg here
         // slightly under-reports peak but never over-reports — safe).
-        const otherPeak = Math.max(0, sysB.maxSum - rt - sa - db - sys);
+        const otherPeak = Math.max(0, sysB.maxSum - rt - sa - db - sys - bes - ela - osc);
         sumOfHourTotals += otherAvg;
         if (otherPeak > peakOfHourMax) peakOfHourMax = otherPeak;
         hourCount += 1;
@@ -475,7 +528,22 @@ async function buildTrendResponse(
         hourCount: dayMap.size,
       };
     }
-    const dayMap = perCatTrend[category].get(date);
+    if (category === "osCore") {
+      const dayMap = sysKernelTrend.get(date);
+      if (!dayMap || dayMap.size === 0) return null;
+      let sumOfHourAvgs = 0;
+      let peakOfHourMax = 0;
+      for (const b of dayMap.values()) {
+        sumOfHourAvgs += b.avgSum;
+        if (b.maxSum > peakOfHourMax) peakOfHourMax = b.maxSum;
+      }
+      return {
+        avg: Math.round((sumOfHourAvgs / dayMap.size) * 10) / 10,
+        peak: Math.round(peakOfHourMax * 10) / 10,
+        hourCount: dayMap.size,
+      };
+    }
+    const dayMap = perCatTrend[category as HistoryProcessCategory].get(date);
     if (!dayMap || dayMap.size === 0) return null;
     let sumOfHourTotals = 0;
     let peakOfHourMax = 0;
@@ -504,10 +572,11 @@ async function buildTrendResponse(
 
   // Drop the now-redundant per-minute maps so the GC reclaims them while we
   // assemble the per-day output (large hosts can hold 14 d × 1440 min entries).
-  for (const cat of ["retellect", "scoApp", "db", "system"] as Category[]) {
+  for (const cat of PROCESS_CATEGORIES) {
     perCatByMin[cat].clear();
   }
   sysCpuByMin.clear();
+  sysKernelByMin.clear();
 
   const dayResults = datesInWindow.map((date) => {
     // Prefer history (sample-level) when this day has any samples.
