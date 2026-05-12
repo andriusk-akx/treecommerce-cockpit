@@ -65,8 +65,20 @@ export function classifyProcessKey(key: string): { procName: string; category: P
   return { procName: base, category: "other" };
 }
 
+/** Sanitise the days-back window into a stable, bounded cache-key segment.
+ *
+ *  Lower bound 1 day guards against negative / NaN input (zero-day window
+ *  has no meaningful aggregate).
+ *
+ *  Upper bound 365 days — Zabbix's trend.get retention is ~365 d on a
+ *  typical install. Pre-2026-05-12 this clamped at 14 d to match the
+ *  raw-history window only, but the heatmap timeline now needs to honour
+ *  custom periods up to a year (RtFiltersContext period selector). The
+ *  internal fetch path (_getCpuHistoryDailyUncached) merges trend + history
+ *  data, so >14 d windows fall back to hourly trend aggregates for the
+ *  older days — same hybrid pattern process-trend route uses. */
 function effectiveDaysKey(days: number): string {
-  return String(Math.min(Math.max(1, days), 14));
+  return String(Math.min(Math.max(1, days), 365));
 }
 
 export class ZabbixClient {
@@ -343,7 +355,13 @@ export class ZabbixClient {
     itemHostMap: Map<string, string>,
     daysBack: number = 14
   ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[]> {
-    const effectiveDays = Math.min(daysBack, 14);
+    // Bound at 1..365 days. The internal merge handles >14 d windows via
+    // trend.get hourly aggregates: history.get covers the recent ~14 d with
+    // sample-level accuracy, trend.get fills in the rest of the window.
+    // The old hard clamp to 14 made the heatmap mis-display custom periods
+    // (30 d / 60 d): the page rendered the wider date axis but the data
+    // payload was silently capped to 14 d, so older cells showed "—".
+    const effectiveDays = Math.min(Math.max(1, daysBack), 365);
     const timeFrom = Math.floor(Date.now() / 1000) - effectiveDays * 24 * 3600;
 
     // `samplesAbove` and `totalSamples` are populated only from history.get

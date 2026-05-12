@@ -26,12 +26,29 @@ export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ pilotId: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; period?: string }>;
+}
+
+/**
+ * Parse the period search param into a positive number of days, bounded
+ * to the Zabbix trend retention window (1..365). Accepts both preset ids
+ * ("14d", "30d", "90d") and bare numeric strings ("60"). Defaults to 14
+ * when the param is missing or unparseable so existing deep-links keep
+ * working unchanged.
+ */
+function parsePeriodDays(raw: string | undefined): number {
+  if (!raw) return 14;
+  const m = /^(\d+)d?$/.exec(raw.trim());
+  if (!m) return 14;
+  const n = parseInt(m[1], 10);
+  if (!Number.isFinite(n)) return 14;
+  return Math.min(Math.max(1, n), 365);
 }
 
 export default async function RetellectPilotPage({ params, searchParams }: Props) {
   const { pilotId } = await params;
-  const { tab } = await searchParams;
+  const { tab, period: periodParam } = await searchParams;
+  const periodDays = parsePeriodDays(periodParam);
 
   const user = await getCurrentUser();
   if (!user) redirect(`/login?next=/retellect/${pilotId}`);
@@ -91,7 +108,7 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
   // sibling `loading.tsx` covering the Phase 1 (auth + DB pilot fetch)
   // window so the user sees a populated layout from click 0.
   const pilotData: RtPilotData = buildPilotData(pilot);
-  const zabbixDataPromise = loadZabbixDataPayload(pilotId, expectedHostKeys);
+  const zabbixDataPromise = loadZabbixDataPayload(pilotId, expectedHostKeys, periodDays);
 
   return (
     <Suspense fallback={<ZabbixLoadingFallback pilot={pilotData} />}>
@@ -250,7 +267,21 @@ const FRESH_MS = {
   history: 300_000,
 };
 
-async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<string>): Promise<ZabbixData> {
+async function loadZabbixDataPayload(
+  pilotId: string,
+  expectedHostKeys: Set<string>,
+  /**
+   * Number of days the CPU heatmap should cover. Threaded from the URL
+   * (?period=30) so changing the period via the timeline selector triggers
+   * a server-side refetch with the new window — without this, the period
+   * lived only in client state and the wider date axis rendered against
+   * a 14-day data payload (older cells dropped to "—").
+   *
+   * Bounded 1..365. Only the cpu-history fetcher reads it; the other 6
+   * fetchers are per-poll-cycle data that doesn't depend on the window.
+   */
+  periodDays: number = 14,
+): Promise<ZabbixData> {
   const [
     zabbixResult,
     zabbixCpuDetailResult,
@@ -352,7 +383,11 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
         }));
       },
     }),
-    fetchSource(`zabbix-rt-cpu-history-${pilotId}`, {
+    // Cache key includes periodDays — changing the heatmap period must NOT
+    // return the previous period's cached payload. Without this, switching
+    // 14d -> 30d would either show stale 14d data (cache hit) or trigger
+    // an "all empty" cell stretch when the cached entry was clipped.
+    fetchSource(`zabbix-rt-cpu-history-${pilotId}-${periodDays}d`, {
       source: "zabbix",
       label: "Zabbix CPU History",
       env: "prod",
@@ -379,7 +414,11 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
         if (cpuUtilItems.length === 0) return [];
         const itemIds = cpuUtilItems.map((i) => i.itemid);
         const itemHostMap = new Map(cpuUtilItems.map((i) => [i.itemid, i.hostid]));
-        return await client.getCpuHistoryDaily(itemIds, itemHostMap, 14);
+        // periodDays drives both the SQL/Zabbix window AND the dailyMap
+        // dimensions. <=14 d windows still return sample-accurate counters
+        // (minutesAbove); older days fall back to trend.get hourly aggregates
+        // so the Peak % heatmap mode renders honestly across the whole span.
+        return await client.getCpuHistoryDaily(itemIds, itemHostMap, periodDays);
       },
     }),
     fetchSource(`zabbix-rt-agent-health-${pilotId}`, {

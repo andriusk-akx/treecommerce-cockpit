@@ -2,6 +2,7 @@
 
 import type { ReactElement } from "react";
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
 import { generateIntervalData, type IntervalSlot } from "./rt-timeline-math";
 import { DataCoverageBanner } from "./DataCoverageBanner";
@@ -132,7 +133,46 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   const threshold = filters.threshold;
   const setThreshold = (v: number) => setFilter("threshold", v);
   const period = filters.period;
-  const setPeriod = (v: string) => setFilter("period", v);
+
+  // ── Period selector: URL is the source of truth ───────────────────
+  //
+  // The CPU heatmap data is fetched server-side at the /retellect/[pilotId]
+  // page level — it doesn't refetch on client state change. Before 2026-05-12
+  // the period filter lived only in RtFiltersContext (localStorage), so
+  // picking "30 d" widened the date axis but the cached 14-d Zabbix payload
+  // left the older 16 cells empty (bug report screenshot).
+  //
+  // Fix: make `?period=` the source of truth. Selecting a period pushes the
+  // new URL via router.push, which triggers the page server component to
+  // re-render with the new searchParam and refetch CPU history with the
+  // larger window. The context still mirrors the value so the rest of the
+  // client UI (chip bar, dates array calc) keeps working unchanged.
+  const router = useRouter();
+  const pathname = usePathname();
+  const urlSearchParams = useSearchParams();
+  // Sync URL → context. Two scenarios:
+  //   - Fresh deep-link with ?period=60 → context catches up to URL.
+  //   - SSR re-render after setPeriod's router.push → URL already matches
+  //     context, this effect is a no-op (but cheap).
+  useEffect(() => {
+    const urlPeriod = urlSearchParams.get("period");
+    if (urlPeriod && urlPeriod !== filters.period) {
+      setFilter("period", urlPeriod);
+    }
+    // We intentionally don't depend on filters.period — context-only changes
+    // shouldn't re-run this effect (they're already going through setPeriod).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSearchParams]);
+
+  const setPeriod = (v: string) => {
+    // Update context immediately so the UI feels responsive while the SSR
+    // refetch is in flight; the destination's loading.tsx + Suspense fallback
+    // already cover the transition window.
+    setFilter("period", v);
+    const params = new URLSearchParams(urlSearchParams.toString());
+    params.set("period", v);
+    router.push(`${pathname}?${params.toString()}`);
+  };
   const storeFilter = filters.store;
   const setStoreFilter = (v: string) => setFilter("store", v);
   const cpuModelFilter = filters.cpuModel;
