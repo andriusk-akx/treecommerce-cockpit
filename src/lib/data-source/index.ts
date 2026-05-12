@@ -57,9 +57,39 @@ export interface FetchOptions<T> {
   env: string;
   /** The live data fetcher function */
   fetcher: () => Promise<T>;
-  /** Max age of cache in ms before it's considered stale (default: no limit) */
+  /** Max age of cache in ms before it's considered stale (default: no limit).
+   *  Applies to the failure-fallback path only — a cache entry older than
+   *  this is treated as if absent when the live fetcher errors. */
   maxCacheAgeMs?: number;
+  /**
+   * Stale-while-revalidate TTL.
+   *
+   * When set, `fetchSource` first checks the disk cache: if an entry is
+   * present AND younger than `freshFor` ms, the cached data is returned
+   * immediately (status: "live", with `cachedAt` set so the source-status
+   * UI can display the freshness), and a background revalidation kicks off
+   * to refresh the cache for the next request.
+   *
+   * When unset (default), every call hits the live fetcher and the cache
+   * is only consulted on failure — original behaviour, preserved.
+   *
+   * Use a TTL that's lower than the upstream poll cadence: monitoring data
+   * with 1-min Zabbix poll cycles is honest at 30-60 s; faster than that
+   * just wastes round-trips with no UX win. The TTL is meaningful only for
+   * paths that benefit from sub-second responses (dashboard first paint,
+   * drill-down panels) — single-call admin operations can leave it unset.
+   */
+  freshFor?: number;
 }
+
+/**
+ * Per-key in-flight revalidation tracker so background revalidations don't
+ * stack on top of each other when many concurrent requests hit the same
+ * stale-but-fresh path. The first request kicks off the revalidate; the
+ * rest see the flag set and skip — they all already returned the cached
+ * payload to their callers, so there's nothing further to do.
+ */
+const revalidating = new Set<string>();
 
 /** Persisted cache entry */
 interface CacheEntry<T> {
@@ -133,6 +163,57 @@ export async function fetchSource<T>(
   opts: FetchOptions<T>,
 ): Promise<SourceResult<T>> {
   const t0 = Date.now();
+
+  // 0. Stale-while-revalidate fast path.
+  //    If the caller opted in (freshFor > 0) AND we have a cache entry
+  //    younger than freshFor ms on disk, return that cached data RIGHT
+  //    NOW and kick off a background revalidation. The user gets first
+  //    paint in single-digit ms instead of waiting 1–3 s for a live
+  //    Zabbix round-trip — typical dashboard refresh window.
+  if (opts.freshFor && opts.freshFor > 0) {
+    const cached = await readFromCache<T>(cacheKey);
+    if (cached) {
+      const ageMs = Date.now() - new Date(cached.cachedAt).getTime();
+      if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= opts.freshFor) {
+        // Background revalidate (no await) — but dedupe so a stampede of
+        // 7 parallel page fetchers doesn't fire 7 simultaneous revalidate
+        // requests against Zabbix for the same key.
+        if (!revalidating.has(cacheKey)) {
+          revalidating.add(cacheKey);
+          // Detach from the request lifecycle. Errors here are intentionally
+          // swallowed: the user already got cached data, so a revalidation
+          // failure should not leak into their response. Next request that
+          // sees stale-cache will try again.
+          void (async () => {
+            try {
+              const data = await opts.fetcher();
+              await writeToCache(cacheKey, data, opts.source, opts.label, opts.env);
+            } catch {
+              /* revalidation failed — keep the existing cache, next request retries */
+            } finally {
+              revalidating.delete(cacheKey);
+            }
+          })();
+        }
+        const fetchMs = Date.now() - t0;
+        // Status is "live" (not "cached") because the data is within the
+        // freshness window the caller declared acceptable. The cachedAt
+        // field lets the source-status UI still show "X seconds old" if
+        // it wants to surface that — purely informational.
+        return {
+          data: cached.data,
+          status: "live",
+          cachedAt: cached.cachedAt,
+          source: opts.source,
+          label: opts.label,
+          env: opts.env,
+          error: null,
+          fetchMs,
+        };
+      }
+    }
+    // Cache miss or older than freshFor — fall through to live fetch below.
+  }
 
   // 1. Try live
   try {

@@ -56,6 +56,11 @@ export default async function DashboardPage() {
       source: "zabbix",
       label: "Zabbix Monitoringas",
       env: "prod",
+      // 60 s SWR — the admin home shows host + problem counts; both
+      // update at Zabbix's poll cadence (~1 min), so a fresher TTL just
+      // wastes round-trips. Hot cache returns in <50 ms versus the 1-3 s
+      // cold path the user used to wait through on every navigation.
+      freshFor: 60_000,
       fetcher: async () => {
         const zClient = getZabbixClient();
         const [version, problems, hosts] = await Promise.all([
@@ -70,6 +75,9 @@ export default async function DashboardPage() {
       source: "zabbix",
       label: "AI Įžvalgos",
       env: "prod",
+      // Insights are derived from the same Zabbix snapshot — same 60 s
+      // window so both surfaces refresh in lockstep.
+      freshFor: 60_000,
       fetcher: () => generateInsights(),
     }),
   ]);

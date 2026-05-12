@@ -229,6 +229,27 @@ function buildPilotData(pilot: PrismaPilotRow): RtPilotData {
   };
 }
 
+// Per-call freshness windows. Login → first paint was bottlenecked by the
+// 7 parallel Zabbix fetches all going live every time, even when an entry
+// from 10 seconds earlier sat on disk. With stale-while-revalidate the
+// hot cache path returns in <50 ms and the background revalidation keeps
+// the cache warm for the next visitor.
+//
+// Values reflect how often the underlying data legitimately moves:
+//   60 s    — live CPU / RAM / process telemetry (Zabbix polls these
+//             at 1-min cadence anyway, so a fresher TTL just wastes
+//             round-trips with no UX benefit)
+//   300 s   — process-item registry, deployed-hostId set (these change
+//             only when SP admin redeploys the template — minutes-scale)
+//   300 s   — 14-day CPU history (trend.get bucket is hourly, so reading
+//             the same 14-day window twice within 5 minutes returns the
+//             same numbers)
+const FRESH_MS = {
+  live: 60_000,
+  registry: 300_000,
+  history: 300_000,
+};
+
 async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<string>): Promise<ZabbixData> {
   const [
     zabbixResult,
@@ -243,6 +264,7 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
       source: "zabbix",
       label: "Zabbix CPU/RAM Metrikos",
       env: "prod",
+      freshFor: FRESH_MS.live,
       fetcher: async () => {
         const client = getZabbixClient();
         const [resources, hosts] = await Promise.all([
@@ -265,6 +287,7 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
       source: "zabbix",
       label: "Zabbix CPU Detail",
       env: "prod",
+      freshFor: FRESH_MS.live,
       fetcher: async () => {
         const client = getZabbixClient();
         const allHosts = await client.getHosts();
@@ -286,6 +309,7 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
       source: "zabbix",
       label: "Zabbix Process Items",
       env: "prod",
+      freshFor: FRESH_MS.registry,
       fetcher: async () => {
         const client = getZabbixClient();
         const allHosts = await client.getHosts();
@@ -307,6 +331,7 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
       source: "zabbix",
       label: "Zabbix Process CPU",
       env: "prod",
+      freshFor: FRESH_MS.live,
       fetcher: async () => {
         const client = getZabbixClient();
         const allHosts = (await client.getHosts()) as Array<{ hostid: string }>;
@@ -331,6 +356,7 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
       source: "zabbix",
       label: "Zabbix CPU History",
       env: "prod",
+      freshFor: FRESH_MS.history,
       fetcher: async () => {
         const client = getZabbixClient();
         const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
@@ -360,6 +386,7 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
       source: "zabbix",
       label: "Zabbix Agent Health",
       env: "prod",
+      freshFor: FRESH_MS.live,
       fetcher: async () => {
         // Per-host count of supported / unsupported items so the dashboard
         // can distinguish "agent broken" from "process idle". Restricted to
@@ -384,6 +411,7 @@ async function loadZabbixDataPayload(pilotId: string, expectedHostKeys: Set<stri
       source: "zabbix",
       label: "Zabbix Retellect Deployment Map",
       env: "prod",
+      freshFor: FRESH_MS.registry,
       fetcher: async (): Promise<string[]> => {
         const client = getZabbixClient();
         const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
