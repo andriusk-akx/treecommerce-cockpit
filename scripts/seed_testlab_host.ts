@@ -16,7 +16,15 @@
  */
 import { prisma } from "../src/lib/db";
 
-const TESTLAB_HOST_KEY = "testlab_SPUB-P-SCO150";
+// Zabbix display name (the `name` field returned by host.get), NOT the
+// technical `host` identifier. seed_rimi_expand.ts and the retellect page
+// match `Device.sourceHostKey` against `host.name`, so storing the
+// technical name here would leave the device silently unmatched in the
+// dashboard ("device exists, but never any data").
+//
+// Verified via Zabbix API (2026-05-13):
+//   host="testlab_SPUB-P-SCO150"  name="Strongpoint testlab SCO"
+const TESTLAB_HOST_KEY = "Strongpoint testlab SCO";
 const TESTLAB_STORE_CODE = "SP-TESTLAB";
 const TESTLAB_STORE_NAME = "StrongPoint Testlab";
 const TESTLAB_DEVICE_NAME = "SCO150";
