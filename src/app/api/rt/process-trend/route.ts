@@ -195,7 +195,17 @@ async function buildTrendResponse(
   // admin deployed this on testlab_SPUB-P-SCO150 so the "osCore" bucket has
   // a real signal source. Hosts without this item just get an empty osCore
   // series — the chart renders an empty line, which is honest.
-  const sysKernelItem = allItems.find((it) => it.key_ === "system.cpu.util[,system]");
+  // Same two-source kernel detection as process-history: prefer the host-scope
+  // metric, fall back to the Windows "System" process perf_counter that SP
+  // admin's May-8 deploy actually shipped. See process-history/route.ts for
+  // the full rationale. `sysKernelNeedsCoresDiv` flips on for the fallback
+  // path so per-core values get /cores before bucketing.
+  const sysKernelHostItem = allItems.find((it) => it.key_ === "system.cpu.util[,system]");
+  const sysKernelProcItem = !sysKernelHostItem
+    ? allItems.find((it) => /^perf_counter\["?\\Process\(System\)\\% Processor Time/.test(it.key_))
+    : null;
+  const sysKernelItem = sysKernelHostItem ?? sysKernelProcItem;
+  const sysKernelNeedsCoresDiv = !!sysKernelProcItem;
 
   // Date window: cover the last `days` days starting at midnight UTC of the
   // earliest day so we capture the full first-day window in Vilnius local.
@@ -359,10 +369,13 @@ async function buildTrendResponse(
         sysCpuByMin.set(minBucket, raw);
         continue;
       }
-      // Kernel CPU (osCore) — also "% of host"; stored separately so the
-      // "other" derivation can subtract it alongside the process buckets.
+      // Kernel CPU (osCore) — host-scope variant is already "% of host",
+      // Process(System) variant is "% of one core" → /cores. Stored
+      // separately so the "other" derivation can subtract it alongside
+      // the process buckets.
       if (sysKernelItem && itemid === sysKernelItem.itemid) {
-        sysKernelByMin.set(minBucket, raw);
+        const v = sysKernelNeedsCoresDiv ? raw / Math.max(1, cores) : raw;
+        sysKernelByMin.set(minBucket, v);
         continue;
       }
       const cat = categoryById.get(itemid);
@@ -468,7 +481,10 @@ async function buildTrendResponse(
       continue;
     }
     if (sysKernelItem && itemid === sysKernelItem.itemid) {
-      acc(sysKernelTrend, vAvg, vMax);
+      // Process(System) variant needs /cores like other perf_counter items.
+      const vA = sysKernelNeedsCoresDiv ? vAvg / Math.max(1, cores) : vAvg;
+      const vM = sysKernelNeedsCoresDiv ? vMax / Math.max(1, cores) : vMax;
+      acc(sysKernelTrend, vA, vM);
       continue;
     }
     const cat = categoryById.get(itemid);

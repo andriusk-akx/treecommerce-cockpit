@@ -165,7 +165,28 @@ export async function GET(req: NextRequest) {
   // bucket can be split into BESClient / Elastic / Windows OS core. Hosts
   // without this item simply have osCore = 0 and the residual stays in
   // "free" / Other as before.
-  const sysKernelItem = allItems.find((it) => it.key_ === "system.cpu.util[,system]");
+  // Two acceptable kernel-CPU sources on this fleet:
+  //   1. system.cpu.util[,system]    — host-scope kernel %, already normalised.
+  //      The "clean" item; what we asked SP admin for. Doesn't yet exist on
+  //      the prod fleet as of 2026-05-13 (only in their longer-term plan).
+  //   2. perf_counter[\Process(System)\...]  — Windows PID 4 "System" process,
+  //      which IS the kernel work surfaced as a process counter. Returns
+  //      "% of one core", so needs /cores division on the route side. SP
+  //      admin's actual May-8 deploy used this form; the dashboard would
+  //      have continued to show OS Core = 0% indefinitely otherwise.
+  //
+  // We prefer (1) when both exist (cleaner semantics — host-scope without
+  // any cores-math gotchas). Fall back to (2) so the existing rollout works
+  // without waiting for SP admin to also add the host-scope item.
+  const sysKernelHostItem = allItems.find((it) => it.key_ === "system.cpu.util[,system]");
+  const sysKernelProcItem = !sysKernelHostItem
+    ? allItems.find((it) => /^perf_counter\["?\\Process\(System\)\\% Processor Time/.test(it.key_))
+    : null;
+  const sysKernelItem = sysKernelHostItem ?? sysKernelProcItem;
+  // The Process(System) variant reports per-core %, so we need to / cores
+  // when normalising its samples; the host-scope variant is already in
+  // host units. A single flag captures the difference at fetch time.
+  const sysKernelNeedsCoresDiv = !!sysKernelProcItem;
   const numCpuItem = allItems.find((it) => it.key_ === "system.cpu.num");
   // Cores known? Default to 1 so we never divide by zero. Modern SCO hosts
   // are 4-core; older ones may be 2.
@@ -321,7 +342,7 @@ export async function GET(req: NextRequest) {
       const kernelRecords = await sysKernelPromise;
       for (const r of kernelRecords) {
         const tsSec = parseInt(r.clock);
-        const value = parseFloat(r.value) || 0;
+        const raw = parseFloat(r.value) || 0;
         const { yyyy, mm, dd, hh, mi } = vilniusFields(tsSec * 1000);
         const minBucket = Math.floor(parseInt(mi, 10) / granularityMin) * granularityMin;
         const mmm = String(minBucket).padStart(2, "0");
@@ -331,8 +352,11 @@ export async function GET(req: NextRequest) {
           b = emptyBucket();
           buckets.set(slotKey, b);
         }
-        // Kernel CPU is already "% of host" (no cores division).
-        b.osCore += value;
+        // system.cpu.util[,system] is already "% of host" (no cores division).
+        // perf_counter[\Process(System)\…] is "% of one core" → /cores.
+        // sysKernelNeedsCoresDiv was set above when we chose the source item.
+        const v = sysKernelNeedsCoresDiv ? raw / Math.max(1, cores) : raw;
+        b.osCore += v;
         b.countOs++;
       }
     } catch (e) {
