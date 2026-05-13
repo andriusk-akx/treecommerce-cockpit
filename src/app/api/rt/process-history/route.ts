@@ -17,6 +17,70 @@ import {
 
 export const dynamic = "force-dynamic";
 
+/**
+ * All slot keying + day-window math must run in Vilnius local time, NOT
+ * the server's TZ (Railway containers default to UTC). Without this:
+ *   - A sample at 14:30 Vilnius local lands in slot "11:30" UTC → the
+ *     chart label "14:30" displays 17:30 EEST data, and infrequent
+ *     items (BESClient samples every 5 min) show 0% in the slot the
+ *     user expects them in.
+ *   - `?date=2026-05-13` is interpreted as UTC midnight → fetches data
+ *     for 03:00 EEST through 02:59 EEST next day, skipping the
+ *     early-morning portion the user thinks is "their day".
+ *
+ * `instrumentation.ts` already pins process.env.TZ at boot, but V8
+ * caches TZ on first Date call. This formatter is independent of
+ * process state — it always speaks Europe/Vilnius regardless of what
+ * the server thinks "local" is. Defense in depth.
+ */
+const VILNIUS_TZ = "Europe/Vilnius";
+const vilniusParts = new Intl.DateTimeFormat("en-GB", {
+  timeZone: VILNIUS_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+/** Format a Unix-ms instant as Vilnius {year, month, day, hour, minute}. */
+function vilniusFields(ms: number): { yyyy: string; mm: string; dd: string; hh: string; mi: string } {
+  const parts = vilniusParts.formatToParts(new Date(ms));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  // Intl returns hour "24" at midnight on some engines — normalise.
+  const hh = get("hour") === "24" ? "00" : get("hour");
+  return { yyyy: get("year"), mm: get("month"), dd: get("day"), hh, mi: get("minute") };
+}
+
+/** Vilnius local midnight on `yyyy-mm-dd` as a Unix-seconds instant. Honest
+ *  about DST: uses Intl to discover the UTC offset Vilnius has at the
+ *  beginning of that calendar day, then subtracts to get the true UTC
+ *  instant for 00:00 local. */
+function vilniusMidnightUnix(dateStr: string): number {
+  // UTC midnight as a starting probe — Vilnius is +2 or +3 of UTC, so this
+  // lands in the "previous evening" Vilnius-side. We read the offset back
+  // off Intl rather than hard-coding DST rules.
+  const probe = new Date(`${dateStr}T12:00:00Z`); // noon UTC, safely inside the right day
+  // Format probe in Vilnius and parse offset from the result.
+  const offsetFmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: VILNIUS_TZ,
+    timeZoneName: "shortOffset",
+    hour: "2-digit",
+    hour12: false,
+  });
+  const tzName = offsetFmt.formatToParts(probe).find((p) => p.type === "timeZoneName")?.value ?? "GMT+02";
+  // tzName is e.g. "GMT+03" (summer) or "GMT+02" (winter). Parse the digits.
+  const m = tzName.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/);
+  const sign = m && m[1] === "-" ? -1 : 1;
+  const hours = m ? parseInt(m[2], 10) : 2;
+  const mins = m && m[3] ? parseInt(m[3], 10) : 0;
+  const offsetSec = sign * (hours * 3600 + mins * 60);
+  // Vilnius midnight in UTC = `dateStr` 00:00 UTC minus the Vilnius offset.
+  const utcMidnightSec = Math.floor(new Date(`${dateStr}T00:00:00Z`).getTime() / 1000);
+  return utcMidnightSec - offsetSec;
+}
+
 interface HourlyBucket {
   retellect: number;
   scoApp: number;
@@ -125,10 +189,10 @@ export async function GET(req: NextRequest) {
   let timeFrom: number;
   let timeTill: number;
   if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    // Parse as LOCAL midnight (server runs in Europe/Vilnius). The user's
-    // calendar day is local-time based, so 00:00 on date = UTC offset behind.
-    const d = new Date(dateStr + "T00:00:00");
-    timeFrom = Math.floor(d.getTime() / 1000);
+    // Parse as Vilnius-local midnight, independent of server timezone.
+    // Railway containers run in UTC; using `new Date(...T00:00:00)` would
+    // capture UTC midnight there and skip the user's actual early morning.
+    timeFrom = vilniusMidnightUnix(dateStr);
     timeTill = timeFrom + 86400 - 1;
   } else {
     const now = Math.floor(Date.now() / 1000);
@@ -195,13 +259,10 @@ export async function GET(req: NextRequest) {
       for (const r of records) {
         const cat = categoryById.get(r.itemid);
         if (!cat) continue;
-        const dt = new Date(parseInt(r.clock) * 1000);
-        const yyyy = dt.getFullYear();
-        const mm = String(dt.getMonth() + 1).padStart(2, "0");
-        const dd = String(dt.getDate()).padStart(2, "0");
-        const hh = String(dt.getHours()).padStart(2, "0");
-        // Bucket by granularityMin within the hour: e.g. 5-min → 0/5/10/.../55
-        const minBucket = Math.floor(dt.getMinutes() / granularityMin) * granularityMin;
+        // Slot key in Vilnius local time — guarantees the heatmap label
+        // "14:30" carries the Vilnius 14:30 sample regardless of server TZ.
+        const { yyyy, mm, dd, hh, mi } = vilniusFields(parseInt(r.clock) * 1000);
+        const minBucket = Math.floor(parseInt(mi, 10) / granularityMin) * granularityMin;
         const mmm = String(minBucket).padStart(2, "0");
         const slotKey = `${yyyy}-${mm}-${dd}T${hh}:${mmm}`;
         let b = buckets.get(slotKey);
@@ -235,12 +296,8 @@ export async function GET(req: NextRequest) {
         const tsSec = parseInt(r.clock);
         const value = parseFloat(r.value) || 0;
         sysAllSamples.push({ clock: tsSec, value });
-        const dt = new Date(tsSec * 1000);
-        const yyyy = dt.getFullYear();
-        const mm = String(dt.getMonth() + 1).padStart(2, "0");
-        const dd = String(dt.getDate()).padStart(2, "0");
-        const hh = String(dt.getHours()).padStart(2, "0");
-        const minBucket = Math.floor(dt.getMinutes() / granularityMin) * granularityMin;
+        const { yyyy, mm, dd, hh, mi } = vilniusFields(tsSec * 1000);
+        const minBucket = Math.floor(parseInt(mi, 10) / granularityMin) * granularityMin;
         const mmm = String(minBucket).padStart(2, "0");
         const slotKey = `${yyyy}-${mm}-${dd}T${hh}:${mmm}`;
         let b = buckets.get(slotKey);
@@ -265,12 +322,8 @@ export async function GET(req: NextRequest) {
       for (const r of kernelRecords) {
         const tsSec = parseInt(r.clock);
         const value = parseFloat(r.value) || 0;
-        const dt = new Date(tsSec * 1000);
-        const yyyy = dt.getFullYear();
-        const mm = String(dt.getMonth() + 1).padStart(2, "0");
-        const dd = String(dt.getDate()).padStart(2, "0");
-        const hh = String(dt.getHours()).padStart(2, "0");
-        const minBucket = Math.floor(dt.getMinutes() / granularityMin) * granularityMin;
+        const { yyyy, mm, dd, hh, mi } = vilniusFields(tsSec * 1000);
+        const minBucket = Math.floor(parseInt(mi, 10) / granularityMin) * granularityMin;
         const mmm = String(minBucket).padStart(2, "0");
         const slotKey = `${yyyy}-${mm}-${dd}T${hh}:${mmm}`;
         let b = buckets.get(slotKey);
@@ -330,8 +383,10 @@ export async function GET(req: NextRequest) {
   if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     baseDay = dateStr;
   } else {
-    const dt = new Date(timeFrom * 1000);
-    baseDay = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+    // Anchor baseDay to the Vilnius calendar day, not server-local, so the
+    // slot keys built below match the keys we wrote into `buckets` above.
+    const { yyyy, mm, dd } = vilniusFields(timeFrom * 1000);
+    baseDay = `${yyyy}-${mm}-${dd}`;
   }
   for (let i = 0; i < slotsPerDay; i++) {
     const totalMin = i * granularityMin;

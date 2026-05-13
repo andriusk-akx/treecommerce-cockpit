@@ -1,6 +1,26 @@
 import type { NextConfig } from "next";
 
 /**
+ * Pin the Node process timezone to Europe/Vilnius BEFORE any other module
+ * loads. Without this, Railway containers run in UTC and every server-side
+ * Date method (`getHours`, `getDate`, …) returns UTC offsets. The CPU
+ * Timeline drill-down was the first place this manifested as a visible
+ * bug: a sample taken at 14:30 Vilnius local landed in the "11:30" slot
+ * server-side, and the slot label "14:30" on the chart actually carried
+ * 17:30 EEST data. Setting TZ here means every server tick — slot keys,
+ * date parsing, history bucketing — speaks the same language as the
+ * user's wall clock.
+ *
+ * Allow override via the standard TZ env var so local dev or future
+ * multi-region deployments can pick a different zone without touching
+ * code. Production Railway picks the default.
+ *
+ * Must be assigned at module top BEFORE any import that could create a
+ * Date object (none of the imports below do, but stay defensive).
+ */
+process.env.TZ = process.env.TZ ?? "Europe/Vilnius";
+
+/**
  * Security baseline headers — applied to every response.
  *
  *   X-Frame-Options: DENY              clickjacking
