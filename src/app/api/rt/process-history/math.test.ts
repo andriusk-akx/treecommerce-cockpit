@@ -205,10 +205,10 @@ describe("averageSlot", () => {
       retellect: 80, scoApp: 24, db: 99, system: 4,
       countR: 4, countS: 1, countD: 4, countSys: 1, // ← all distinct counts
     }));
-    expect(r.retellect).toBe(20.0); // 80/4
-    expect(r.scoApp).toBe(24.0);    // 24/1
-    expect(r.db).toBe(24.8);        // 99/4 = 24.75 → rounded to 24.8
-    expect(r.system).toBe(4.0);     // 4/1
+    expect(r.retellect).toBe(20);    // 80/4
+    expect(r.scoApp).toBe(24);       // 24/1
+    expect(r.db).toBe(24.75);        // 99/4 — preserved at 2-decimal precision
+    expect(r.system).toBe(4);        // 4/1
   });
 
   it("zero count → zero (not NaN, not 1)", () => {
@@ -232,12 +232,17 @@ describe("averageSlot", () => {
     expect(r.free).toBe(0);
   });
 
-  it("rounds to one decimal place to match the API contract", () => {
+  it("rounds to two decimal places to preserve sub-1% precision for the UI formatter", () => {
+    // Pre-2026-05-13 the contract was 1 decimal (0.3). Elastic-agent's
+    // typical 0.04% on a 4-core host would have rounded to 0.0 and the
+    // UI bar showed "0%" even though monitoring was working. 2 decimals
+    // is the minimum that keeps small but non-zero values legible while
+    // RtTimeline's formatPct decides per-value precision for display.
     const r = averageSlot(slot({
       retellect: 1,
       countR: 3,
     }));
-    expect(r.retellect).toBe(0.3); // 1/3 = 0.333… → 0.3
+    expect(r.retellect).toBe(0.33); // 1/3 = 0.3333… → 0.33
   });
 
   it("besclient / elastic / osCore are averaged independently and subtract from free", () => {

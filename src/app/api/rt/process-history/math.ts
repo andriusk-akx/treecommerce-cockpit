@@ -192,13 +192,21 @@ export interface SlotAverages {
  * Returns rounded values to match what the API serialises to the client.
  */
 export function averageSlot(b: SlotBucket): SlotAverages {
-  const r = b.countR > 0 ? Math.round((b.retellect / b.countR) * 10) / 10 : 0;
-  const sa = b.countS > 0 ? Math.round((b.scoApp / b.countS) * 10) / 10 : 0;
-  const dbv = b.countD > 0 ? Math.round((b.db / b.countD) * 10) / 10 : 0;
-  const sys = b.countSys > 0 ? Math.round((b.system / b.countSys) * 10) / 10 : 0;
-  const bes = b.countBes > 0 ? Math.round((b.besclient / b.countBes) * 10) / 10 : 0;
-  const ela = b.countEla > 0 ? Math.round((b.elastic / b.countEla) * 10) / 10 : 0;
-  const os = b.countOs > 0 ? Math.round((b.osCore / b.countOs) * 10) / 10 : 0;
+  // 2-decimal precision so the UI can render sub-1% values honestly.
+  // Pre-2026-05-13 this was 1 decimal, which collapsed values < 0.05%
+  // (like Elastic agent's typical 0.04% per host) to "0%" — the user
+  // saw blank bars and assumed monitoring was broken when in fact the
+  // process simply uses negligible CPU. With 2 decimals the formatter
+  // in RtTimeline can show "0.04%" for tiny values and "11%" / "0.5%"
+  // for larger ones via conditional precision.
+  const round = (v: number) => Math.round(v * 100) / 100;
+  const r = b.countR > 0 ? round(b.retellect / b.countR) : 0;
+  const sa = b.countS > 0 ? round(b.scoApp / b.countS) : 0;
+  const dbv = b.countD > 0 ? round(b.db / b.countD) : 0;
+  const sys = b.countSys > 0 ? round(b.system / b.countSys) : 0;
+  const bes = b.countBes > 0 ? round(b.besclient / b.countBes) : 0;
+  const ela = b.countEla > 0 ? round(b.elastic / b.countEla) : 0;
+  const os = b.countOs > 0 ? round(b.osCore / b.countOs) : 0;
   return {
     retellect: r,
     scoApp: sa,

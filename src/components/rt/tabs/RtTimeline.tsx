@@ -115,6 +115,34 @@ function useSplitPane(defaultPx: number, minTop: number, minBottom: number) {
   return { splitPx, setSplitPx, containerRef, onMouseDown };
 }
 
+/**
+ * Conditional-precision percentage formatter for the drill-down slot panel.
+ *
+ *   ≥ 10   → whole-number ("11%")
+ *   ≥ 1    → one decimal  ("3.4%")
+ *   > 0    → two decimals ("0.04%")  ← preserves sub-1% values that would
+ *                                       otherwise round to "0%" and look
+ *                                       like the bar carries no signal
+ *   = 0    → "0%"
+ *
+ * Aligns with the same tiered pattern already in use for the threshold-
+ * exceed Min% column (line ~1088); centralised here so any future cell
+ * that wants the same treatment can call it.
+ *
+ * 2026-05-13: introduced after SP admin rolled out BESClient / Elastic
+ * monitoring. BESClient (~2% raw / 0.5% per host on a 4-core SCO) was
+ * visible at 1 decimal, but Elastic agent (~0.16% raw / 0.04% per host)
+ * collapsed to "0%" and looked broken even though the data flowed
+ * correctly. averageSlot now returns 2-decimal precision so this
+ * formatter has real precision to spend.
+ */
+function formatPct(v: number): string {
+  if (!Number.isFinite(v) || v <= 0) return "0%";
+  if (v >= 10) return `${Math.round(v)}%`;
+  if (v >= 1) return `${(Math.round(v * 10) / 10).toFixed(1)}%`;
+  return `${(Math.round(v * 100) / 100).toFixed(2)}%`;
+}
+
 // ─── Helper: time label for slot end ────────────────────────────────
 function slotEndLabel(slot: IntervalSlot, minutesPerSlot: number): string {
   const endMinutes = (slot.hour * 60 + slot.minute + minutesPerSlot);
@@ -1508,8 +1536,8 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 <div style={{ flex: 1, height: 12, background: "#f1f3f5", borderRadius: 3, overflow: "hidden" }}>
                   <div style={{ height: "100%", borderRadius: 3, background: proc.color, width: `${val}%`, transition: "width 0.2s ease" }} />
                 </div>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "#212529", width: 44, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
-                  {Math.round(val * 10) / 10}%
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#212529", width: 52, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
+                  {formatPct(val)}
                 </span>
               </div>
             );
@@ -1522,8 +1550,8 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             <div style={{ flex: 1, height: 12, background: "#f1f3f5", borderRadius: 3, overflow: "hidden" }}>
               <div style={{ height: "100%", borderRadius: 3, background: "#94a3b8", width: `${other}%`, transition: "width 0.2s ease" }} />
             </div>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "#475569", width: 44, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
-              {Math.round(other * 10) / 10}%
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#475569", width: 52, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
+              {formatPct(other)}
             </span>
           </div>
         </div>
