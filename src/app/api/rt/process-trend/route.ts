@@ -196,11 +196,13 @@ async function buildTrendResponse(
   // a real signal source. Hosts without this item just get an empty osCore
   // series — the chart renders an empty line, which is honest.
   // Same two-source kernel detection as process-history: prefer the host-scope
-  // metric, fall back to the Windows "System" process perf_counter that SP
-  // admin's May-8 deploy actually shipped. See process-history/route.ts for
-  // the full rationale. `sysKernelNeedsCoresDiv` flips on for the fallback
-  // path so per-core values get /cores before bucketing.
-  const sysKernelHostItem = allItems.find((it) => it.key_ === "system.cpu.util[,system]");
+  // metric (matches the system.cpu.util[,system,*] family — SP admin's testlab
+  // item shipped with the avg1 variant 2026-05-15, but other hosts may end up
+  // with avg5/avg15 depending on template), fall back to the Process(System)
+  // perf_counter. See process-history/route.ts for the full rationale.
+  // `sysKernelNeedsCoresDiv` flips on for the fallback path so per-core
+  // values get /cores before bucketing.
+  const sysKernelHostItem = allItems.find((it) => /^system\.cpu\.util\[,system(,|\])/.test(it.key_));
   const sysKernelProcItem = !sysKernelHostItem
     ? allItems.find((it) => /^perf_counter\["?\\Process\(System\)\\% Processor Time/.test(it.key_))
     : null;

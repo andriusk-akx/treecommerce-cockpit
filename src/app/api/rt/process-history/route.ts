@@ -166,19 +166,22 @@ export async function GET(req: NextRequest) {
   // without this item simply have osCore = 0 and the residual stays in
   // "free" / Other as before.
   // Two acceptable kernel-CPU sources on this fleet:
-  //   1. system.cpu.util[,system]    — host-scope kernel %, already normalised.
-  //      The "clean" item; what we asked SP admin for. Doesn't yet exist on
-  //      the prod fleet as of 2026-05-13 (only in their longer-term plan).
+  //   1. system.cpu.util[,system,*]  — host-scope kernel %, already normalised.
+  //      The "clean" item SP admin added on testlab 2026-05-15 with the key
+  //      `system.cpu.util[,system,avg1]`. The avg-window parameter varies
+  //      (avg1 / avg5 / avg15) so we match the family rather than a single
+  //      exact string — pre-2026-05-15 a strict `system.cpu.util[,system]`
+  //      check silently fell back to (2) even when the host-scope item was
+  //      live.
   //   2. perf_counter[\Process(System)\...]  — Windows PID 4 "System" process,
   //      which IS the kernel work surfaced as a process counter. Returns
   //      "% of one core", so needs /cores division on the route side. SP
-  //      admin's actual May-8 deploy used this form; the dashboard would
-  //      have continued to show OS Core = 0% indefinitely otherwise.
+  //      admin's earlier May-8 deploy used this form; we keep it as the
+  //      fallback so hosts that don't yet have the host-scope item still
+  //      get an OS Core breakdown.
   //
-  // We prefer (1) when both exist (cleaner semantics — host-scope without
-  // any cores-math gotchas). Fall back to (2) so the existing rollout works
-  // without waiting for SP admin to also add the host-scope item.
-  const sysKernelHostItem = allItems.find((it) => it.key_ === "system.cpu.util[,system]");
+  // Prefer (1) when both exist — cleaner semantics, no cores math.
+  const sysKernelHostItem = allItems.find((it) => /^system\.cpu\.util\[,system(,|\])/.test(it.key_));
   const sysKernelProcItem = !sysKernelHostItem
     ? allItems.find((it) => /^perf_counter\["?\\Process\(System\)\\% Processor Time/.test(it.key_))
     : null;
