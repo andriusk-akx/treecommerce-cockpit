@@ -412,6 +412,39 @@ export async function GET(req: NextRequest) {
     const { yyyy, mm, dd } = vilniusFields(timeFrom * 1000);
     baseDay = `${yyyy}-${mm}-${dd}`;
   }
+  /**
+   * Forward-fill window for sparse-cadence categories.
+   *
+   * SP admin's BESClient / Elastic / Process(System) items poll every ~5 min
+   * (verified via Zabbix sample timestamps 2026-05-13). Most 1-min slots
+   * therefore have NO sample for those items and the per-slot bar collapses
+   * to 0% — making the user believe "monitoring is broken" when in reality
+   * the previous and following minutes both carry valid readings.
+   *
+   * Fix: while emitting the per-slot output, remember the last non-zero
+   * value seen for each sparse category and re-use it for up to
+   * FILL_WINDOW_MIN minutes after the sample. SCO App / DB / System / etc.
+   * are sampled every minute, so they're never carried — only the three
+   * newly-deployed perf_counter items get filled.
+   *
+   * 6 min covers the typical 5-min poll cadence with one-minute slack for
+   * agent drift. Longer gaps (item misconfigured / agent dropped) still
+   * render as a real 0% so genuine outages are visible.
+   *
+   * Forward-fill is intentionally not applied to `free` directly — we
+   * recompute it from the filled-in named buckets below so the residual
+   * stays consistent with what the user sees in the bars.
+   */
+  const FILL_WINDOW_MIN = 6;
+  const FILL_MAX_SLOTS = Math.max(1, Math.ceil(FILL_WINDOW_MIN / granularityMin));
+  const SPARSE_KEYS = ["besclient", "elastic", "osCore"] as const;
+  type SparseKey = (typeof SPARSE_KEYS)[number];
+  const lastSeen: Record<SparseKey, { value: number; atSlot: number } | null> = {
+    besclient: null,
+    elastic: null,
+    osCore: null,
+  };
+
   for (let i = 0; i < slotsPerDay; i++) {
     const totalMin = i * granularityMin;
     const h = Math.floor(totalMin / 60);
@@ -453,7 +486,22 @@ export async function GET(req: NextRequest) {
           retellect: 0, scoApp: 0, db: 0, system: 0,
           besclient: 0, elastic: 0, osCore: 0, free: 100,
         };
-    const { retellect: r, scoApp: sa, db: dbv, system: sys, besclient: bes, elastic: ela, osCore: os } = avg;
+    const { retellect: r, scoApp: sa, db: dbv, system: sys } = avg;
+    // Sparse-cadence forward-fill: for besclient / elastic / osCore, if this
+    // slot has no real reading (0 from averageSlot) but a recent slot had one
+    // within FILL_MAX_SLOTS, carry the value forward. Otherwise keep 0.
+    const filled: Record<SparseKey, number> = { besclient: 0, elastic: 0, osCore: 0 };
+    for (const k of SPARSE_KEYS) {
+      const v = avg[k];
+      if (v > 0) {
+        filled[k] = v;
+        lastSeen[k] = { value: v, atSlot: i };
+      } else {
+        const seen = lastSeen[k];
+        filled[k] = seen && i - seen.atSlot <= FILL_MAX_SLOTS ? seen.value : 0;
+      }
+    }
+    const { besclient: bes, elastic: ela, osCore: os } = filled;
     const sysCpuVals = b?.sysCpuValues ?? [];
     const sysCpuAvg = sysCpuVals.length
       ? Math.round((sysCpuVals.reduce((acc, v) => acc + v, 0) / sysCpuVals.length) * 10) / 10
