@@ -13,11 +13,23 @@ import { resolveCpuModel } from "./rt-inventory-helpers";
 import { isRetellectRunning, isRetellectDeployed, isRetellectActiveToday } from "./rt-overview-helpers";
 
 // Heatmap is a per-DAY peak view, so periods shorter than 1 day make no sense.
-// Trend retention on this Zabbix is ~5–7 days for trend.get and 14 days for
-// raw history.get — anything longer would be empty cells, so we cap at 14d.
-// Custom is kept for ad-hoc shorter windows (e.g. last 3 d).
+//
+// Retention reality (re-measured 2026-05-18 via scripts/probe-retention-windows.mjs):
+//   trend.get  — ~29 days on this Zabbix deployment (hourly aggregates).
+//   history.get — 14 d for the broadest item coverage; some active items hold
+//                 up to ~42 d but coverage is uneven across the fleet.
+//
+// `_getCpuHistoryDailyUncached` merges both sources, so the 30d preset is
+// honest: nearly every day has real data, with the older edge falling back
+// to trend.get hourly aggregates. The previous "cap at 14d" comment dated
+// from a time when trend retention here was 5–7 days and is no longer true.
+//
+// Custom (1..365) is kept for ad-hoc windows beyond the presets — but anything
+// past ~29 d will currently render empty older cells until SP admin extends
+// trend retention. Re-run the probe script when retention changes.
 const PERIODS = [
   { id: "14d", label: "14d", days: 14 },
+  { id: "30d", label: "30d", days: 30 },
 ] as const;
 
 // Granularity selector was removed from the UI 2026-04-28; we now always use
@@ -811,9 +823,8 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       </select>
       </div>
       {/* Row 2 — secondary slicers, all label-prefixed so first-time users
-          immediately know what each control does. "Period" uses an explicit
-          label even though only one preset exists today, because pairing
-          "14d" with the word "Period" removes any ambiguity about the unit. */}
+          immediately know what each control does. "Period" gets an explicit
+          label because the unit ("14d", "30d") is otherwise ambiguous. */}
       <div style={{ display: "flex", alignItems: "center", gap: compact ? 8 : 12, flexWrap: "wrap" }}>
       <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }} title="How many days of history to show">Period</span>
       <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
@@ -823,7 +834,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             border: period === p.id && !showCustomPeriod ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
             background: period === p.id && !showCustomPeriod ? C.pillActive : "#fff",
             color: period === p.id && !showCustomPeriod ? "#fff" : "#495057", fontWeight: period === p.id && !showCustomPeriod ? 600 : 400,
-          }} title="Show the last 14 days">{p.label}</button>
+          }} title={`Show the last ${p.days} days`}>{p.label}</button>
         ))}
         <button onClick={() => setShowCustomPeriod(!showCustomPeriod)} style={{
           padding: "2px 8px", borderRadius: 12, fontSize: 11, cursor: "pointer",
