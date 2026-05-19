@@ -297,6 +297,16 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   };
   const [drillIntervals, setDrillIntervals] = useState<ProcessSlot[] | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
+  // 2026-05-19: Sparse categories (BESClient / Elastic / OS Core) were rolled
+  // out per-host on different dates (Pavilnionys SCO02: 2026-05-09; testlab:
+  // 2026-05-12). Drill-downs into earlier days have ZERO samples for those
+  // items because the Zabbix items did not exist yet on that host. The route
+  // surfaces this as `unmonitored: string[]` so the UI can hide deceptive
+  // "0%" rows in the drill-down and fold their would-be residual into Other
+  // with a tooltip explaining what's missing — preserves visual stability
+  // across the rollout boundary while staying honest about coverage.
+  type SparseKey = "besclient" | "elastic" | "osCore";
+  const [dayUnmonitored, setDayUnmonitored] = useState<SparseKey[]>([]);
   // chartMode lives in RtFiltersContext (above) so it persists across tabs.
   // Day summary (overall system.cpu.util statistics for the drill date) —
   // answers the user's primary question: when did the spike happen and how
@@ -618,8 +628,16 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       .then((d) => {
         setDrillIntervals(Array.isArray(d.slots) ? d.slots : null);
         setDaySummary(d.daySummary ?? null);
+        // Defensive: allow only the three known sparse-category keys; ignore
+        // anything else the server might send (forward compatibility).
+        const u = Array.isArray(d.unmonitored)
+          ? (d.unmonitored.filter((k: unknown) =>
+              k === "besclient" || k === "elastic" || k === "osCore"
+            ) as SparseKey[])
+          : [];
+        setDayUnmonitored(u);
       })
-      .catch(() => { setDrillIntervals(null); setDaySummary(null); })
+      .catch(() => { setDrillIntervals(null); setDaySummary(null); setDayUnmonitored([]); })
       .finally(() => setDrillLoading(false));
   }, [drill, granularity]);
 
@@ -1540,6 +1558,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         <div style={{ width: 1, height: 60, background: C.border, flexShrink: 0 }} />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
           {PROCESSES.filter(p => p.key !== "free").map((proc) => {
+            // 2026-05-19: rows whose underlying Zabbix items had ZERO samples
+            // across the whole day (per server `unmonitored` flag) are hidden
+            // here rather than rendered as a flat "0%" bar. Their residual is
+            // absorbed by Other below, and Other's sub-label names them so
+            // the user understands what's missing. Without this, a host that
+            // gained per-process monitoring mid-window would have a sudden
+            // "all 0%" pre-rollout day that looks like a real reading.
+            if ((dayUnmonitored as readonly string[]).includes(proc.key)) return null;
             const val = selSlotData[proc.key];
             return (
               <div key={proc.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1555,16 +1581,39 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           })}
           {/* Other = host CPU - monitored process sum. Captures kernel work /
               processes not tracked by name (the difference between total host
-              CPU and the four monitored categories). */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 11, color: "#475569", width: 64, textAlign: "right", flexShrink: 0 }} title="CPU consumed by processes we don't monitor by name (kernel, scheduler, services).">Other</span>
-            <div style={{ flex: 1, height: 12, background: "#f1f3f5", borderRadius: 3, overflow: "hidden" }}>
-              <div style={{ height: "100%", borderRadius: 3, background: "#94a3b8", width: `${other}%`, transition: "width 0.2s ease" }} />
-            </div>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "#475569", width: 52, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
-              {formatPct(other)}
-            </span>
-          </div>
+              CPU and the named categories). When some categories were not yet
+              provisioned on this host on the drilled-into day (`dayUnmonitored`
+              non-empty), their would-be values fall in here too — the
+              sub-label spells them out so the bar isn't silently overloaded. */}
+          {(() => {
+            const unmonitoredLabels = dayUnmonitored.map((k) => {
+              const p = PROCESSES.find((x) => x.key === k);
+              return p ? p.label : k;
+            });
+            const otherTooltip = unmonitoredLabels.length > 0
+              ? `CPU consumed by processes we don't monitor by name (kernel, scheduler, services). Also includes ${unmonitoredLabels.join(", ")} — no Zabbix data for those items on this day (likely enabled on this host later).`
+              : "CPU consumed by processes we don't monitor by name (kernel, scheduler, services).";
+            return (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                <span style={{ fontSize: 11, color: "#475569", width: 64, textAlign: "right", flexShrink: 0, paddingTop: 0 }} title={otherTooltip}>Other</span>
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1, height: 12, background: "#f1f3f5", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ height: "100%", borderRadius: 3, background: "#94a3b8", width: `${other}%`, transition: "width 0.2s ease" }} />
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "#475569", width: 52, textAlign: "right", fontFamily: "'SF Mono','Cascadia Code',monospace", flexShrink: 0 }}>
+                      {formatPct(other)}
+                    </span>
+                  </div>
+                  {unmonitoredLabels.length > 0 && (
+                    <div style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.3 }} title={otherTooltip}>
+                      Includes {unmonitoredLabels.join(", ")} — no Zabbix data on this day
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
     );

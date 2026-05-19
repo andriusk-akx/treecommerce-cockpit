@@ -6,6 +6,8 @@ import {
   averageSlot,
   normaliseValue,
   summariseDay,
+  findUnmonitoredCategories,
+  SPARSE_CATEGORIES,
 } from "./math";
 
 // ─── normalizeProcName ──────────────────────────────────────────────
@@ -437,6 +439,61 @@ describe("end-to-end pipeline (categorise → averageSlot)", () => {
     const monitoredSum = r.retellect + r.scoApp + r.db + r.system + r.besclient + r.elastic + r.osCore;
     expect(monitoredSum).toBe(350);
     expect(r.free).toBe(0);
+  });
+});
+
+// ─── findUnmonitoredCategories ──────────────────────────────────────
+
+describe("findUnmonitoredCategories", () => {
+  // Day-level rollout flag: when a host had zero Zabbix samples for one of
+  // the late-rollout categories (besclient / elastic / osCore) across the
+  // entire drilled-into day, the UI must NOT render a flat 0% bar implying
+  // the category was measured. The drill-down folds the would-be residual
+  // into Other with an explanatory sub-label. This helper is the single
+  // source of truth the route uses to populate `unmonitored` in the response.
+
+  it("returns empty when every sparse category has at least one sample", () => {
+    expect(findUnmonitoredCategories({ besclient: 1, elastic: 1, osCore: 1 })).toEqual([]);
+    expect(findUnmonitoredCategories({ besclient: 1440, elastic: 287, osCore: 96 })).toEqual([]);
+  });
+
+  it("returns ALL three when nothing was sampled (typical Pavilnionys SCO02 drilling 2026-04-30, pre-rollout)", () => {
+    // Real scenario that motivated the feature: SP admin enabled the three
+    // new items on 2026-05-09. Drilling into 2026-04-30 has no samples at
+    // all for any of them — Other should absorb the residual and the bar
+    // chart should hide the three deceptive 0% rows.
+    expect(findUnmonitoredCategories({ besclient: 0, elastic: 0, osCore: 0 })).toEqual([
+      "besclient", "elastic", "osCore",
+    ]);
+  });
+
+  it("returns only the missing categories when the host has partial coverage", () => {
+    // E.g. a host where BESClient and Elastic are deployed but the kernel-CPU
+    // item is not yet provisioned. Mixed prod hosts looked like this during
+    // the 2026-05-09 → 2026-05-12 rollout window.
+    expect(findUnmonitoredCategories({ besclient: 287, elastic: 287, osCore: 0 })).toEqual([
+      "osCore",
+    ]);
+    expect(findUnmonitoredCategories({ besclient: 0, elastic: 12, osCore: 0 })).toEqual([
+      "besclient", "osCore",
+    ]);
+  });
+
+  it("preserves stable canonical order (besclient → elastic → osCore) regardless of input key order", () => {
+    // UI sub-label concatenates the names; stable order keeps the message
+    // identical run-to-run, which makes screenshots/snapshot diffs sane.
+    const a = findUnmonitoredCategories({ osCore: 0, elastic: 0, besclient: 0 });
+    const b = findUnmonitoredCategories({ besclient: 0, elastic: 0, osCore: 0 });
+    expect(a).toEqual(b);
+    expect(a).toEqual(["besclient", "elastic", "osCore"]);
+  });
+
+  it("SPARSE_CATEGORIES constant lists exactly the three rolled-out categories — guards against accidental expansion that would silently hide healthy buckets", () => {
+    // If someone ever adds "retellect" or "scoApp" to SPARSE_CATEGORIES by
+    // mistake, drilling into ANY day on ANY host with zero samples for those
+    // (e.g. a host where Retellect was never deployed) would hide the bar
+    // and confuse the user. This invariant lock keeps the set narrow.
+    expect([...SPARSE_CATEGORIES].sort()).toEqual(["besclient", "elastic", "osCore"]);
   });
 });
 

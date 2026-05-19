@@ -45,6 +45,37 @@ export type Category =
  *  category systems describe different data and must stay separate. */
 export type HistoryProcessCategory = Exclude<Category, "osCore">;
 
+/** Categories that were rolled out late (SP admin enabled corresponding Zabbix
+ *  items first on testlab `SPUB-P-SCO150` ~2026-05-12, then on Rimi prod hosts
+ *  from ~2026-05-09 onward — and the rollout date varies per host). Drill-downs
+ *  into earlier days legitimately have ZERO samples for these items: the items
+ *  simply did not exist yet on that host. The cockpit must NOT render those as
+ *  "0%" bars because doing so falsely implies the categories were measured and
+ *  found to consume nothing. Instead, the route reports them in a per-day
+ *  `unmonitored: string[]` field and the UI folds their would-be residual into
+ *  "Other" with an explanatory sub-label. */
+export type SparseCategory = "besclient" | "elastic" | "osCore";
+export const SPARSE_CATEGORIES: readonly SparseCategory[] = ["besclient", "elastic", "osCore"];
+
+/**
+ * Identify which of the recently-deployed sparse categories had ZERO Zabbix
+ * samples across the entire day. Caller passes a per-day count per sparse
+ * category; categories whose count is exactly 0 are returned in stable order.
+ *
+ * Used by the route to set `unmonitored` on the drill-down response so the UI
+ * can hide misleading "0%" bars and explain the absence on the Other row.
+ *
+ * Note: this is intentionally day-level, not slot-level. Forward-fill in the
+ * route already handles intra-day gaps from 5-min poll cadence — those slots
+ * still belong to a "monitored" day. A category is unmonitored only when not
+ * a single sample arrived during the requested window.
+ */
+export function findUnmonitoredCategories(
+  dailyCounts: Record<SparseCategory, number>,
+): SparseCategory[] {
+  return SPARSE_CATEGORIES.filter((k) => (dailyCounts[k] ?? 0) === 0);
+}
+
 export interface RawItem {
   itemid: string;
   key_: string;

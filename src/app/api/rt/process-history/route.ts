@@ -13,6 +13,8 @@ import {
   averageSlot,
   normaliseValue,
   summariseDay,
+  findUnmonitoredCategories,
+  type SparseCategory,
 } from "./math";
 
 export const dynamic = "force-dynamic";
@@ -530,10 +532,32 @@ export async function GET(req: NextRequest) {
       sysCpuMax,
     });
   }
+  // Day-level unmonitored categories: items that were never published on this
+  // host across the requested window. Computed AFTER all batch + kernel fetches
+  // and BEFORE any forward-fill — forward-fill only affects display per slot
+  // when the cadence is sparse, but a truly absent item has zero samples all
+  // day. The UI uses this to hide deceptive "0%" rows in the drill-down and
+  // fold the would-be residual into Other with an explanatory sub-label.
+  // See `feedback` notes (2026-05-19) and project_rt_category_split memory.
+  let totalBes = 0;
+  let totalEla = 0;
+  let totalOs = 0;
+  for (const [, b] of buckets) {
+    totalBes += b.countBes;
+    totalEla += b.countEla;
+    totalOs += b.countOs;
+  }
+  const unmonitored: SparseCategory[] = findUnmonitoredCategories({
+    besclient: totalBes,
+    elastic: totalEla,
+    osCore: totalOs,
+  });
+
   return NextResponse.json({
     slots,
     hasSysCpu: !!sysCpuItem,
     hasOsCore: !!sysKernelItem,
+    unmonitored,
     daySummary,
   });
 }
