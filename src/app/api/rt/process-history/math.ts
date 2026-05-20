@@ -411,7 +411,14 @@ export function averageSlotV2(
     dataQuality = "warn";
   } else {
     other = Math.max(0, Math.round((hostCpu - sumNamed) * 100) / 100);
-    free = Math.max(0, Math.round((100 - hostCpu) * 100) / 100);
+    // `free` is derived from what remains AFTER named + other so the stack
+    // always sums to ~100 even when categories overshoot host CPU (the
+    // cpu_num bug shape). In the happy path (sumNamed <= hostCpu), `other`
+    // absorbs the gap and `free` collapses to 100 - hostCpu = idle. In the
+    // overshoot path, `other` is clamped to 0 and `free` shrinks so the
+    // visual stack stays within 100% — the warning banner above tells the
+    // operator the values were not properly normalised.
+    free = Math.max(0, Math.round((100 - sumNamed - other) * 100) / 100);
     overshootPp = Math.round((sumNamed - hostCpu) * 100) / 100;
     if (!coresKnown) {
       // We didn't normalise per_counter values — assume the worst.

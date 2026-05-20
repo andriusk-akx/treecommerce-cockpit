@@ -720,7 +720,44 @@ describe("averageSlotV2", () => {
       true,
     );
     expect(r.other).toBe(40);   // host CPU − Σ
-    expect(r.free).toBe(40);    // 100 − host CPU
+    // free = max(0, 100 - Σnamed - other) = max(0, 100 - 20 - 40) = 40
+    // Happens to equal 100 - hostCpu in the happy path; the next test
+    // exercises the overshoot path where the two values diverge.
+    expect(r.free).toBe(40);
+  });
+
+  it("INVARIANT: warn-level overshoot keeps stack within 100% (free shrinks, doesn't break)", () => {
+    // Σ named = 95, host CPU = 85 (mild overshoot, ~10pp). Old free formula
+    // gave 100-85=15 — stack of 95+0+15=110%. New formula gives
+    // max(0, 100-95-0)=5 — stack of 95+0+5=100% with no negative bars.
+    const r = averageSlotV2(
+      slot({ scoApp: 95, countS: 1 }),
+      [85],
+      true,
+    );
+    expect(r.other).toBe(0);    // clamped: hostCpu - Σ = -10 -> 0
+    expect(r.free).toBe(5);     // 100 - 95 - 0 = 5 (not 100 - hostCpu = 15)
+    const total = r.categories.scoApp + r.other + r.free;
+    expect(total).toBeCloseTo(100, 1);
+    // overshoot 10pp falls in the warn band (>5pp <=15pp).
+    expect(r.dataQuality).toBe("warn");
+  });
+
+  it("BREAKS invariant when sum exceeds 100 (fail-level overshoot — data is broken, math can't hide that)", () => {
+    // Σ named = 110, host CPU = 80. Categories alone overshoot 100%. The
+    // dataQuality classifier flags this as fail and the UI surfaces a red
+    // banner; the math doesn't try to scale categories down because that
+    // would distort the data the operator needs to see.
+    const r = averageSlotV2(
+      slot({ scoApp: 110, countS: 1 }),
+      [80],
+      true,
+    );
+    expect(r.other).toBe(0);
+    expect(r.free).toBe(0);  // 100 - 110 - 0 clamped
+    const total = r.categories.scoApp + r.other + r.free;
+    expect(total).toBeGreaterThan(100);  // honest: data IS broken
+    expect(r.dataQuality).toBe("fail"); // 30pp overshoot > 15pp threshold
   });
 
   it("free + other + Σ named = host CPU + free invariant always holds", () => {

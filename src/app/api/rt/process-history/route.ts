@@ -561,6 +561,23 @@ export async function GET(req: NextRequest) {
       }
     }
     const { besclient: bes, elastic: ela, osCore: os } = filled;
+    // Recompute Other / Free / dataQuality using the post-fill category
+    // values. Forward-fill can lift besclient/elastic/osCore from 0 to a
+    // recently-seen value; without re-running the math, slotV2.other and
+    // slotV2.free still reflect the pre-fill snapshot, breaking the
+    // Σ+Other+Free=100 invariant by exactly the fill delta. We keep the
+    // dataQuality classification from slotV2 if it was already worse
+    // ("warn"/"fail"); the fill itself can't push a slot from ok to fail.
+    const filledSum = r + sa + dbv + sys + bes + ela + os;
+    const recomputedHostCpu = slotV2.hostCpu;
+    let recomputedOther = slotV2.other;
+    let recomputedFree = slotV2.free;
+    let recomputedOvershoot = slotV2.overshootPp;
+    if (recomputedHostCpu !== null) {
+      recomputedOther = Math.max(0, Math.round((recomputedHostCpu - filledSum) * 100) / 100);
+      recomputedFree = Math.max(0, Math.round((100 - filledSum - recomputedOther) * 100) / 100);
+      recomputedOvershoot = Math.round((filledSum - recomputedHostCpu) * 100) / 100;
+    }
     const sysCpuVals = b?.sysCpuValues ?? [];
     const sysCpuAvg = sysCpuVals.length
       ? Math.round((sysCpuVals.reduce((acc, v) => acc + v, 0) / sysCpuVals.length) * 10) / 10
@@ -585,10 +602,10 @@ export async function GET(req: NextRequest) {
       // hostCpu data exists). `other` is the unattributed slice of host CPU
       // = max(0, hostCpu - Σnamed) and goes into a new "Other" stack segment
       // in the drill-down. dataQuality drives the slot's sanity badge.
-      free: slotV2.free,
-      other: slotV2.other,
-      hostCpu: slotV2.hostCpu,
-      overshootPp: slotV2.overshootPp,
+      free: recomputedFree,
+      other: recomputedOther,
+      hostCpu: recomputedHostCpu,
+      overshootPp: recomputedOvershoot,
       dataQuality: slotV2.dataQuality,
       sysCpuAvg,
       sysCpuMax,
