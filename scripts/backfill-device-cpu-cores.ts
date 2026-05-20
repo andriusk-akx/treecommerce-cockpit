@@ -24,7 +24,7 @@
  *
  * Run:
  *
- *   DATABASE_URL=... ZABBIX_TOKEN=... node scripts/backfill-device-cpu-cores.mjs
+ *   DATABASE_URL=... ZABBIX_TOKEN=... npx tsx scripts/backfill-device-cpu-cores.ts
  *
  * Safe to re-run: writes only when the resolved value differs from what's
  * already in the DB, or when the previous probe is older than 24h. Manual
@@ -32,7 +32,7 @@
  * script — operators can pin a value via Settings -> Devices and trust it
  * stays put across backfills.
  */
-import { PrismaClient } from "../src/generated/prisma/client.js";
+import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
 const URL_ZBX = process.env.ZABBIX_URL || "https://monitoring.strongpoint.com/api_jsonrpc.php";
@@ -46,7 +46,7 @@ if (!TOKEN) {
 // because this script runs from .mjs and we don't have a build step that
 // would let us import the TS module directly. Keep the two lists in sync
 // when adding new entries (audit via grep "i3-6100" in both files).
-const KNOWN_CPU_MODELS = [
+const KNOWN_CPU_MODELS: { match: string; cores: number }[] = [
   // Keep in sync with src/lib/zabbix/cores.ts (KNOWN_CPU_MODELS).
   // Order matters: more specific patterns first.
   { match: "i3-10100", cores: 8 },
@@ -66,7 +66,7 @@ const KNOWN_CPU_MODELS = [
   { match: "x5-e8000", cores: 4 },
 ];
 
-function inferCoresFromCpuModel(model) {
+function inferCoresFromCpuModel(model: string | null): number | null {
   if (!model) return null;
   const norm = model.toLowerCase().replace(/\s+/g, " ").trim();
   for (const entry of KNOWN_CPU_MODELS) {
@@ -75,7 +75,7 @@ function inferCoresFromCpuModel(model) {
   return null;
 }
 
-async function call(method, params = {}) {
+async function call(method: string, params: Record<string, unknown> = {}): Promise<any> {
   const res = await fetch(URL_ZBX, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}` },
@@ -89,7 +89,7 @@ async function call(method, params = {}) {
 }
 
 async function main() {
-  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
   const prisma = new PrismaClient({ adapter });
 
   try {
