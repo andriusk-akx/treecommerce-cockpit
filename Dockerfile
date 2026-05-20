@@ -36,6 +36,16 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD wget -qO- http://localhost:${PORT:-8080}/api/version || exit 1
 
-# Use npm start which calls `next start` from package.json.
-# `exec` makes node PID 1 — SIGTERM from Railway propagates for graceful shutdown.
-CMD ["sh", "-c", "exec npm start -- -H 0.0.0.0 -p ${PORT:-8080}"]
+# Apply any pending Prisma migrations BEFORE starting the server. `migrate
+# deploy` is idempotent (no-op when prod is already current), so on quiet
+# deploys this adds ~200 ms to cold-start and nothing on warm restarts. The
+# chain stops on failure, so a broken migration prevents the server from
+# coming up against a half-migrated schema — better than a 500-storm.
+#
+# Added 2026-05-20 alongside the cpu_num normalisation fix: that release
+# adds three columns to Device, and without this step the new Prisma client
+# queries would error against an unmigrated prod DB.
+#
+# `exec` on the final command keeps Next.js as PID 1 so SIGTERM from Railway
+# propagates for graceful shutdown.
+CMD ["sh", "-c", "npx prisma migrate deploy && exec npm start -- -H 0.0.0.0 -p ${PORT:-8080}"]
