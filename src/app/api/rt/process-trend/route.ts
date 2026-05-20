@@ -30,6 +30,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getZabbixClient } from "@/lib/zabbix/client";
 import { cached } from "@/lib/zabbix/cache";
+import { resolveCoresForHost } from "@/lib/zabbix/cores";
+import { prisma } from "@/lib/db";
 import {
   chooseTelemetrySources,
   normaliseValue,
@@ -157,8 +159,19 @@ async function buildTrendResponse(
   )) as Array<{ itemid: string; key_: string; lastvalue: string }>;
 
   // Cores — needed for perf_counter normalisation.
+  // Uses resolveCoresForHost so hosts whose `system.cpu.num` is missing or
+  // ZBX_NOTSUPPORTED still get the right divisor from Device.cpuCores
+  // (backfilled by scripts/backfill-device-cpu-cores.mjs) or, as a last
+  // resort, from a CPU-model lookup. The previous `parseInt(... || "1")`
+  // path silently default'd to cores=1, leaving perf_counter values raw
+  // — the root cause of the >100% drill-down stacks.
   const numCpuItem = allItems.find((it) => it.key_ === "system.cpu.num");
-  const cores = Math.max(1, parseInt(numCpuItem?.lastvalue || "1") || 1);
+  const coresResolved = await resolveCoresForHost({
+    hostId,
+    zabbixItem: numCpuItem,
+    prisma,
+  });
+  const cores = coresResolved.value;
 
   // chooseTelemetrySources gives us:
   //   - categoryById: itemId → Category for ALL recognised processes

@@ -293,9 +293,31 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
      *  the response (zero on hosts that don't publish the new items). */
     besclient: number; elastic: number; osCore: number;
     free: number;
+    // CPU normalisation spec (2026-05-20): added by averageSlotV2 path.
+    // Present whenever the route is on the new code; older clients (or
+    // a server still on a prior deploy) may not send them — the renderer
+    // defaults to "warn" / 0 / null when missing.
+    other?: number;
+    hostCpu?: number | null;
+    overshootPp?: number | null;
+    dataQuality?: "ok" | "warn" | "fail";
     sysCpuAvg: number | null; sysCpuMax: number | null;
   };
+  type DayDataQuality = {
+    day: "ok" | "warn" | "fail";
+    ok: number;
+    warn: number;
+    fail: number;
+  };
   const [drillIntervals, setDrillIntervals] = useState<ProcessSlot[] | null>(null);
+  // Top-level dataQuality summary returned by /api/rt/process-history. Drives
+  // the warning banner under the drill-down stacked bar.
+  const [drillDataQuality, setDrillDataQuality] = useState<DayDataQuality | null>(null);
+  // Cores actually used by the route to normalise this drill-down. Null when
+  // the route is on a previous deploy that didn't send it. Used in the
+  // drill-down header tooltip so operators know whether the displayed numbers
+  // were normalised and where the value came from.
+  const [drillCoresInfo, setDrillCoresInfo] = useState<{ cores: number; coresKnown: boolean; coresSource: string | null } | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
   // 2026-05-19: Sparse categories (BESClient / Elastic / OS Core) were rolled
   // out per-host on different dates (Pavilnionys SCO02: 2026-05-09; testlab:
@@ -490,15 +512,24 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         //   4. "—" placeholder (only when even cores are unknown).
         // TODO(RT-CPUMODEL phase 2): backfill Device.cpuModel and the fallback
         // becomes a no-op for the Rimi fleet.
-        const cores = detail?.numCpus || 0;
+        // Resolve cores with the same priority order resolveCoresForHost uses
+        // on the server: live Zabbix detail > Device.cpuCores (backfilled).
+        // When neither answers we set effectiveCores = 0 and surface a "?c"
+        // warning badge in the cpu model cell. The route's perf_counter
+        // normalisation will independently flag this via dataQuality.
+        const liveCores = detail?.numCpus || 0;
+        const cachedCores = device.cpuCores ?? 0;
+        const effectiveCores = liveCores > 0 ? liveCores : cachedCores;
+        const coresSource: "zabbix" | "cache" | "unknown" =
+          liveCores > 0 ? "zabbix" : cachedCores > 0 ? "cache" : "unknown";
         const cpuModelFromRegistry = resolveCpuModel(device.cpuModel, zHost?.inventory?.cpuModel ?? null);
         const resolvedCpuModel =
           cpuModelFromRegistry !== "—"
             ? cpuModelFromRegistry
-            : cores > 0
-              ? `${cores}-core (model unknown)`
+            : effectiveCores > 0
+              ? `${effectiveCores}-core (model unknown)`
               : "—";
-        return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: resolvedCpuModel, deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, rtActive, rtDeployed, rtActiveToday, currentCpu: Math.round(cpuTotal * 10) / 10, cores, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedDays, minutesAbove, totalMinutes };
+        return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: resolvedCpuModel, deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, rtActive, rtDeployed, rtActiveToday, currentCpu: Math.round(cpuTotal * 10) / 10, cores: effectiveCores, coresSource, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedDays, minutesAbove, totalMinutes };
       });
   }, [pilot, zabbixByName, cpuDetail, trendByHostDate, retellectByHost, storeFilter, threshold, periodDays, dates, hasTrendData]);
 
@@ -617,7 +648,13 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // python.exe / sp.sss / sqlservr / vmware-vmx — those items are not deployed
   // on Rimi hosts yet. We show an honest empty state instead of simulated bars.
   useEffect(() => {
-    if (!drill) { setDrillIntervals(null); setDaySummary(null); return; }
+    if (!drill) {
+      setDrillIntervals(null);
+      setDaySummary(null);
+      setDrillDataQuality(null);
+      setDrillCoresInfo(null);
+      return;
+    }
     // Drill carries the unambiguous Zabbix host id (set when the cell was
     // clicked). Multiple devices can share the same display name across stores
     // (e.g. "SCO2" in 8 stores), so we never resolve by name here.
@@ -636,8 +673,35 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             ) as SparseKey[])
           : [];
         setDayUnmonitored(u);
+        // CPU normalisation spec: surface dataQuality summary and cores info.
+        // Both are optional — the renderer tolerates older route deployments.
+        setDrillDataQuality(
+          d.dataQuality && typeof d.dataQuality.day === "string"
+            ? {
+                day: d.dataQuality.day,
+                ok: d.dataQuality.ok ?? 0,
+                warn: d.dataQuality.warn ?? 0,
+                fail: d.dataQuality.fail ?? 0,
+              }
+            : null,
+        );
+        setDrillCoresInfo(
+          typeof d.cores === "number"
+            ? {
+                cores: d.cores,
+                coresKnown: !!d.coresKnown,
+                coresSource: d.coresSource ?? null,
+              }
+            : null,
+        );
       })
-      .catch(() => { setDrillIntervals(null); setDaySummary(null); setDayUnmonitored([]); })
+      .catch(() => {
+        setDrillIntervals(null);
+        setDaySummary(null);
+        setDayUnmonitored([]);
+        setDrillDataQuality(null);
+        setDrillCoresInfo(null);
+      })
       .finally(() => setDrillLoading(false));
   }, [drill, granularity]);
 
@@ -1011,7 +1075,22 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           color: sel ? C.pillActive : "#343a40",
           minWidth: 70, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis",
         }} title={rowTitle}>{row.name}</td>
-        <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", minWidth: 110, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }} title={row.cpuModel}>{row.cpuModel}</td>
+        <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", minWidth: 130, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }} title={
+          row.coresSource === "unknown"
+            ? `${row.cpuModel} — CPU cores unknown. system.cpu.num not published and no Device.cpuCores override. Per-counter values are NOT normalised; stacked drill-down may be misleading. Run scripts/backfill-device-cpu-cores.mjs or set the value via Settings → Devices.`
+            : `${row.cpuModel} · ${row.cores} cores (${row.coresSource === "zabbix" ? "live" : "cached"})`
+        }>
+          {row.cpuModel}
+          {row.cores > 0 ? (
+            <span style={{ marginLeft: 4, color: row.coresSource === "cache" ? "#7e7e7e" : "#0c8feb", fontWeight: 500 }}>
+              · {row.cores}c
+            </span>
+          ) : (
+            <span style={{ marginLeft: 4, color: "#b91c1c", fontWeight: 600 }}>
+              · ?c⚠
+            </span>
+          )}
+        </td>
         {/*
           Two-dot Retellect indicator (split 2026-05-07):
             - "Deploy" — filled green when host has EVER reported python.cpu
@@ -1614,6 +1693,47 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
               </div>
             );
           })()}
+          {/* Data-quality banner (CPU normalisation spec §7.4): surfaces
+              normalisation problems the operator would otherwise have to
+              spot by eyeballing the stacked bar. */}
+          {drillDataQuality && drillDataQuality.day !== "ok" && (
+            <div
+              role="status"
+              style={{
+                marginTop: 12,
+                padding: "8px 12px",
+                borderRadius: 6,
+                border: `1px solid ${drillDataQuality.day === "fail" ? "#fecaca" : "#fde68a"}`,
+                background: drillDataQuality.day === "fail" ? "#fef2f2" : "#fffbeb",
+                color: drillDataQuality.day === "fail" ? "#b91c1c" : "#92400e",
+                fontSize: 11,
+                lineHeight: 1.4,
+              }}
+            >
+              <strong style={{ fontWeight: 700 }}>
+                {drillDataQuality.day === "fail" ? "✗ Data inconsistency: " : "⚠ Data quality: "}
+              </strong>
+              {drillDataQuality.day === "fail" ? (
+                <>
+                  Monitored categories sum exceeds host CPU by more than tolerance in {drillDataQuality.fail}
+                  {" "}of {drillDataQuality.ok + drillDataQuality.warn + drillDataQuality.fail} slots.
+                  Likely cause:{" "}
+                  {drillCoresInfo && !drillCoresInfo.coresKnown
+                    ? "CPU cores unknown for this host — per-counter values were not normalised."
+                    : "normalisation problem or per-counter rounding."}{" "}
+                  Fix: run <code>scripts/backfill-device-cpu-cores.mjs</code> or set <code>Device.cpuCores</code> manually in Settings → Devices.
+                </>
+              ) : drillCoresInfo && !drillCoresInfo.coresKnown ? (
+                <>
+                  CPU cores unknown for this host. Per-counter values were not normalised, so the breakdown may understate or overstate categories. Recommended action: run the cpu-cores backfill or set the value manually in Settings → Devices.
+                </>
+              ) : (
+                <>
+                  {drillDataQuality.warn} of {drillDataQuality.ok + drillDataQuality.warn + drillDataQuality.fail} slots have mild data-quality flags. The breakdown is broadly correct but specific slot values may be off by a few percentage points.
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1748,7 +1868,33 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 </span>
               )}
             </span>
-            {drillResources && <span style={{ fontSize: 11, color: "#adb5bd" }}>{drillResources.cores} cores · {drillResources.totalRamGb} GB · {drillResources.deviceType}</span>}
+            {drillResources && (() => {
+              // Prefer the cores number the SERVER actually used to normalise
+              // this response (drillCoresInfo) over the client-side row count.
+              // They should match in the happy path; when they don't (e.g.
+              // the row had no cores but the server fell back to a cached
+              // value), the server reading is the source of truth for what
+              // the displayed numbers mean.
+              const usedCores = drillCoresInfo?.cores ?? drillResources.cores;
+              const coresKnown = drillCoresInfo ? drillCoresInfo.coresKnown : usedCores > 0;
+              const sourceLabel =
+                drillCoresInfo?.coresSource === "zabbix" ? "live from Zabbix"
+                : drillCoresInfo?.coresSource === "manual" ? "manual override"
+                : drillCoresInfo?.coresSource === "inferred_from_model" ? "inferred from CPU model"
+                : "unknown source";
+              return (
+                <span
+                  style={{ fontSize: 11, color: coresKnown ? "#adb5bd" : "#b91c1c", fontWeight: coresKnown ? 400 : 600 }}
+                  title={
+                    coresKnown
+                      ? `${usedCores} cores (${sourceLabel}) · ${drillResources.totalRamGb} GB RAM`
+                      : "CPU cores unknown for this host. Per-counter values are NOT normalised; stacked bar may be misleading."
+                  }
+                >
+                  {coresKnown ? `${usedCores} cores` : `?c⚠`} · {drillResources.totalRamGb} GB · {drillResources.deviceType}
+                </span>
+              );
+            })()}
           </div>
           {/* Tab pills removed 2026-04-28 — the only meaningful view is the
               process breakdown. The Resource Utilization tab was a placeholder

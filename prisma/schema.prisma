@@ -184,6 +184,29 @@ model Device {
   sourceHostKey    String?
   deviceType       DeviceType @default(OTHER)
   cpuModel         String?
+  // CPU core count — drives per_counter / cpu_num normalisation in the
+  // Retellect drill-down. Stored here (not derived from Zabbix on every
+  // request) so:
+  //   1. Hosts whose `system.cpu.num` item is ZBX_NOTSUPPORTED still get
+  //      correct normalisation as long as we backfilled at least once.
+  //   2. The fix doesn't depend on a live Zabbix round-trip in the hot
+  //      path of /api/rt/process-history.
+  //   3. Operators can manually override (e.g. when CPU model is known
+  //      but the agent template hasn't been redeployed).
+  // Refreshed via `scripts/backfill-device-cpu-cores.mjs` (24h cadence).
+  cpuCores         Int?
+  // Provenance of `cpuCores`. Used by UI to show "4c (Zabbix)" vs.
+  // "4c (inferred from CPU model)" vs. "4c (manual)" so operators can
+  // judge confidence at a glance.
+  //   "zabbix"               → read live from system.cpu.num.lastvalue
+  //   "inferred_from_model"  → derived from cpuModel via known-model table
+  //   "manual"               → operator set the value via Settings UI
+  //   null                   → never resolved (rendered as "?c" in UI)
+  cpuCoresSource   String?
+  // Last time `cpuCores` was refreshed from Zabbix (or NULL if never).
+  // The resolveCoresForHost helper re-probes when this is older than the
+  // configured TTL (24h) so we eventually pick up hardware changes.
+  cpuCoresProbedAt DateTime?
   ramGb            Float?
   os               String?
   status           String     @default("active")

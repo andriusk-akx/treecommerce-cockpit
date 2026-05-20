@@ -4,6 +4,7 @@ import {
   categorise,
   chooseTelemetrySources,
   averageSlot,
+  averageSlotV2,
   normaliseValue,
   summariseDay,
   findUnmonitoredCategories,
@@ -17,9 +18,23 @@ describe("normalizeProcName", () => {
     expect(normalizeProcName("Python")).toBe("python");
     expect(normalizeProcName("SPSS")).toBe("spss");
   });
-  it("strips '#' so perf_counter `python#1` aligns with `python1.cpu`", () => {
-    expect(normalizeProcName("python#1")).toBe("python1");
-    expect(normalizeProcName("python#42")).toBe("python42");
+  // 2026-05-20 spec: strip optional '#' followed by trailing digits at end
+  // of name. Covers both Windows perfcounter `#N` suffix AND Zabbix
+  // UserParameter `python1`/`python2` index style. Old code did
+  // `replace(/#/g, "")` which mangled `sp.sss#1` -> `sp.sss1`, dropping
+  // multi-instance SCO processes from the breakdown.
+  it("strips perfcounter instance suffix '#N'", () => {
+    expect(normalizeProcName("python#1")).toBe("python");
+    expect(normalizeProcName("python#42")).toBe("python");
+    expect(normalizeProcName("sp.sss#0")).toBe("sp.sss");
+    expect(normalizeProcName("sp.sss#2")).toBe("sp.sss");
+  });
+  it("strips Zabbix UserParameter index suffix (bare trailing digits)", () => {
+    expect(normalizeProcName("python1")).toBe("python");
+    expect(normalizeProcName("python42")).toBe("python");
+  });
+  it("preserves mid-name '#' (regex anchors to END only)", () => {
+    expect(normalizeProcName("weird#name")).toBe("weird#name");
   });
   it("preserves dotted names like sp.sss", () => {
     expect(normalizeProcName("sp.sss")).toBe("sp.sss");
@@ -101,6 +116,9 @@ describe("chooseTelemetrySources", () => {
   });
 
   it("picks perf_counter[ \\Process(python#1) ] over python1.cpu when both exist", () => {
+    // Both items normalise to "python" now (perfcounter strips '#1',
+    // *.cpu strips '.cpu' then the bare digit '1'). chooseTelemetrySources
+    // groups them and the perfcounter wins; python1.cpu is dropped.
     const r = chooseTelemetrySources([
       { itemid: "100", key_: "python1.cpu" },
       { itemid: "200", key_: 'perf_counter["\\Process(python#1)\\% Processor Time"]' },
@@ -109,6 +127,51 @@ describe("chooseTelemetrySources", () => {
     expect(r.categoryById.get("200")).toBe("retellect");
     expect(r.needsCoresDivision.has("200")).toBe(true);
     expect(r.needsCoresDivision.has("100")).toBe(false);
+  });
+
+  it("keeps ALL perf_counter instances of a multi-instance process (sp.sss#0/#1/#2)", () => {
+    // Memory: project_sco_process_architecture documents sp.sss runs as 3
+    // instances. The old normalizeProcName mangled each to sp.sss0/1/2 and
+    // dropped them (categorise() did not match). Now all three are kept,
+    // grouped under "sp.sss", and the route sums their values.
+    const r = chooseTelemetrySources([
+      { itemid: "10", key_: 'perf_counter["\\Process(sp.sss#0)\\% Processor Time"]' },
+      { itemid: "11", key_: 'perf_counter["\\Process(sp.sss#1)\\% Processor Time"]' },
+      { itemid: "12", key_: 'perf_counter["\\Process(sp.sss#2)\\% Processor Time"]' },
+    ]);
+    expect(r.categoryById.get("10")).toBe("scoApp");
+    expect(r.categoryById.get("11")).toBe("scoApp");
+    expect(r.categoryById.get("12")).toBe("scoApp");
+    expect(r.needsCoresDivision.has("10")).toBe(true);
+    expect(r.needsCoresDivision.has("11")).toBe(true);
+    expect(r.needsCoresDivision.has("12")).toBe(true);
+  });
+
+  it("keeps BOTH bare \\Process(sp.sss) and \\Process(sp.sss#N) variants", () => {
+    // Windows numbers concurrent instances of the same EXE as `name`,
+    // `name#1`, `name#2`, ... The bare-name counter is the FIRST instance,
+    // NOT an aggregate. Summing all of them gives the correct total CPU
+    // across all running processes. Dropping the bare name would
+    // under-count by exactly one instance.
+    const r = chooseTelemetrySources([
+      { itemid: "1", key_: 'perf_counter["\\Process(sp.sss)\\% Processor Time"]' },
+      { itemid: "2", key_: 'perf_counter["\\Process(sp.sss#1)\\% Processor Time"]' },
+      { itemid: "3", key_: 'perf_counter["\\Process(sp.sss#2)\\% Processor Time"]' },
+    ]);
+    expect(r.categoryById.get("1")).toBe("scoApp");
+    expect(r.categoryById.get("2")).toBe("scoApp");
+    expect(r.categoryById.get("3")).toBe("scoApp");
+    expect(r.needsCoresDivision.has("1")).toBe(true);
+    expect(r.needsCoresDivision.has("2")).toBe(true);
+    expect(r.needsCoresDivision.has("3")).toBe(true);
+  });
+
+  it("keeps bare Process(sp.sss) when no #N instance exists for it", () => {
+    const r = chooseTelemetrySources([
+      { itemid: "1", key_: 'perf_counter["\\Process(sp.sss)\\% Processor Time"]' },
+    ]);
+    expect(r.categoryById.get("1")).toBe("scoApp");
+    expect(r.needsCoresDivision.has("1")).toBe(true);
   });
 
   it("falls back to *.cpu when perf_counter is missing for that process", () => {
@@ -572,5 +635,104 @@ describe("summariseDay", () => {
     expect(r.maxValue).toBe(80);
     expect(r.avgValue).toBe(80);
     expect(r.maxAtClock).toBe(555);
+  });
+});
+
+// ─── averageSlotV2 (CPU normalisation spec 2026-05-20) ─────────────────
+//
+// V2 adds host-CPU integration and a sanity classification on top of the
+// independent-per-category averages. The route uses these fields so the UI
+// can show "Other" as the unattributed-but-real share of host CPU (instead
+// of the legacy `free = 100 − Σ` which masked the >100% bug) and surface
+// a warning whenever monitored sums overshoot host CPU.
+
+describe("averageSlotV2", () => {
+  const slot = (over: Partial<Parameters<typeof averageSlotV2>[0]> = {}): Parameters<typeof averageSlotV2>[0] => ({
+    retellect: 0, scoApp: 0, db: 0, system: 0, besclient: 0, elastic: 0, osCore: 0,
+    countR: 0, countS: 0, countD: 0, countSys: 0, countBes: 0, countEla: 0, countOs: 0,
+    ...over,
+  });
+
+  it("data quality OK: categories sum close to host CPU (within 5pp tolerance)", () => {
+    const r = averageSlotV2(
+      slot({ scoApp: 22, countS: 1, db: 9, countD: 1, retellect: 1, countR: 1 }),
+      [33],  // host CPU 33%, Σnamed = 32 → overshoot −1pp
+      true,
+    );
+    expect(r.dataQuality).toBe("ok");
+    expect(r.hostCpu).toBe(33);
+    expect(r.other).toBe(1);     // 33 - 32 = 1 (max with 0)
+    expect(r.free).toBe(67);     // 100 - 33 = 67
+    expect(r.overshootPp).toBe(-1);
+  });
+
+  it("data quality FAIL: cpu_num normalisation missing → 135% on 85% host CPU (the original bug)", () => {
+    // Reproduces the screenshot scenario: Σnamed = 87+36+7+4.7 = 134.7,
+    // host CPU = 85. Old code rendered this as a stack >100%. averageSlotV2
+    // surfaces dataQuality="fail" so the UI shows a warning instead.
+    const r = averageSlotV2(
+      slot({
+        scoApp: 87, countS: 1,
+        db: 36, countD: 1,
+        system: 7.3, countSys: 1,
+        retellect: 4.7, countR: 1,
+      }),
+      [85],
+      true,
+    );
+    expect(r.dataQuality).toBe("fail");
+    expect(r.hostCpu).toBe(85);
+    expect(r.other).toBe(0);                 // clamped to 0 when sums overshoot
+    expect(r.overshootPp).toBeGreaterThan(15);
+  });
+
+  it("data quality WARN: cores unknown forces warn even if numbers look ok", () => {
+    // Same input as the "OK" case but coresKnown=false → the route did NOT
+    // normalise perf_counter values, so we can't trust the sums.
+    const r = averageSlotV2(
+      slot({ scoApp: 22, countS: 1, db: 9, countD: 1 }),
+      [33],
+      false,  // coresKnown=false
+    );
+    expect(r.dataQuality).toBe("warn");
+  });
+
+  it("data quality WARN: no host CPU sample in slot", () => {
+    const r = averageSlotV2(
+      slot({ scoApp: 22, countS: 1 }),
+      [],   // no sysCpu samples this slot
+      true,
+    );
+    expect(r.dataQuality).toBe("warn");
+    expect(r.hostCpu).toBeNull();
+    expect(r.other).toBe(0);
+    expect(r.free).toBe(0);
+    expect(r.overshootPp).toBeNull();
+  });
+
+  it("Other is derived from host CPU, not from 100 - Σ (the legacy bug)", () => {
+    // host=60, Σ=20 → Other should be 40 (host − Σ), NOT 80 (100 − Σ).
+    // The legacy `free` formula attributed un-monitored CPU to "idle",
+    // which masked normalisation errors and over-stated headroom.
+    const r = averageSlotV2(
+      slot({ scoApp: 20, countS: 1 }),
+      [60],
+      true,
+    );
+    expect(r.other).toBe(40);   // host CPU − Σ
+    expect(r.free).toBe(40);    // 100 − host CPU
+  });
+
+  it("free + other + Σ named = host CPU + free invariant always holds", () => {
+    // Σ named + other = host CPU (clamped), free = 100 − host CPU
+    // So Σ + other + free = max(Σ, host CPU) + (100 − host CPU)
+    // which equals 100 when sums don't overshoot host CPU.
+    const r = averageSlotV2(
+      slot({ scoApp: 20, countS: 1, db: 10, countD: 1, system: 5, countSys: 1 }),
+      [50],
+      true,
+    );
+    const sumNamed = r.categories.scoApp + r.categories.db + r.categories.system;
+    expect(sumNamed + r.other + r.free).toBeCloseTo(100, 1);
   });
 });

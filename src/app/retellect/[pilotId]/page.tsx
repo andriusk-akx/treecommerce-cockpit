@@ -201,6 +201,9 @@ type PrismaPilotRow = NonNullable<Awaited<ReturnType<typeof prisma.pilot.findUni
     name: string;
     sourceHostKey: string | null;
     cpuModel: string | null;
+    cpuCores: number | null;
+    cpuCoresSource: string | null;
+    cpuCoresProbedAt: Date | null;
     ramGb: number | null;
     retellectEnabled: boolean;
     retellectConfidence: string | null;
@@ -236,6 +239,14 @@ function buildPilotData(pilot: PrismaPilotRow): RtPilotData {
       sourceHostKey: d.sourceHostKey,
       storeName: d.store?.name ?? "—",
       cpuModel: d.cpuModel ?? "—",
+      // cpuCores + provenance flow through to the timeline so the cpu_num
+      // badge can be rendered alongside the cpu model column ("i3-6100 · 4c")
+      // and the drill-down header can show real cores rather than a 0
+      // placeholder. Null means resolveCoresForHost wasn't able to establish
+      // a core count for this device — the UI renders "?c" with a tooltip.
+      cpuCores: d.cpuCores,
+      cpuCoresSource: d.cpuCoresSource,
+      cpuCoresProbedAt: d.cpuCoresProbedAt,
       ramGb: d.ramGb ?? 0,
       retellectEnabled: d.retellectEnabled,
       retellectConfidence: d.retellectConfidence,

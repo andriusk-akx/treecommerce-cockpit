@@ -81,9 +81,46 @@ export interface RawItem {
   key_: string;
 }
 
-/** Normalise process names so *.cpu and perf_counter keys cross-reference. */
+/**
+ * Normalise process names so *.cpu and perf_counter keys cross-reference.
+ *
+ * Strips an optional "#" followed by trailing digits at the END of the name
+ * — covering BOTH:
+ *
+ *   1. Windows perfcounter instance suffix:  "sp.sss#1" -> "sp.sss"
+ *   2. Zabbix UserParameter index suffix:     "python1" -> "python"
+ *
+ * The two flavours represent the same underlying process (Windows numbers
+ * concurrent instances of one .exe as #0/#1/...; some StrongPoint agent
+ * templates expose the same data as `python1.cpu`/`python2.cpu` items).
+ * Normalising both to the same key lets chooseTelemetrySources dedupe
+ * them — perfcounter wins, *.cpu fills the gap.
+ *
+ * The regex anchors to the END (#?\d+$), so:
+ *
+ *   "sp.sss#0"  -> "sp.sss"        (categorise -> scoApp)
+ *   "sp.sss"    -> "sp.sss"        (categorise -> scoApp)
+ *   "python1"   -> "python"        (categorise -> retellect via /^python\d*$/)
+ *   "python#3"  -> "python"        (categorise -> retellect)
+ *   "weird#name" -> "weird#name"   (mid-name '#' survives — only trailing digits strip)
+ *   "ipv6"      -> "ipv"           (defensive: a process literally named "ipv6" would lose the 6,
+ *                                   but no categorise() entry depends on a trailing digit so this
+ *                                   is moot in practice)
+ *
+ * After normalisation, multiple instance-numbered items for the same
+ * process share a single normalised name. chooseTelemetrySources keeps
+ * all of them (per-group, root-vs-instance dedupe applies) and the route
+ * sums their per-minute values, so three sp.sss#0..#2 workers at 25%
+ * each correctly become a 75% slot value.
+ *
+ * Older code did `replace(/#/g, "")` which (a) mangled "sp.sss#1" into
+ * "sp.sss1" — a name categorise() did not match — silently dropping
+ * multi-instance SCO processes from the breakdown, and (b) did NOT strip
+ * the bare-digit suffix on `python1`, so cpu items and perf items used
+ * different keys whenever both flavours existed for the same process.
+ */
 export function normalizeProcName(name: string): string {
-  return name.toLowerCase().replace(/#/g, "");
+  return name.toLowerCase().replace(/#?\d+$/, "");
 }
 
 /**
@@ -141,6 +178,25 @@ export function categorise(procName: string): HistoryProcessCategory | null {
  *   - perf_counter wins per-process (preferred for spike accuracy).
  *   - *.cpu items are only included for processes without perf_counter.
  *   - Items unrecognised by `categorise()` are silently dropped.
+ *
+ * Multi-instance handling (memory: project_sco_process_architecture
+ * documents that sp.sss runs as 3 instances on each SCO):
+ *
+ *   1. perf_counter items are grouped by normalised process name. ALL
+ *      entries in a group contribute to the same category. The route
+ *      later SUMS their per-minute values, so multiple workers correctly
+ *      add up to the total category load.
+ *
+ *   2. There is intentionally NO root-vs-instance dedupe. Windows perfcounter
+ *      numbers concurrent instances as `name`, `name#1`, `name#2`, ... —
+ *      the bare-name counter is the FIRST instance, not an aggregate.
+ *      Three sp.sss processes show up as `sp.sss` + `sp.sss#1` + `sp.sss#2`,
+ *      and all three values must be summed to get total SCO App load.
+ *      Dropping the bare-name entry would under-count by one instance.
+ *
+ *   3. *.cpu fallback: agent-emitted "spss.cpu" etc. are "% of host"
+ *      and don't need /cores. Used only when the host doesn't publish
+ *      any perf_counter for that normalised name.
  */
 export function chooseTelemetrySources(allItems: RawItem[]): {
   categoryById: Map<string, HistoryProcessCategory>;
@@ -156,7 +212,11 @@ export function chooseTelemetrySources(allItems: RawItem[]): {
 
   const categoryById = new Map<string, HistoryProcessCategory>();
   const needsCoresDivision = new Set<string>();
-  const perfByProc = new Map<string, { itemid: string; cat: HistoryProcessCategory }>();
+
+  // Group perf items by normalised process name and category. All entries
+  // per group are kept — multi-instance Windows processes naturally show up
+  // as `name`, `name#1`, `name#2`, ... and summing them is correct.
+  const perfGroups = new Map<string, HistoryProcessCategory>();
 
   for (const it of perfItems) {
     const m = it.key_.match(/\\Process\(([^)]+)\)/);
@@ -164,16 +224,17 @@ export function chooseTelemetrySources(allItems: RawItem[]): {
     const procName = normalizeProcName(m[1]);
     const cat = categorise(procName);
     if (!cat) continue;
-    perfByProc.set(procName, { itemid: it.itemid, cat });
-  }
-  for (const [, entry] of perfByProc) {
-    categoryById.set(entry.itemid, entry.cat);
-    needsCoresDivision.add(entry.itemid);
+    perfGroups.set(procName, cat);
+    categoryById.set(it.itemid, cat);
+    needsCoresDivision.add(it.itemid);
   }
 
+  // *.cpu fallback: include only when the normalised name has NO perf_counter
+  // group at all. perf is more accurate (instantaneous, captures spikes) so
+  // we prefer it whenever available.
   for (const it of cpuItems) {
     const procName = normalizeProcName(it.key_.replace(/\.cpu$/, ""));
-    if (perfByProc.has(procName)) continue;
+    if (perfGroups.has(procName)) continue;
     const cat = categorise(procName);
     if (!cat) continue;
     categoryById.set(it.itemid, cat);
@@ -207,9 +268,13 @@ export interface SlotAverages {
   besclient: number;
   elastic: number;
   osCore: number;
-  /** Remainder after every named category is subtracted from 100. Clamped ≥0
+  /** Remainder after every named category is subtracted from 100. Clamped >=0
    *  so a slot where monitored sums overshoot host CPU (rare, perf_counter
-   *  rounding) never renders a negative bar. */
+   *  rounding) never renders a negative bar.
+   *
+   *  Kept for back-compat. The new averageSlotV2 returns a richer object
+   *  (with host CPU + Other + dataQuality), but the existing route plumbing
+   *  still reads `free` from this path until it's fully migrated. */
   free: number;
 }
 
@@ -250,18 +315,147 @@ export function averageSlot(b: SlotBucket): SlotAverages {
   };
 }
 
+/** Slot data quality classification.
+ *
+ *   "ok"   — categories add up plausibly given host CPU (within tolerance)
+ *   "warn" — modest overshoot or no host CPU reading available
+ *   "fail" — categories sum exceeds host CPU by more than HARD_TOLERANCE_PP.
+ *            Almost always indicates a cpu_num normalisation problem.
+ *
+ *  See spec §4.4 (AKpilot-CPU-Normalization-Spec.md). */
+export type SlotDataQuality = "ok" | "warn" | "fail";
+
+/** Per-category point-percent tolerance bands for the sanity check.
+ *
+ *  These are deliberately generous: per-counter rounding + multi-source
+ *  category sums can drift a few percentage points off host CPU even on
+ *  a perfectly-normalised host. We only flag when the gap is large
+ *  enough to be visible to the operator as "this can't be right".
+ *
+ *  Tolerance is symmetric around 0 — Σnamed lower than host CPU (a
+ *  large "Other" share) is fine; Σnamed higher than host CPU by more
+ *  than the tolerance is the failure mode. */
+export const SLOT_TOLERANCE_PP = {
+  ok: 5,
+  warn: 15,
+} as const;
+
+export interface SlotAveragesV2 {
+  /** Per-category averages, same numbers as averageSlot returned. */
+  categories: {
+    retellect: number;
+    scoApp: number;
+    db: number;
+    system: number;
+    besclient: number;
+    elastic: number;
+    osCore: number;
+  };
+  /** Average of the slot's system.cpu.util samples — the "actual" host
+   *  CPU utilisation. Null when no sysCpu samples landed in this slot
+   *  (older Zabbix templates without `system.cpu.util`, or a slot the
+   *  poll cadence skipped). When null we cannot derive Other/free and
+   *  the data quality drops to "warn" at best. */
+  hostCpu: number | null;
+  /** max(0, hostCpu - sum(categories)) — the share of host CPU we couldn't
+   *  attribute to any monitored category. Renders as the "Other" bar in
+   *  the stacked breakdown. Zero when hostCpu is null. */
+  other: number;
+  /** max(0, 100 - hostCpu) — host idle. Zero when hostCpu is null.
+   *  Replaces the legacy `free = 100 - sum(categories)` definition,
+   *  which over-attributed CPU to "free" whenever cores normalisation
+   *  was wrong. */
+  free: number;
+  /** Σ(categories) - hostCpu. Positive = monitored sums overshoot host
+   *  CPU (the cpu_num bug). Negative = there's headroom for "Other".
+   *  Null when hostCpu is null. */
+  overshootPp: number | null;
+  /** Quality classification — see SlotDataQuality. */
+  dataQuality: SlotDataQuality;
+}
+
+/**
+ * V2 of averageSlot: same category math, plus host CPU integration and a
+ * data-quality classification. Routes use this for slots after 2026-05-20;
+ * the legacy averageSlot is kept callable for any code still on the v1 path.
+ *
+ * `hostCpuValues` is the array of system.cpu.util samples that landed in
+ * this slot. The route already collects them as `bucket.sysCpuValues` so
+ * no new fetches are required — only a parameter change at the call site.
+ *
+ * `coresKnown=false` (cpu_num could not be resolved for this host) forces
+ * dataQuality to at most "warn" even when the sums happen to look right —
+ * the route is intentionally pessimistic when normalisation could not be
+ * applied.
+ */
+export function averageSlotV2(
+  b: SlotBucket,
+  hostCpuValues: number[],
+  coresKnown: boolean,
+): SlotAveragesV2 {
+  const avg = averageSlot(b);
+  const hostCpu = hostCpuValues.length
+    ? Math.round((hostCpuValues.reduce((acc, v) => acc + v, 0) / hostCpuValues.length) * 10) / 10
+    : null;
+  const sumNamed =
+    avg.retellect + avg.scoApp + avg.db + avg.system +
+    avg.besclient + avg.elastic + avg.osCore;
+
+  let other = 0;
+  let free = 0;
+  let overshootPp: number | null = null;
+  let dataQuality: SlotDataQuality = "warn";
+
+  if (hostCpu === null) {
+    // Without host CPU we can't tell whether sums make sense. Treat as warn.
+    dataQuality = "warn";
+  } else {
+    other = Math.max(0, Math.round((hostCpu - sumNamed) * 100) / 100);
+    free = Math.max(0, Math.round((100 - hostCpu) * 100) / 100);
+    overshootPp = Math.round((sumNamed - hostCpu) * 100) / 100;
+    if (!coresKnown) {
+      // We didn't normalise per_counter values — assume the worst.
+      dataQuality = "warn";
+    } else if (Math.abs(overshootPp) <= SLOT_TOLERANCE_PP.ok) {
+      dataQuality = "ok";
+    } else if (overshootPp <= SLOT_TOLERANCE_PP.warn) {
+      // Negative overshoot or modest positive — still survivable.
+      dataQuality = "warn";
+    } else {
+      dataQuality = "fail";
+    }
+  }
+
+  return {
+    categories: {
+      retellect: avg.retellect,
+      scoApp: avg.scoApp,
+      db: avg.db,
+      system: avg.system,
+      besclient: avg.besclient,
+      elastic: avg.elastic,
+      osCore: avg.osCore,
+    },
+    hostCpu,
+    other,
+    free,
+    overshootPp,
+    dataQuality,
+  };
+}
+
 /**
  * Convert a Zabbix raw value to "% of host" given the item's source kind.
  *
- * Defensive on `cores`: if it's NaN, ≤0, or otherwise garbage we default to 1
+ * Defensive on `cores`: if it's NaN, <=0, or otherwise garbage we default to 1
  * so the value passes through unchanged rather than producing NaN. The route
  * already guards with `parseInt(... || "1") || 1` upstream, but the helper
  * shouldn't trust its caller.
  */
 export function normaliseValue(raw: number, isPerfCounter: boolean, cores: number): number {
   if (!isPerfCounter) return raw;
-  // Cores must be ≥1 to make sense. Anything below (NaN, 0, negative,
-  // fractional) is treated as 1 → value passes through unchanged.
+  // Cores must be >=1 to make sense. Anything below (NaN, 0, negative,
+  // fractional) is treated as 1 -> value passes through unchanged.
   const safeCores = Number.isFinite(cores) && cores >= 1 ? cores : 1;
   return raw / safeCores;
 }

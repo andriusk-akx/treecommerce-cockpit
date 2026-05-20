@@ -37,6 +37,17 @@ export interface RtPilotData {
     sourceHostKey: string | null;
     storeName: string;
     cpuModel: string;
+    /** Persistent CPU core count for this device, as resolved by
+     *  scripts/backfill-device-cpu-cores.mjs (or set manually via Settings).
+     *  Drives the cpu_num badge in the timeline row and the drill-down
+     *  header. Null when never resolved — UI shows "?c" with a tooltip. */
+    cpuCores: number | null;
+    /** Provenance of cpuCores: "zabbix" | "manual" | "inferred_from_model"
+     *  | null. Drives the source tag the UI may show alongside the badge. */
+    cpuCoresSource: string | null;
+    /** Last Zabbix probe timestamp for cpuCores. Surfaced in tooltips so
+     *  operators can tell how recent the cache is. */
+    cpuCoresProbedAt: Date | null;
     ramGb: number;
     retellectEnabled: boolean;
     retellectConfidence: string | null;

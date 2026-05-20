@@ -11,11 +11,15 @@ import { cached } from "@/lib/zabbix/cache";
 import {
   chooseTelemetrySources,
   averageSlot,
+  averageSlotV2,
   normaliseValue,
   summariseDay,
   findUnmonitoredCategories,
   type SparseCategory,
+  type SlotDataQuality,
 } from "./math";
+import { resolveCoresForHost } from "@/lib/zabbix/cores";
+import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -193,9 +197,19 @@ export async function GET(req: NextRequest) {
   // host units. A single flag captures the difference at fetch time.
   const sysKernelNeedsCoresDiv = !!sysKernelProcItem;
   const numCpuItem = allItems.find((it) => it.key_ === "system.cpu.num");
-  // Cores known? Default to 1 so we never divide by zero. Modern SCO hosts
-  // are 4-core; older ones may be 2.
-  const cores = Math.max(1, parseInt(numCpuItem?.lastvalue || "1") || 1);
+  // Resolve cpu_num via the layered helper (live Zabbix -> cached Device.cpuCores
+  // -> inferred from CPU model -> coresKnown=false). The old code silently
+  // defaulted to cores=1 here, which left perf_counter values un-normalised on
+  // hosts whose Zabbix agent doesn't publish system.cpu.num. The result was
+  // stacked bars summing past 100% on the drill-down (e.g. SCO App 87% + DB 36%
+  // on a host with peak CPU 85%). See AKpilot-CPU-Normalization-Spec.md.
+  const coresResolved = await resolveCoresForHost({
+    hostId,
+    zabbixItem: numCpuItem,
+    prisma,
+  });
+  const cores = coresResolved.value;
+  const coresKnown = coresResolved.coresKnown;
 
   // Pure helper computes the chosen item set: perf_counter wins per process,
   // *.cpu fills the gap for processes without a perf_counter equivalent.
@@ -405,6 +419,23 @@ export async function GET(req: NextRequest) {
     elastic: number;
     osCore: number;
     free: number;
+    /** Unattributed host CPU share = max(0, hostCpu - Sum(named)). Rendered
+     *  as a distinct "Other" stack segment so the chart visually adds up
+     *  to host CPU even when monitored categories don't cover every
+     *  process. Zero when hostCpu is null. */
+    other: number;
+    /** Average system.cpu.util for this slot's time window, or null when no
+     *  samples landed in the slot. Replaces the legacy `free = 100 - Sum`
+     *  approach with a true host-CPU-vs-attributed comparison. */
+    hostCpu: number | null;
+    /** Sum(named) - hostCpu in percentage points. Positive = monitored sums
+     *  overshoot host CPU (typically a cpu_num normalisation problem).
+     *  Null when hostCpu is null. */
+    overshootPp: number | null;
+    /** Slot sanity classification. "ok" within tolerance, "warn" mild or
+     *  cores unknown, "fail" large overshoot (almost always a cpu_num
+     *  problem). Drives the per-slot badge on the drill-down. */
+    dataQuality: SlotDataQuality;
     sysCpuAvg: number | null;
     sysCpuMax: number | null;
   }> = [];
@@ -470,27 +501,50 @@ export async function GET(req: NextRequest) {
     // would inflate transient spikes). Items inside a category that fire at
     // separate timestamps inside one slot still average correctly because
     // their per-item contributions all land in the same accumulator.
-    const avg = b
-      ? averageSlot({
-          retellect: b.retellect,
-          scoApp: b.scoApp,
-          db: b.db,
-          system: b.system,
-          besclient: b.besclient,
-          elastic: b.elastic,
-          osCore: b.osCore,
-          countR: b.countR,
-          countS: b.countS,
-          countD: b.countD,
-          countSys: b.countSys,
-          countBes: b.countBes,
-          countEla: b.countEla,
-          countOs: b.countOs,
-        })
+    // averageSlotV2 produces both the per-category numbers (same math as the
+    // legacy averageSlot) AND the host-CPU-aware fields: `hostCpu`, `other`,
+    // `free`, `overshootPp`, `dataQuality`. The route surfaces all of these
+    // so the UI can show a warning whenever monitored sums exceed host CPU
+    // by more than the spec's tolerance (5pp "ok", 15pp "warn", above that
+    // "fail"). Without averageSlotV2 we'd reproduce the legacy bug where
+    // `free = 100 - Σnamed` masked cpu_num normalisation problems by
+    // visually filling the rest with idle.
+    const slotV2 = b
+      ? averageSlotV2(
+          {
+            retellect: b.retellect,
+            scoApp: b.scoApp,
+            db: b.db,
+            system: b.system,
+            besclient: b.besclient,
+            elastic: b.elastic,
+            osCore: b.osCore,
+            countR: b.countR,
+            countS: b.countS,
+            countD: b.countD,
+            countSys: b.countSys,
+            countBes: b.countBes,
+            countEla: b.countEla,
+            countOs: b.countOs,
+          },
+          b.sysCpuValues,
+          coresKnown,
+        )
       : {
-          retellect: 0, scoApp: 0, db: 0, system: 0,
-          besclient: 0, elastic: 0, osCore: 0, free: 100,
+          categories: {
+            retellect: 0, scoApp: 0, db: 0, system: 0,
+            besclient: 0, elastic: 0, osCore: 0,
+          },
+          hostCpu: null,
+          other: 0,
+          free: 100,
+          overshootPp: null,
+          dataQuality: "warn" as SlotDataQuality,
         };
+    const avg = {
+      ...slotV2.categories,
+      free: slotV2.free,
+    };
     const { retellect: r, scoApp: sa, db: dbv, system: sys } = avg;
     // Sparse-cadence forward-fill: for besclient / elastic / osCore, if this
     // slot has no real reading (0 from averageSlot) but a recent slot had one
@@ -527,7 +581,15 @@ export async function GET(req: NextRequest) {
       besclient: bes,
       elastic: ela,
       osCore: os,
-      free: Math.max(0, 100 - r - sa - dbv - sys - bes - ela - os),
+      // `free` stays as the host-CPU-derived idle from V2 (or 100 when no
+      // hostCpu data exists). `other` is the unattributed slice of host CPU
+      // = max(0, hostCpu - Σnamed) and goes into a new "Other" stack segment
+      // in the drill-down. dataQuality drives the slot's sanity badge.
+      free: slotV2.free,
+      other: slotV2.other,
+      hostCpu: slotV2.hostCpu,
+      overshootPp: slotV2.overshootPp,
+      dataQuality: slotV2.dataQuality,
       sysCpuAvg,
       sysCpuMax,
     });
@@ -553,11 +615,37 @@ export async function GET(req: NextRequest) {
     osCore: totalOs,
   });
 
+  // Day-level sanity rollup: counts of slots in each dataQuality bucket so the
+  // UI can render a single dot per day in the heatmap header without iterating
+  // the slot array on every render. `coresKnown` propagates so the timeline
+  // row's cpu_num badge can show "?c" with a tooltip when normalisation could
+  // not be applied for this host.
+  let okCount = 0;
+  let warnCount = 0;
+  let failCount = 0;
+  for (const s of slots) {
+    const dq = (s as { dataQuality?: SlotDataQuality }).dataQuality;
+    if (dq === "ok") okCount += 1;
+    else if (dq === "warn") warnCount += 1;
+    else if (dq === "fail") failCount += 1;
+  }
+  const dayDataQuality: SlotDataQuality =
+    failCount > 0 ? "fail" : warnCount > okCount ? "warn" : "ok";
+
   return NextResponse.json({
     slots,
     hasSysCpu: !!sysCpuItem,
     hasOsCore: !!sysKernelItem,
     unmonitored,
     daySummary,
+    cores,
+    coresKnown,
+    coresSource: coresResolved.source,
+    dataQuality: {
+      day: dayDataQuality,
+      ok: okCount,
+      warn: warnCount,
+      fail: failCount,
+    },
   });
 }
