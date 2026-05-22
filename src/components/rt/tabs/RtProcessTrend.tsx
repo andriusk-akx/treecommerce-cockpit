@@ -403,7 +403,7 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
             </label>
 
             <span style={{ fontSize: 10, color: C.textDim, marginLeft: "auto", fontStyle: "italic" }}>
-              Pasirink procesą, kurio elgseną tikrini
+              Pick a process to inspect its behaviour
             </span>
           </div>
 

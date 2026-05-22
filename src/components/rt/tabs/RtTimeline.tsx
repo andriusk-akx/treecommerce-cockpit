@@ -977,19 +977,25 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       </div>
       <div style={{ width: 1, height: 16, background: C.border }} />
       <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }} title="Filter by Retellect telemetry">Filter</span>
-      {/* Two mutually-exclusive Retellect filter pills (post-2026-05-07):
-          • "Retellect Today"      — only hosts with meaningful python.cpu
-                                     activity within the last 24 h
-                                     (matches the RT TODAY column dot).
-          • "Retellect Installed"  — only hosts where Retellect items are
-                                     configured in the Zabbix template,
-                                     regardless of current activity (matches
-                                     the RT INST column dot — superset of Today).
+      {/* Two mutually-exclusive Retellect filter pills (post-2026-05-07,
+          relabelled 2026-05-22 — "Today" was ambiguous and the pill ordered
+          before "Installed", which is conceptually a SUPERSET. New order
+          puts the superset first so the user sees the broader filter before
+          the narrower one — matches the column header order (RT Inst, RT Act):
+          • "Retellect Installed" — only hosts where Retellect items are
+                                    configured in the Zabbix template,
+                                    regardless of current activity (matches
+                                    the RT INST column dot).
+          • "Retellect Active"    — only hosts with meaningful python.cpu
+                                    activity within the last 24 h (matches
+                                    the RT ACT column dot — subset of Installed).
+          Internal id stays "today" / "installed" to keep localStorage
+          payloads from earlier sessions valid; only the visible label moves.
           Clicking the active one deselects (returns to "show all"). */}
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
         {([
-          { id: "today" as const, label: "Retellect Today", dot: "#10b981", bgActive: "#ecfdf5", borderActive: "#a7f3d0", textActive: "#065f46", tip: "Show only hosts with meaningful Retellect (python.cpu) activity in the last 24 h. Matches the RT TODAY column dot." },
           { id: "installed" as const, label: "Retellect Installed", dot: "#0ea5e9", bgActive: "#eff6ff", borderActive: "#bfdbfe", textActive: "#1e40af", tip: "Show only hosts where Retellect items are configured in the Zabbix template (deployment registry — includes deployed-but-idle hosts). Matches the RT INST column dot." },
+          { id: "today" as const, label: "Retellect Active", dot: "#10b981", bgActive: "#ecfdf5", borderActive: "#a7f3d0", textActive: "#065f46", tip: "Show only hosts with meaningful Retellect (python.cpu) activity in the last 24 h. Matches the RT ACT column dot." },
         ]).map((p) => {
           const active = retellectInstalled === p.id;
           return (
@@ -1081,13 +1087,27 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             : `${row.cpuModel} · ${row.cores} cores (${row.coresSource === "zabbix" ? "live" : "cached"})`
         }>
           {row.cpuModel}
+          {/* CPU core count badge. The abbreviation "4c" was opaque to anyone
+              new to the dashboard (real feedback 2026-05-22 — a first-time
+              viewer didn't realise the suffix meant "cores"). Spelled out as
+              "4 cores" so the meaning is self-evident; still fits the
+              130–160 px column for every CPU model in the Rimi fleet. The
+              parent <td> already carries a richer tooltip (live vs cached
+              source); we add a direct title on the span so a hover on the
+              badge itself surfaces the same info without delay. */}
           {row.cores > 0 ? (
-            <span style={{ marginLeft: 4, color: row.coresSource === "cache" ? "#7e7e7e" : "#0c8feb", fontWeight: 500 }}>
-              · {row.cores}c
+            <span
+              style={{ marginLeft: 4, color: row.coresSource === "cache" ? "#7e7e7e" : "#0c8feb", fontWeight: 500 }}
+              title={`${row.cores} CPU cores (${row.coresSource === "zabbix" ? "from live Zabbix system.cpu.num" : "from cached Device.cpuCores backfill"})`}
+            >
+              · {row.cores} cores
             </span>
           ) : (
-            <span style={{ marginLeft: 4, color: "#b91c1c", fontWeight: 600 }}>
-              · ?c⚠
+            <span
+              style={{ marginLeft: 4, color: "#b91c1c", fontWeight: 600 }}
+              title="CPU core count unknown — system.cpu.num not published and no Device.cpuCores override. Per-counter values are NOT normalised."
+            >
+              · ? cores ⚠
             </span>
           )}
         </td>
@@ -1331,11 +1351,12 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   into two narrower columns 2026-05-07. Header labels keep
                   the "RT" prefix so the user knows both columns answer
                   Retellect-specific questions (the dashboard is general
-                  enough that a bare "Inst"/"Today" pair would be ambiguous):
-                    RT INST  — Retellect items configured in Zabbix template
-                               for this host (ever-installed signal).
-                    RT TODAY — Retellect produced meaningful CPU activity
-                               within the last 24 h.
+                  enough that a bare "Inst"/"Act" pair would be ambiguous):
+                    RT INST — Retellect items configured in Zabbix template
+                              for this host (ever-installed signal).
+                    RT ACT  — Retellect produced meaningful CPU activity
+                              within the last 24 h ("Active"). Renamed from
+                              "Today" 2026-05-22 to match the filter pill.
                   Both share the "rt" sort key (see toggleSort below).
                 */}
                 <th
@@ -1348,9 +1369,9 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 <th
                   onClick={() => toggleSort("rt")}
                   style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 56 }}
-                  title="RT active today — Retellect produced meaningful python.cpu activity within the last 24 h."
+                  title="RT active — Retellect produced meaningful python.cpu activity within the last 24 h."
                 >
-                  RT&nbsp;Today{sortArrow("rt")}
+                  RT&nbsp;Act{sortArrow("rt")}
                 </th>
                 {dates.map((d, i) => <th key={i} style={{ textAlign: "center", padding: "4px 0", fontSize: 8, fontWeight: 400, color: C.headerText, width: 32, minWidth: 32 }}>{String(d.getDate()).padStart(2, "0")}</th>)}
                 <th onClick={() => toggleSort("exceed")} title={`Minutes ≥ ${threshold}% out of total sampled minutes`} style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
