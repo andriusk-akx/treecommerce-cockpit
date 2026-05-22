@@ -1669,8 +1669,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
               const p = PROCESSES.find((x) => x.key === k);
               return p ? p.label : k;
             });
+            // The sparse-category note used to read "no Zabbix data on this day",
+            // which read as "the whole day has no Zabbix data" — confusing, since
+            // host CPU and the named processes ARE present on these days. Reworded
+            // to make clear it's only THESE category items (BES/Elastic/OS Core)
+            // that weren't yet collected — they were rolled out across Rimi prod
+            // around 2026-05-09 and so pre-rollout days have no samples for them.
             const otherTooltip = unmonitoredLabels.length > 0
-              ? `CPU consumed by processes we don't monitor by name (kernel, scheduler, services). Also includes ${unmonitoredLabels.join(", ")} — no Zabbix data for those items on this day (likely enabled on this host later).`
+              ? `CPU consumed by processes we don't monitor by name (kernel, scheduler, services). Also includes ${unmonitoredLabels.join(", ")} — those Zabbix items were not yet deployed on this host on this day (BES/Elastic/OS Core rolled out across Rimi prod ~2026-05-09).`
               : "CPU consumed by processes we don't monitor by name (kernel, scheduler, services).";
             return (
               <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -1686,7 +1692,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   </div>
                   {unmonitoredLabels.length > 0 && (
                     <div style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.3 }} title={otherTooltip}>
-                      Includes {unmonitoredLabels.join(", ")} — no Zabbix data on this day
+                      Includes {unmonitoredLabels.join(", ")} — not yet tracked on this day
                     </div>
                   )}
                 </div>
