@@ -47,17 +47,42 @@ const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf-8")) as
 /**
  * Compute MAJOR.MINOR.{commit-count}. MAJOR and MINOR come from package.json
  * (so a deliberate release can still bump them); the patch is derived from
- * git so it auto-increments per commit. Falls back to package.json verbatim
- * when git isn't reachable (shallow CI checkout, no .git in container, etc.).
+ * the commit count so it auto-increments per commit.
+ *
+ * The count source falls back in this order:
+ *   1. AKPILOT_VERSION_OVERRIDE       (CI/release injection)
+ *   2. AKPILOT_PATCH_OVERRIDE         (just the patch, MAJOR.MINOR from pkg)
+ *   3. `git rev-list --count HEAD`    (host & CI with full git history)
+ *   4. src/generated/commit-count.txt (tracked file maintained by
+ *      .git/hooks/pre-commit — used by Railway, where .git is stripped
+ *      from the Docker build context regardless of .dockerignore)
+ *   5. package.json's literal version (last-resort fallback)
  */
 function computeVersion(): string {
   if (process.env.AKPILOT_VERSION_OVERRIDE) return process.env.AKPILOT_VERSION_OVERRIDE;
   const base = pkg.version ?? "0.0.0";
   const m = base.match(/^(\d+)\.(\d+)/);
   if (!m) return base;
-  const count = tryGit("rev-list --count HEAD");
-  if (!/^\d+$/.test(count)) return base;
-  return `${m[1]}.${m[2]}.${count}`;
+  const majMin = `${m[1]}.${m[2]}`;
+
+  if (process.env.AKPILOT_PATCH_OVERRIDE && /^\d+$/.test(process.env.AKPILOT_PATCH_OVERRIDE)) {
+    return `${majMin}.${process.env.AKPILOT_PATCH_OVERRIDE}`;
+  }
+
+  const gitCount = tryGit("rev-list --count HEAD");
+  if (/^\d+$/.test(gitCount) && gitCount !== "0") {
+    return `${majMin}.${gitCount}`;
+  }
+
+  // Fallback: tracked commit-count file (maintained by pre-commit hook).
+  try {
+    const countFile = readFileSync(join(repoRoot, "src/generated/commit-count.txt"), "utf-8").trim();
+    if (/^\d+$/.test(countFile)) return `${majMin}.${countFile}`;
+  } catch {
+    // file missing — ignore
+  }
+
+  return base;
 }
 const version = computeVersion();
 const commit =

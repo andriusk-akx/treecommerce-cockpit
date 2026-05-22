@@ -6,11 +6,7 @@
 
 FROM node:24-alpine
 WORKDIR /app
-# git is needed at build time so scripts/generate-version.ts can run
-# `git rev-list --count HEAD` to derive the auto-incrementing patch
-# version. It's not retained in the final image — .git is removed after
-# version:generate runs (see RUN block below).
-RUN apk add --no-cache libc6-compat openssl git
+RUN apk add --no-cache libc6-compat openssl
 
 # Install all deps (including dev — needed for prisma + next CLI at boot)
 COPY package.json package-lock.json ./
@@ -29,18 +25,13 @@ ENV AKPILOT_COMMIT_FULL_OVERRIDE=${RAILWAY_GIT_COMMIT_SHA:-unknown}
 ENV AKPILOT_BRANCH_OVERRIDE=${RAILWAY_GIT_BRANCH:-unknown}
 
 # Build Prisma client + version stamp + Next.js production bundle.
-# .git is included in the build context (see .dockerignore) so that
-# version:generate can derive the auto-incrementing patch from
-# `git rev-list --count HEAD`. It's deleted right after to keep history
-# (and any unused refs) out of the final image.
-RUN echo "=== git debug ===" && \
-    (ls -la .git 2>&1 | head -3 || echo "NO .git dir") && \
-    (git rev-list --count HEAD 2>&1 || echo "rev-list failed") && \
-    (git --version 2>&1 || echo "git missing") && \
-    echo "=== end debug ===" && \
-    npx prisma generate && \
+# Note: Railway strips .git from the Docker build context regardless of
+# .dockerignore, so generate-version.ts can't derive the commit count via
+# `git rev-list` here. The pre-commit hook (.git/hooks/pre-commit on the
+# author's machine) maintains src/generated/commit-count.txt as a tracked
+# fallback — generate-version.ts reads it when git is unreachable.
+RUN npx prisma generate && \
     npm run version:generate && \
-    rm -rf .git && \
     npm run build
 
 EXPOSE 8080

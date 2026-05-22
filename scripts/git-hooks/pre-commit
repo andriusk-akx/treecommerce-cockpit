@@ -1,0 +1,21 @@
+#!/bin/bash
+echo "🔍 Pre-commit..."
+
+# Maintain src/generated/commit-count.txt so Railway (which strips .git from
+# its Docker build context) still has a way to know the patch number for
+# the auto-bumping footer version. Write the count of EXISTING commits + 1
+# (the commit we're about to create), then stage the file.
+if git rev-parse --git-dir > /dev/null 2>&1; then
+  COUNT=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+  NEW_COUNT=$((COUNT + 1))
+  mkdir -p src/generated
+  CURRENT=$(cat src/generated/commit-count.txt 2>/dev/null || echo "")
+  if [ "$CURRENT" != "$NEW_COUNT" ]; then
+    echo "$NEW_COUNT" > src/generated/commit-count.txt
+    git add src/generated/commit-count.txt
+  fi
+fi
+
+[ -f "node_modules/.bin/eslint" ] && npx eslint --quiet . 2>/dev/null || true
+echo "✅ OK"
+exit 0

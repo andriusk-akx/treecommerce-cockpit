@@ -1,9 +1,10 @@
 node_modules
 .next
-# .git is intentionally INCLUDED in the build context so that
-# scripts/generate-version.ts can run `git rev-list --count HEAD` to derive
-# the auto-incrementing patch version. The Dockerfile deletes .git right
-# after `npm run version:generate` so it doesn't ship in the final image.
+# Note: Railway strips .git from the build context regardless of what's in
+# here, so we don't bother including it. The auto-bumping patch version is
+# sourced from src/generated/commit-count.txt (maintained by pre-commit
+# hook) when git isn't reachable inside the build container.
+.git
 .claude
 .env
 .env.local
