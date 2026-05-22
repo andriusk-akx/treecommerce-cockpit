@@ -646,8 +646,25 @@ export async function GET(req: NextRequest) {
     else if (dq === "warn") warnCount += 1;
     else if (dq === "fail") failCount += 1;
   }
+  // Day-level "fail" must reflect a sustained inconsistency, not a single
+  // noisy slot. Per-minute slots routinely show transient Σnamed > host CPU
+  // overshoots because `system.cpu.util` and the per-process counters land
+  // at slightly different timestamps within the same minute — that's
+  // sampling alignment noise, not a normalisation bug. Threshold for
+  // promoting to "fail": at least 5 failed slots AND > 1% of the day's
+  // slots (≈ 14 of 1440 at 1-min granularity). Below that, the day is
+  // demoted to "warn" so the operator still gets a soft signal in the
+  // drill-down banner without the red alarm + "fix this now" tone of the
+  // "fail" banner.
+  const totalSlots = okCount + warnCount + failCount;
+  const failIsSustained =
+    failCount >= 5 && failCount / Math.max(1, totalSlots) > 0.01;
   const dayDataQuality: SlotDataQuality =
-    failCount > 0 ? "fail" : warnCount > okCount ? "warn" : "ok";
+    failIsSustained
+      ? "fail"
+      : failCount > 0 || warnCount > okCount
+        ? "warn"
+        : "ok";
 
   return NextResponse.json({
     slots,

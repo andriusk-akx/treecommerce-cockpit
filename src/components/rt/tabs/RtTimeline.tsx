@@ -1735,7 +1735,20 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 </>
               ) : (
                 <>
-                  {drillDataQuality.warn} of {drillDataQuality.ok + drillDataQuality.warn + drillDataQuality.fail} slots have mild data-quality flags. The breakdown is broadly correct but specific slot values may be off by a few percentage points.
+                  {/* "warn" day with isolated `fail` slots is the common
+                      case after we tightened the day-level rollup threshold
+                      (route.ts): we don't want to scream "fail" for one
+                      transient overshoot, but the operator should still see
+                      that some slot(s) tripped, with the count visible. */}
+                  {drillDataQuality.fail > 0 ? (
+                    <>
+                      {drillDataQuality.fail} of {drillDataQuality.ok + drillDataQuality.warn + drillDataQuality.fail} slots briefly showed Σcategories &gt; host CPU (likely sampling alignment between system.cpu.util and per-process counters). The day's breakdown is broadly correct; isolated minutes may overshoot by a few percentage points.
+                    </>
+                  ) : (
+                    <>
+                      {drillDataQuality.warn} of {drillDataQuality.ok + drillDataQuality.warn + drillDataQuality.fail} slots have mild data-quality flags. The breakdown is broadly correct but specific slot values may be off by a few percentage points.
+                    </>
+                  )}
                 </>
               )}
             </div>
