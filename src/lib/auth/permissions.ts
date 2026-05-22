@@ -21,6 +21,7 @@ export const ALL_TABS = [
   "comparison",
   "reference",
   "capacity",
+  "rollout",
   "hypotheses",
   "datahealth",
 ] as const;
@@ -35,6 +36,7 @@ export const TAB_LABELS: Record<TabKey, string> = {
   comparison: "CPU Comparison",
   reference: "Reference Store",
   capacity: "Capacity Risk",
+  rollout: "Rollout Insights",
   hypotheses: "Hypotheses & Recommendations",
   datahealth: "Data Health",
 };

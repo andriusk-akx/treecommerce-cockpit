@@ -8,6 +8,7 @@ import { RtTimeline } from "./tabs/RtTimeline";
 import { RtCpuComparison } from "./tabs/RtCpuComparison";
 import { RtReference } from "./tabs/RtReference";
 import { RtCapacityRisk } from "./tabs/RtCapacityRisk";
+import { RtRolloutInsights } from "./tabs/RtRolloutInsights";
 import { RtHypotheses } from "./tabs/RtHypotheses";
 import { RtDataHealth } from "./tabs/RtDataHealth";
 // `RtFiltersBar` (chip bar with active-filter chips and "Clear all") is
@@ -182,6 +183,7 @@ export interface ZabbixData {
 // UserPilotAccess.allowedTabs. Keep in sync with src/lib/auth/permissions.ts.
 const tabs = [
   { id: "overview",    label: "Overview",                  permKey: "overview" },
+  { id: "rollout",     label: "Rollout Insights",          permKey: "rollout" },
   { id: "timeline",    label: "CPU Timeline",              permKey: "timeline" },
   { id: "inventory",   label: "Host Inventory",            permKey: "inventory" },
   { id: "health",      label: "Data Health",               permKey: "datahealth" },
@@ -409,6 +411,7 @@ export function RtPilotWorkspace({
             }}
           />
         )}
+        {activeTab === "rollout"    && allowedSet.has("rollout")    && <RtRolloutInsights pilot={pilot} zabbix={zabbix} />}
         {activeTab === "timeline"   && allowedSet.has("timeline")   && <RtTimeline pilot={pilot} zabbix={zabbix} />}
         {activeTab === "cpu"        && allowedSet.has("comparison") && <RtCpuComparison pilot={pilot} zabbix={zabbix} />}
         {activeTab === "reference"  && allowedSet.has("reference")  && <RtReference pilot={pilot} zabbix={zabbix} />}
