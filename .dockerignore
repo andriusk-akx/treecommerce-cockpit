@@ -1,6 +1,9 @@
 node_modules
 .next
-.git
+# .git is intentionally INCLUDED in the build context so that
+# scripts/generate-version.ts can run `git rev-list --count HEAD` to derive
+# the auto-incrementing patch version. The Dockerfile deletes .git right
+# after `npm run version:generate` so it doesn't ship in the final image.
 .claude
 .env
 .env.local

@@ -25,8 +25,13 @@ ENV AKPILOT_COMMIT_FULL_OVERRIDE=${RAILWAY_GIT_COMMIT_SHA:-unknown}
 ENV AKPILOT_BRANCH_OVERRIDE=${RAILWAY_GIT_BRANCH:-unknown}
 
 # Build Prisma client + version stamp + Next.js production bundle.
+# .git is included in the build context (see .dockerignore) so that
+# version:generate can derive the auto-incrementing patch from
+# `git rev-list --count HEAD`. It's deleted right after to keep history
+# (and any unused refs) out of the final image.
 RUN npx prisma generate && \
     npm run version:generate && \
+    rm -rf .git && \
     npm run build
 
 EXPOSE 8080
