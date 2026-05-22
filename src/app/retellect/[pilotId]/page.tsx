@@ -116,6 +116,7 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
         pilot={pilotData}
         zabbixDataPromise={zabbixDataPromise}
         initialTab={tab || "overview"}
+        initialPeriod={periodParam}
         allowedTabs={Array.from(allowedTabs)}
       />
     </Suspense>
@@ -127,11 +128,22 @@ async function RtPilotPageContent({
   pilot,
   zabbixDataPromise,
   initialTab,
+  initialPeriod,
   allowedTabs,
 }: {
   pilot: RtPilotData;
   zabbixDataPromise: Promise<ZabbixData>;
   initialTab: string;
+  /**
+   * Raw `?period=` URL value (e.g. "14d", "30d", "60") or undefined when the
+   * caller hasn't set one. Passed straight through to RtPilotWorkspace →
+   * RtFiltersProvider so server-side first render and client first render
+   * both seed the filter context from the URL instead of falling back to
+   * localStorage (unavailable on server) or defaults. Fixes the bug where
+   * switching 14d→30d (or hard-reloading ?period=30d) painted a 14-day
+   * heatmap axis until the client's URL-sync useEffect caught up.
+   */
+  initialPeriod: string | undefined;
   allowedTabs: string[];
 }) {
   const zabbix = await zabbixDataPromise;
@@ -140,6 +152,7 @@ async function RtPilotPageContent({
       pilot={pilot}
       zabbix={zabbix}
       initialTab={initialTab}
+      initialPeriod={initialPeriod}
       allowedTabs={allowedTabs}
     />
   );

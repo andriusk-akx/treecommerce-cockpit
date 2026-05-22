@@ -204,11 +204,21 @@ export function RtPilotWorkspace({
   pilot,
   zabbix,
   initialTab,
+  initialPeriod,
   allowedTabs,
 }: {
   pilot: RtPilotData;
   zabbix: ZabbixData;
   initialTab: string;
+  /**
+   * Raw `?period=` URL value (e.g. "14d", "30d", "60") forwarded to
+   * RtFiltersProvider. Threaded from the page server component so the SSR
+   * pass renders the heatmap axis at the correct width on first paint —
+   * without this, the provider falls back to localStorage (unavailable
+   * server-side) → defaults → 14-day axis even when URL says 30d. See
+   * RtFiltersProvider for the full rationale.
+   */
+  initialPeriod?: string;
   /** Permission keys the current user is allowed to see in this pilot. */
   allowedTabs: string[];
 }) {
@@ -249,7 +259,7 @@ export function RtPilotWorkspace({
   ).length;
 
   return (
-    <RtFiltersProvider pilotId={pilot.id}>
+    <RtFiltersProvider pilotId={pilot.id} initialPeriod={initialPeriod}>
     <div>
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">

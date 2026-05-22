@@ -95,23 +95,58 @@ export function useRtFilters(): ContextValue {
 interface ProviderProps {
   /** Pilot id — used as localStorage namespace. */
   pilotId: string;
+  /**
+   * Period value seeded from the page-level `?period=` URL search param.
+   *
+   * Why this exists: `period` has two sources of truth — the URL (used by the
+   * server component to fetch the right-sized CPU history payload) and the
+   * filters context (used by the client UI to compute the heatmap axis
+   * length). Before this prop, the provider's SSR pass returned
+   * `defaultFilters.period = "14d"` regardless of URL because `localStorage`
+   * is unavailable server-side. That caused a "14-day axis with 30-day data"
+   * flash on hard reload of `?period=30d`: the server-rendered HTML had the
+   * wrong axis width until the client's URL→context sync useEffect in
+   * RtTimeline fired and re-rendered. Users perceived this as "data stuck on
+   * 14d, then somehow recovers".
+   *
+   * Passing `initialPeriod` from the page lets the very first SSR pass — and
+   * client first render — both use the URL value, so the heatmap renders the
+   * correct axis from paint zero. localStorage still wins for return visits
+   * with no `?period=` in URL (deep-link from elsewhere).
+   *
+   * Pass the raw URL param value: preset id ("14d") or bare digits ("60").
+   * Empty/undefined means no URL override; localStorage (then defaults) wins.
+   */
+  initialPeriod?: string;
   children: ReactNode;
 }
 
-export function RtFiltersProvider({ pilotId, children }: ProviderProps) {
+export function RtFiltersProvider({ pilotId, initialPeriod, children }: ProviderProps) {
   const storageKey = `rtFilters:${pilotId}`;
 
   // Initialise from localStorage via lazy init. This file is "use client", so
-  // the initialiser only runs in the browser — no SSR mismatch concern.
+  // the initialiser only runs in the browser — no SSR mismatch concern…
+  // …except for `period`, where the server's SSR pass also runs this code
+  // and would otherwise return `defaultFilters.period`. We seed `period` from
+  // the URL-derived `initialPeriod` first so server and client agree on the
+  // axis width from the very first render (see ProviderProps doc above).
   const [filters, setFilters] = useState<DashboardFilters>(() => {
-    if (typeof window === "undefined") return defaultFilters;
+    const seed: DashboardFilters = initialPeriod
+      ? { ...defaultFilters, period: initialPeriod }
+      : defaultFilters;
+    if (typeof window === "undefined") return seed;
     try {
       const raw = window.localStorage.getItem(storageKey);
-      if (!raw) return defaultFilters;
+      if (!raw) return seed;
       const parsed = JSON.parse(raw) as Partial<DashboardFilters>;
       // Shallow-merge with defaults so missing keys fall back gracefully when
-      // the schema gains a field between sessions.
-      const merged = { ...defaultFilters, ...parsed };
+      // the schema gains a field between sessions. URL `period` (if present)
+      // overrides localStorage to match server-side data fetch.
+      const merged = {
+        ...defaultFilters,
+        ...parsed,
+        ...(initialPeriod ? { period: initialPeriod } : {}),
+      };
       // Migration 2026-04-28: drill-down granularity used to expose 1/5/15/60
       // presets. The 5- and 15-minute buckets were dropped, but legacy
       // localStorage payloads still carry those values — if we let them
