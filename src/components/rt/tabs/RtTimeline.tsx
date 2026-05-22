@@ -1763,7 +1763,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                       that some slot(s) tripped, with the count visible. */}
                   {drillDataQuality.fail > 0 ? (
                     <>
-                      {drillDataQuality.fail} of {drillDataQuality.ok + drillDataQuality.warn + drillDataQuality.fail} slots briefly showed Σcategories &gt; host CPU (likely sampling alignment between system.cpu.util and per-process counters). The day's breakdown is broadly correct; isolated minutes may overshoot by a few percentage points.
+                      {drillDataQuality.fail} of {drillDataQuality.ok + drillDataQuality.warn + drillDataQuality.fail} slots briefly showed Σcategories &gt; host CPU (likely sampling alignment between system.cpu.util and per-process counters). The day&apos;s breakdown is broadly correct; isolated minutes may overshoot by a few percentage points.
                     </>
                   ) : (
                     <>

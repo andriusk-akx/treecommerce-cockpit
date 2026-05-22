@@ -97,6 +97,12 @@ export default async function DashboardPage() {
     OTHER: "bg-gray-100 text-gray-600 border-gray-200",
   };
 
+  // Server Component: Date.now() is evaluated once per request on the
+  // server, not during a client render, so impurity is bounded. Captured
+  // once here and reused for problem-duration rows below.
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now();
+
   return (
     <div>
       <DataSourceStatus sources={sourceSummary} />
@@ -191,7 +197,7 @@ export default async function DashboardPage() {
                   const clockVal = parseInt(p.clock);
                   if (!Number.isFinite(clockVal) || clockVal <= 0) return null;
                   const started = new Date(clockVal * 1000);
-                  const duration = formatDuration(Date.now() - started.getTime());
+                  const duration = formatDuration(nowMs - started.getTime());
                   return (
                     <tr key={p.eventid} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium text-gray-900">{p.name}</td>
