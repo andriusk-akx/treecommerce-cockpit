@@ -6,7 +6,11 @@
 
 FROM node:24-alpine
 WORKDIR /app
-RUN apk add --no-cache libc6-compat openssl
+# git is needed at build time so scripts/generate-version.ts can run
+# `git rev-list --count HEAD` to derive the auto-incrementing patch
+# version. It's not retained in the final image — .git is removed after
+# version:generate runs (see RUN block below).
+RUN apk add --no-cache libc6-compat openssl git
 
 # Install all deps (including dev — needed for prisma + next CLI at boot)
 COPY package.json package-lock.json ./
