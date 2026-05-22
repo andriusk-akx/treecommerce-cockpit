@@ -33,7 +33,12 @@ ENV AKPILOT_BRANCH_OVERRIDE=${RAILWAY_GIT_BRANCH:-unknown}
 # version:generate can derive the auto-incrementing patch from
 # `git rev-list --count HEAD`. It's deleted right after to keep history
 # (and any unused refs) out of the final image.
-RUN npx prisma generate && \
+RUN echo "=== git debug ===" && \
+    (ls -la .git 2>&1 | head -3 || echo "NO .git dir") && \
+    (git rev-list --count HEAD 2>&1 || echo "rev-list failed") && \
+    (git --version 2>&1 || echo "git missing") && \
+    echo "=== end debug ===" && \
+    npx prisma generate && \
     npm run version:generate && \
     rm -rf .git && \
     npm run build
