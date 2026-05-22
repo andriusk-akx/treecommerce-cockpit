@@ -7,7 +7,7 @@ import { LogoX } from "./components/LogoX";
 import { Suspense } from "react";
 import { getCurrentUser } from "@/lib/auth/sessions";
 import { filterAccessiblePilots } from "@/lib/auth/permissions";
-import { VERSION, COMMIT, DIRTY } from "@/generated/version";
+import { VERSION, COMMIT, DIRTY, BUILD_TIME } from "@/generated/version";
 import "./globals.css";
 
 // Layout depends on the current user's permissions — must be per-request.
@@ -103,9 +103,13 @@ export default async function RootLayout({
           <span className="mx-2 text-gray-300">·</span>
           {/* Version string is concatenated server-side so it ends up as a
               single text node in the DOM (no React comment markers between
-              "v" and the number) — easier to grep, easier to read. */}
-          <span title={`build ${COMMIT}${DIRTY ? "+dirty" : ""}`}>
-            {`v${VERSION} (${COMMIT}${DIRTY ? "+" : ""})`}
+              "v" and the number) — easier to grep, easier to read.
+              Build time is rendered in Europe/Vilnius (operator timezone)
+              with minute precision — the seconds didn't add information and
+              made the footer look noisy. sv-SE locale gives ISO-ish output
+              (`YYYY-MM-DD HH:MM`) without locale-specific separators. */}
+          <span title={`build ${COMMIT}${DIRTY ? "+dirty" : ""} · deployed ${BUILD_TIME}`}>
+            {`v${VERSION} (${COMMIT}${DIRTY ? "+" : ""}) · ${new Date(BUILD_TIME).toLocaleString("sv-SE", { timeZone: "Europe/Vilnius", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`}
           </span>
         </footer>
       </body>

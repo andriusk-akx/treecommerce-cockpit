@@ -12,10 +12,15 @@
  * with --depth=0). All env-var overrides win — useful for CI to inject the
  * authoritative SHA when builds happen in detached-head state.
  *
- *   AKPILOT_VERSION_OVERRIDE     -> overrides package.json version
+ *   AKPILOT_VERSION_OVERRIDE     -> overrides the entire computed version
  *   AKPILOT_COMMIT_OVERRIDE      -> overrides git short SHA
  *   AKPILOT_COMMIT_FULL_OVERRIDE -> overrides full SHA
  *   AKPILOT_BRANCH_OVERRIDE      -> overrides branch
+ *
+ * Version is auto-bumped: package.json's MAJOR.MINOR is kept, but the patch
+ * is replaced with the commit count on the current HEAD's history. So every
+ * new commit produces a monotonically-increasing version like 0.1.79 → 0.1.80
+ * without manual bumps.
  *
  * Usage: `npx tsx scripts/generate-version.ts` (run by `prebuild` / `predev`).
  */
@@ -39,7 +44,22 @@ function tryGit(args: string): string {
 
 const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf-8")) as { version?: string };
 
-const version = process.env.AKPILOT_VERSION_OVERRIDE ?? pkg.version ?? "0.0.0";
+/**
+ * Compute MAJOR.MINOR.{commit-count}. MAJOR and MINOR come from package.json
+ * (so a deliberate release can still bump them); the patch is derived from
+ * git so it auto-increments per commit. Falls back to package.json verbatim
+ * when git isn't reachable (shallow CI checkout, no .git in container, etc.).
+ */
+function computeVersion(): string {
+  if (process.env.AKPILOT_VERSION_OVERRIDE) return process.env.AKPILOT_VERSION_OVERRIDE;
+  const base = pkg.version ?? "0.0.0";
+  const m = base.match(/^(\d+)\.(\d+)/);
+  if (!m) return base;
+  const count = tryGit("rev-list --count HEAD");
+  if (!/^\d+$/.test(count)) return base;
+  return `${m[1]}.${m[2]}.${count}`;
+}
+const version = computeVersion();
 const commit =
   process.env.AKPILOT_COMMIT_OVERRIDE ?? tryGit("rev-parse --short HEAD") ?? "unknown";
 const commitFull =
