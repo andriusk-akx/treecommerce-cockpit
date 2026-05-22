@@ -143,9 +143,11 @@ export function ProcessCategoryReference() {
       </table>
       <div className="px-4 py-2 bg-amber-50/60 border-t border-amber-200 text-[10px] text-amber-900">
         <strong>Known coverage gaps</strong> (pending StrongPoint admin):
-        no Retellect helper / service item exists in the template — if
-        Retellect deploys auxiliary processes, they are invisible;
-        BESClient / Elastic / OS Core items are deployed on
+        the Retellect helper runs under the Python service, so it&apos;s
+        already counted inside the Retellect bucket via{" "}
+        <code>python*.cpu</code> — only non-python auxiliary processes (if
+        any) would be invisible; BESClient / Elastic / OS Core items are
+        deployed on
         <code className="ml-1">testlab_SPUB-P-SCO150</code> only as of
         2026-05-12, fleet rollout still pending so production Rimi SCOs
         keep those cycles inside &ldquo;Other&rdquo;; no LLD{" "}

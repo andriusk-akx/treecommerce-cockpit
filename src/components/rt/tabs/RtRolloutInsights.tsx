@@ -255,9 +255,10 @@ export function RtRolloutInsights({
             <DriverDecomposition drivers={drivers} />
             <p className="text-[11px] text-gray-400 mt-3 leading-relaxed">
               Decomposition of CPU during high-load windows. Retellect bucket
-              captures python-named processes only — its true footprint may be
-              slightly higher. Bars labelled <em>unattributed</em> are residual
-              host CPU not covered by per-process telemetry.
+              captures all python-named processes — the Retellect helper runs
+              under the Python service, so it is already counted here. Bars
+              labelled <em>unattributed</em> are residual host CPU not covered
+              by per-process telemetry.
             </p>
           </div>
         </section>
@@ -302,8 +303,10 @@ export function RtRolloutInsights({
             <li className="flex items-start gap-2">
               <span className="text-gray-300 mt-0.5">·</span>
               <span>
-                Retellect bucket captures python-named processes only — helper
-                processes may land in <em>Other</em>.
+                Retellect bucket captures all python-named processes
+                (including the helper, which runs under the Python service)
+                — only non-python auxiliary processes, if any exist, would
+                fall into <em>Other</em>.
               </span>
             </li>
             <li className="flex items-start gap-2">
