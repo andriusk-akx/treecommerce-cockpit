@@ -666,9 +666,13 @@ export class ZabbixClient {
    * currently idle → showed up as OFF, which contradicted the period-level
    * comparison the matrix exists to display.
    *
-   * Threshold rationale: 0.5% is two orders of magnitude above the
-   * floor-zero noise and below typical Retellect workload values, matching
-   * the convention used by the per-host process-trend card.
+   * Threshold rationale: 0.1% catches lightly-loaded Retellect periods
+   * (e.g. occasional promotion-engine triggers on a quiet SCO) while still
+   * filtering out floor-zero noise. Earlier tuning at 0.5% missed real
+   * activity on hosts like Pavilnonys SCO2 where Retellect ran briefly
+   * within the window but never crossed the higher threshold in a single
+   * hourly bucket. Aligns with the 7-day "Retellect Installed" 1%-max
+   * confidence band visible on the Overview tab.
    *
    * Cost: same as the deployed helper — one item registry call + one
    * trend.get filtered by `value_max > 0.5`. Cached 5 min.
@@ -679,7 +683,10 @@ export class ZabbixClient {
   ): Promise<Set<string>> {
     if (hostIds.length === 0) return new Set();
     const safeDays = Math.max(1, Math.min(daysBack, 90));
-    const cacheKey = `zabbix:retellectActiveInPeriodHostIds:${safeDays}d:${hostIds.slice().sort().join(",")}`;
+    // Cache key prefix bumped to v2 alongside the 0.5 -> 0.1 % threshold
+    // change so previously-cached "0 ON" results from the stricter threshold
+    // are invalidated immediately rather than after the next 5-min TTL.
+    const cacheKey = `zabbix:retellectActiveInPeriodHostIds:v2:${safeDays}d:${hostIds.slice().sort().join(",")}`;
     return (await cached(
       cacheKey,
       async () => {
@@ -721,7 +728,7 @@ export class ZabbixClient {
         const out = new Set<string>();
         for (const t of trends) {
           const vmax = parseFloat(t.value_max);
-          if (!Number.isFinite(vmax) || vmax <= 0.5) continue;
+          if (!Number.isFinite(vmax) || vmax <= 0.1) continue;
           const hostId = itemHostMap.get(String(t.itemid));
           if (hostId) out.add(hostId);
         }
