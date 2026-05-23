@@ -1238,20 +1238,30 @@ function computeRolloutInsightsFromAggregate(
     if (!matchedHost) continue;
     const entry = perHostMap.get(matchedHost.hostId);
     if (!entry) continue; // host had no usable items at all
-    if (entry.baselineSpssCpu === null) continue; // baseline not computable
-    g.hostsWithBaseline++;
+    // Baseline-aware credit: only hosts with a real baseline contribute
+    // to the active-only aggregates (peak Total CPU, Retellect CPU avg,
+    // hostsOn / hostsOff sets). Hosts WITHOUT a baseline still emit
+    // valid totalCpu samples — those need to flow into the All-tracked
+    // counter so the "Min > X%" column doesn't silently disappear when
+    // a host has sparse night data. Merge unconditionally; the per-host
+    // entry already has empty active aggregates when baseline is null.
+    const hasBaseline = entry.baselineSpssCpu !== null;
+    if (hasBaseline) g.hostsWithBaseline++;
     const onMin = entry.on.realActiveMinutes + entry.on.syntheticActiveMinutes;
     const offMin = entry.off.realActiveMinutes + entry.off.syntheticActiveMinutes;
-    if (onMin > 0) {
+    if (hasBaseline && onMin > 0) {
       g.hostsOn.add(matchedHost.hostId);
       if (entry.on.peakTotalCpu !== null) g.perHostPeakOn.push(entry.on.peakTotalCpu);
-      g.on = mergeOnOff(g.on, entry.on);
     }
-    if (offMin > 0) {
+    if (hasBaseline && offMin > 0) {
       g.hostsOff.add(matchedHost.hostId);
       if (entry.off.peakTotalCpu !== null) g.perHostPeakOff.push(entry.off.peakTotalCpu);
-      g.off = mergeOnOff(g.off, entry.off);
     }
+    // Always merge — even baseline-null hosts contribute realTrackedMinutes
+    // and minutesAboveThreshold counters (active accumulators are 0 in
+    // those entries so they don't pollute the active-only metrics).
+    g.on = mergeOnOff(g.on, entry.on);
+    g.off = mergeOnOff(g.off, entry.off);
   }
 
   // Pure: mean of a non-empty number array, null when empty. Same shape
