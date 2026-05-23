@@ -175,6 +175,16 @@ export interface ZabbixData {
    * indistinguishable from a host that was never deployed.
    */
   retellectDeployedHostIds?: string[];
+  /**
+   * Period-aware activity signal: hostIds where python.cpu trend records
+   * show value_max > 0.5% at any point during the selected periodDays
+   * window (defaults to 14 d when no `?period=` param is set). Drives the
+   * Rollout Insights ON/OFF split so intermittent hosts (canonical case:
+   * Pavilnonys SCO2) are correctly classified as ON even when currently
+   * idle. Distinct from `retellectDeployedHostIds`, which includes
+   * zero-only template-scaffold hosts.
+   */
+  retellectActiveInPeriodHostIds?: string[];
 }
 
 // ─── Constants ──────────────────────────────────────────────────────

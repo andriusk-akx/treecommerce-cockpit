@@ -620,35 +620,50 @@ function computeRolloutInsights(
     cpuSnapshotByHost.set(hostId, computeCpuTotal(p.user, p.system, p.total));
   }
 
-  // Build the live "Retellect ON" host set the same way RtOverview does:
-  // sum python*.cpu per host, mark a host ON when the latest sample is fresh
-  // (24-hour window via isRetellectActiveToday) AND total CPU > 0.01%.
+  // Build the "Retellect ON in period" host set. Two layers:
   //
-  // Why not use Device.retellectEnabled from the DB: that flag is essentially
-  // never populated in Rimi prod (every device reads false), so the previous
-  // implementation classified every device as OFF and the Decision Matrix's
-  // Peak ON column was always empty. The live signal — "did this host
-  // emit meaningful python.cpu telemetry in the last 24 h" — is what every
-  // other tab on this page already uses (RtOverview tile, RtTimeline RT-ACT
-  // dot, RtInventory filter).
-  const refMs = Date.now();
-  const retellectCpuByHostId = new Map<string, number>();
-  const retellectFreshestMsByHostId = new Map<string, number>();
-  for (const proc of zabbix.procCpu || []) {
-    if (proc.category !== "retellect") continue;
-    const lastMs = proc.lastClock ? new Date(proc.lastClock).getTime() : 0;
-    if (lastMs > 0) {
-      const prev = retellectFreshestMsByHostId.get(proc.hostId) || 0;
-      if (lastMs > prev) retellectFreshestMsByHostId.set(proc.hostId, lastMs);
-      const cur = retellectCpuByHostId.get(proc.hostId) || 0;
-      retellectCpuByHostId.set(proc.hostId, cur + Math.max(0, proc.cpuValue));
+  //   1. Period-aware: zabbix.retellectActiveInPeriodHostIds is the
+  //      server-fetched set of hosts whose python.cpu trend records had
+  //      value_max > 0.5% at any point in the selected periodDays window
+  //      (defaults to 14 d). Captures intermittent hosts that ran
+  //      Retellect during the window but are currently idle —
+  //      Pavilnonys SCO2 is the canonical case.
+  //
+  //   2. Live fallback (24-h python.cpu snapshot, isRetellectActiveToday):
+  //      only used when the period-aware payload is missing or empty,
+  //      which can happen on first paint before the registry fetch
+  //      resolves, or in dev when Zabbix trend.get is unreachable. We
+  //      prefer to under-classify ON in that edge case rather than over-
+  //      classify based on a stale local heuristic.
+  //
+  // Why not Device.retellectEnabled (DB flag): essentially never populated
+  // in Rimi prod. Drove the original bug where every row showed Peak ON = —.
+  const retellectActiveInPeriodHostIds = new Set<string>(
+    zabbix.retellectActiveInPeriodHostIds ?? [],
+  );
+  let retellectLiveHostIds: Set<string>;
+  if (retellectActiveInPeriodHostIds.size > 0) {
+    retellectLiveHostIds = retellectActiveInPeriodHostIds;
+  } else {
+    const refMs = Date.now();
+    const retellectCpuByHostId = new Map<string, number>();
+    const retellectFreshestMsByHostId = new Map<string, number>();
+    for (const proc of zabbix.procCpu || []) {
+      if (proc.category !== "retellect") continue;
+      const lastMs = proc.lastClock ? new Date(proc.lastClock).getTime() : 0;
+      if (lastMs > 0) {
+        const prev = retellectFreshestMsByHostId.get(proc.hostId) || 0;
+        if (lastMs > prev) retellectFreshestMsByHostId.set(proc.hostId, lastMs);
+        const cur = retellectCpuByHostId.get(proc.hostId) || 0;
+        retellectCpuByHostId.set(proc.hostId, cur + Math.max(0, proc.cpuValue));
+      }
     }
-  }
-  const retellectLiveHostIds = new Set<string>();
-  for (const [hid, totalCpu] of retellectCpuByHostId) {
-    const freshestMs = retellectFreshestMsByHostId.get(hid) || 0;
-    if (isRetellectActiveToday({ freshestMs, refMs, totalCpu })) {
-      retellectLiveHostIds.add(hid);
+    retellectLiveHostIds = new Set<string>();
+    for (const [hid, totalCpu] of retellectCpuByHostId) {
+      const freshestMs = retellectFreshestMsByHostId.get(hid) || 0;
+      if (isRetellectActiveToday({ freshestMs, refMs, totalCpu })) {
+        retellectLiveHostIds.add(hid);
+      }
     }
   }
 

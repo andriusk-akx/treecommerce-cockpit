@@ -314,6 +314,7 @@ async function loadZabbixDataPayload(
     zabbixHistoryResult,
     zabbixAgentHealthResult,
     zabbixDeployedHostIds,
+    zabbixActiveInPeriodHostIds,
   ] = await Promise.all([
     fetchSource(`zabbix-rt-resources-${pilotId}`, {
       source: "zabbix",
@@ -489,6 +490,34 @@ async function loadZabbixDataPayload(
         return Array.from(deployed);
       },
     }),
+    // Activity-in-period signal: hosts where python.cpu trend records show
+    // value_max > 0.5% at any point in the last `periodDays` days. This is
+    // the leadership-grade "did Retellect actually run here during the
+    // window" signal — Rollout Insights uses it for the ON/OFF split so
+    // intermittent hosts (canonical case: Pavilnonys SCO2, ran for a week
+    // then went idle) end up on the correct side of the comparison. Cache
+    // key includes periodDays so the 14d/30d/90d selector returns honest
+    // numbers per window — see ZabbixClient.getRetellectActiveInPeriodHostIds.
+    fetchSource(`zabbix-rt-active-in-period-hostids-${pilotId}-${periodDays}d`, {
+      source: "zabbix",
+      label: "Zabbix Retellect Activity Map (period)",
+      env: "prod",
+      freshFor: FRESH_MS.registry,
+      fetcher: async (): Promise<string[]> => {
+        const client = getZabbixClient();
+        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
+        const matchedHostIds = new Set<string>();
+        for (const h of allHosts) {
+          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
+        }
+        if (matchedHostIds.size === 0) return [];
+        const active = await client.getRetellectActiveInPeriodHostIds(
+          Array.from(matchedHostIds),
+          periodDays,
+        );
+        return Array.from(active);
+      },
+    }),
   ]);
 
   const zabbixHosts = zabbixResult.data || [];
@@ -498,6 +527,7 @@ async function loadZabbixDataPayload(
   const cpuHistory = zabbixHistoryResult.data || [];
   const agentHealth = zabbixAgentHealthResult.data || [];
   const deployedHostIds = zabbixDeployedHostIds.data || [];
+  const activeInPeriodHostIds = zabbixActiveInPeriodHostIds.data || [];
 
   // Build Zabbix live data payload
   return {
@@ -581,5 +611,6 @@ async function loadZabbixDataPayload(
     // misconfigured) still show as deployed instead of looking identical
     // to never-deployed hosts.
     retellectDeployedHostIds: deployedHostIds as string[],
+    retellectActiveInPeriodHostIds: activeInPeriodHostIds as string[],
   };
 }

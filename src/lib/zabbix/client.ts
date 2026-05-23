@@ -644,6 +644,94 @@ export class ZabbixClient {
     ));
   }
 
+  /**
+   * Find which hosts ran Retellect WITH MEANINGFUL ACTIVITY at any point in
+   * the last `daysBack` days. Sister to `getRetellectDeployedHostIds`, but
+   * filters trend records by `value_max > 0.5%` so the result only contains
+   * hosts where python.cpu actually consumed CPU at some hourly bucket — not
+   * just hosts where the items existed and emitted zeros.
+   *
+   * Why both helpers exist:
+   *   • Deployed (any record, even 0) — best for "Retellect template is on
+   *     this host" questions: Timeline RT-DEPLOY dot, inventory readouts.
+   *   • Active-in-period (max > 0.5%) — best for ON/OFF comparisons over a
+   *     window: Rollout Insights Decision Matrix needs to classify a host
+   *     as ON if it ran Retellect at any point during the chosen 14/30/90-d
+   *     period, even if the worker has since gone idle.
+   *
+   * Without this distinction, the matrix's ON column was empty in Rimi prod
+   * because the live-snapshot rule (24-h python.cpu freshness) only caught
+   * hosts running Retellect right now. The user's canonical case was
+   * Pavilnonys SCO2: ran Retellect intermittently across a 30-day window,
+   * currently idle → showed up as OFF, which contradicted the period-level
+   * comparison the matrix exists to display.
+   *
+   * Threshold rationale: 0.5% is two orders of magnitude above the
+   * floor-zero noise and below typical Retellect workload values, matching
+   * the convention used by the per-host process-trend card.
+   *
+   * Cost: same as the deployed helper — one item registry call + one
+   * trend.get filtered by `value_max > 0.5`. Cached 5 min.
+   */
+  async getRetellectActiveInPeriodHostIds(
+    hostIds: string[],
+    daysBack: number,
+  ): Promise<Set<string>> {
+    if (hostIds.length === 0) return new Set();
+    const safeDays = Math.max(1, Math.min(daysBack, 90));
+    const cacheKey = `zabbix:retellectActiveInPeriodHostIds:${safeDays}d:${hostIds.slice().sort().join(",")}`;
+    return (await cached(
+      cacheKey,
+      async () => {
+        // Step 1: same item registry as the deployed helper — every
+        // python.cpu / perf_counter[Process(python*)] item on the matched
+        // hosts. Mirroring the implementation keeps the two surfaces in
+        // lock-step on the "what counts as a Retellect item" question.
+        const [byCpuKey, byPerfKey] = await Promise.all([
+          this.request("item.get", {
+            output: ["itemid", "hostid"],
+            hostids: hostIds,
+            search: { key_: "python" },
+            filter: { status: 0 },
+          }) as Promise<Array<{ itemid: string; hostid: string }>>,
+          this.request("item.get", {
+            output: ["itemid", "hostid"],
+            hostids: hostIds,
+            search: { key_: "Process(python" },
+            filter: { status: 0 },
+          }) as Promise<Array<{ itemid: string; hostid: string }>>,
+        ]);
+        const itemHostMap = new Map<string, string>();
+        for (const it of byCpuKey) itemHostMap.set(String(it.itemid), String(it.hostid));
+        for (const it of byPerfKey) itemHostMap.set(String(it.itemid), String(it.hostid));
+        if (itemHostMap.size === 0) return new Set<string>();
+
+        // Step 2: trend.get over the period. Pull value_max so we can
+        // filter zero-only hosts out client-side (trend.get's query
+        // language doesn't support server-side numeric filters).
+        const itemIds = Array.from(itemHostMap.keys());
+        const timeFrom = Math.floor(Date.now() / 1000) - safeDays * 24 * 3600;
+        const trends = (await this.request("trend.get", {
+          output: ["itemid", "value_max"],
+          itemids: itemIds,
+          time_from: String(timeFrom),
+          limit: 100000,
+        })) as Array<{ itemid: string; value_max: string }>;
+
+        const out = new Set<string>();
+        for (const t of trends) {
+          const vmax = parseFloat(t.value_max);
+          if (!Number.isFinite(vmax) || vmax <= 0.5) continue;
+          const hostId = itemHostMap.get(String(t.itemid));
+          if (hostId) out.add(hostId);
+        }
+        return out;
+      },
+      // 5-min TTL — same cadence as deployed helper.
+      5 * 60_000,
+    ));
+  }
+
   /** Get resource metrics (CPU, RAM, Disk, Network) for all monitored hosts */
   async getResourceMetrics(): Promise<any[]> {
     // 60s TTL — same reasoning as getProcessCpuItems: the response carries
