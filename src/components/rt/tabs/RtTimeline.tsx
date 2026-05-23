@@ -446,7 +446,16 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // bucket key emitted by the trend rollup. The same expression also lives
   // inside `allHostRows` for the column totals; keeping a component-scope
   // copy lets the cell renderer below read `trend.minutesAbove[thKey]`.
-  const thKey = (threshold >= 90 ? 90 : threshold >= 80 ? 80 : threshold >= 70 ? 70 : threshold >= 60 ? 60 : 50) as 50 | 60 | 70 | 80 | 90;
+  const thKey = (
+    threshold >= 90 ? 90 :
+    threshold >= 80 ? 80 :
+    threshold >= 70 ? 70 :
+    threshold >= 60 ? 60 :
+    threshold >= 50 ? 50 :
+    threshold >= 40 ? 40 :
+    threshold >= 30 ? 30 :
+    20
+  ) as 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90;
 
   const allHostRows = useMemo(() => {
     return pilot.devices
@@ -921,7 +930,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       <span style={{ fontSize: 10, textTransform: "uppercase", color: "#212529", fontWeight: 700, letterSpacing: "0.04em" }}>Threshold</span>
       <select value={threshold} onChange={(e) => setThreshold(Number(e.target.value))}
         style={{ fontSize: 13, fontWeight: 600, padding: "3px 6px", border: "1px solid #cbd5e1", borderRadius: 4, width: 64, background: "#f8fafc" }}>
-        {[50, 60, 70, 80, 90].map((v) => <option key={v} value={v}>{v}%</option>)}
+        {[20, 30, 40, 50, 60, 70, 80, 90].map((v) => <option key={v} value={v}>{v}%</option>)}
       </select>
       {/* Count from — synced with the Rollout Insights matrix. Phase 1
           ships UI parity (the same control is in both filter bars and

@@ -338,7 +338,7 @@ export class ZabbixClient {
     itemIds: string[],
     itemHostMap: Map<string, string>,
     daysBack: number = 14
-  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[]> {
+  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[]> {
     if (itemIds.length === 0) return [];
     // Cache the daily aggregate for 2 minutes. This data covers 14 days, the
     // newest day changes minute-by-minute, but the rest is frozen. A 2-minute
@@ -354,7 +354,7 @@ export class ZabbixClient {
     itemIds: string[],
     itemHostMap: Map<string, string>,
     daysBack: number = 14
-  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[]> {
+  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[]> {
     // Bound at 1..365 days. The internal merge handles >14 d windows via
     // trend.get hourly aggregates: history.get covers the recent ~14 d with
     // sample-level accuracy, trend.get fills in the rest of the window.
@@ -369,7 +369,7 @@ export class ZabbixClient {
     // not to the sample-level counters — they don't expose individual samples.
     type Bucket = {
       max: number; sum: number; min: number; count: number;
-      samples: { 50: number; 60: number; 70: number; 80: number; 90: number };
+      samples: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
       totalSamples: number;
     };
     const dailyMap = new Map<string, Bucket>();
@@ -377,7 +377,7 @@ export class ZabbixClient {
       new Date(clockSec * 1000).toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" });
     const newBucket = (value: number): Bucket => ({
       max: value, sum: value, min: value, count: 1,
-      samples: { 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
+      samples: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
       totalSamples: 0,
     });
     const merge = (hostId: string, date: string, value: number, isRawSample: boolean) => {
@@ -393,13 +393,24 @@ export class ZabbixClient {
       // Per-threshold counters apply only to true 1-min samples. Trend
       // aggregates would distort the count (each represents an hour, not a
       // minute) so we exclude them.
+      //
+      // Strict `>` (NOT `>=`) — must match aggregateHost's convention in
+      // src/lib/rollout-insights/aggregate.ts so the Timeline tracked-mode
+      // cell and Rollout matrix tracked-mode counter report identical
+      // numbers at the same threshold. A sample sitting exactly at 70.0
+      // falls into the next-lower band (60). Zabbix samples are rarely
+      // exact-integer but it does happen; the inclusive variant used to
+      // cause off-by-N drift between the two views.
       if (isRawSample) {
         b.totalSamples += 1;
-        if (value >= 50) b.samples[50]++;
-        if (value >= 60) b.samples[60]++;
-        if (value >= 70) b.samples[70]++;
-        if (value >= 80) b.samples[80]++;
-        if (value >= 90) b.samples[90]++;
+        if (value > 20) b.samples[20]++;
+        if (value > 30) b.samples[30]++;
+        if (value > 40) b.samples[40]++;
+        if (value > 50) b.samples[50]++;
+        if (value > 60) b.samples[60]++;
+        if (value > 70) b.samples[70]++;
+        if (value > 80) b.samples[80]++;
+        if (value > 90) b.samples[90]++;
       }
     };
 
@@ -486,7 +497,7 @@ export class ZabbixClient {
       merge(hostId, date, parseFloat(r.value) || 0, true);
     }
 
-    const result: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[] = [];
+    const result: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[] = [];
     for (const [key, data] of dailyMap) {
       const [hostId, date] = key.split("|");
       result.push({

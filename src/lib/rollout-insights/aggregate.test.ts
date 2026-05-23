@@ -272,6 +272,27 @@ describe("aggregateHost", () => {
     expect(entry.perDay[1]?.activeMinutesAbove[80]).toBe(0);
   });
 
+  it("perDay activeMinutesAbove sums equal the whole-window activeMinutesAboveThreshold (reconciliation)", () => {
+    // Build a realistic mixed set: 30 night baseline samples, 4 active
+    // ON-classified daytime minutes on day 1 at various Total CPU levels,
+    // 2 active OFF-classified minutes on day 2 (no python), 60-min trend
+    // bucket also active+ON. The whole-window counter must equal the sum
+    // across perDay entries — this is the invariant that backs the
+    // "Timeline cells sum = Rollout group counter" claim end-to-end.
+    const buckets: HostBucket[] = [];
+    for (let i = 0; i < 30; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 3, i), 1, 0, 5));
+    for (let i = 0; i < 4; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 14, i), 8, 2, 75));
+    for (let i = 0; i < 2; i++) buckets.push(bucket(vilniusWinterTs("2026-02-11", 14, i), 8, 0, 65));
+    buckets.push(bucket(vilniusWinterTs("2026-02-12", 14, 0), 8, 1.5, 85, "trend"));
+    const entry = aggregateHost("h1", buckets, 2);
+    for (const t of [20, 30, 40, 50, 60, 70, 80, 90] as const) {
+      const wholeWindow =
+        entry.on.activeMinutesAboveThreshold[t] + entry.off.activeMinutesAboveThreshold[t];
+      const perDaySum = entry.perDay.reduce((s, d) => s + d.activeMinutesAbove[t], 0);
+      expect(perDaySum).toBe(wholeWindow);
+    }
+  });
+
   it("populates threshold counters even when baseline is null (sparse night data)", () => {
     // Only 5 night samples — under default min 30 → baseline = null
     const buckets: HostBucket[] = [];
