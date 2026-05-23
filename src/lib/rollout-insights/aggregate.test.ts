@@ -252,6 +252,26 @@ describe("aggregateHost", () => {
     expect(entry.on.syntheticTrackedMinutes).toBe(60);
   });
 
+  it("emits a perDay array with per-Vilnius-date active minute counters", () => {
+    const buckets: HostBucket[] = [];
+    // Baseline: 30 night samples at 1 %
+    for (let i = 0; i < 30; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 3, i), 1, 0, 5));
+    // Day 1 (2026-02-10): 4 active minutes at 50% Total CPU
+    for (let i = 0; i < 4; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 14, i), 8, 0, 50));
+    // Day 2 (2026-02-11): 2 active minutes at 75% Total CPU
+    for (let i = 0; i < 2; i++) buckets.push(bucket(vilniusWinterTs("2026-02-11", 14, i), 8, 0, 75));
+    const entry = aggregateHost("h1", buckets, 2);
+    expect(entry.perDay.length).toBe(2);
+    expect(entry.perDay[0]?.date).toBe("2026-02-10");
+    expect(entry.perDay[0]?.activeRealMinutes).toBe(4);
+    expect(entry.perDay[0]?.activeMinutesAbove[40]).toBe(4); // 50 > 40
+    expect(entry.perDay[0]?.activeMinutesAbove[50]).toBe(0); // strict >
+    expect(entry.perDay[1]?.date).toBe("2026-02-11");
+    expect(entry.perDay[1]?.activeRealMinutes).toBe(2);
+    expect(entry.perDay[1]?.activeMinutesAbove[70]).toBe(2);
+    expect(entry.perDay[1]?.activeMinutesAbove[80]).toBe(0);
+  });
+
   it("populates threshold counters even when baseline is null (sparse night data)", () => {
     // Only 5 night samples — under default min 30 → baseline = null
     const buckets: HostBucket[] = [];

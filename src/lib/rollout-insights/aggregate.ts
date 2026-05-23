@@ -28,6 +28,7 @@ import {
   ACTIVE_ABOVE_BUCKETS,
   emptyOnOffAggregate,
   type ActiveAboveBucket,
+  type PerDayActiveCounters,
   type RolloutOnOffAggregate,
   type RolloutPerHostEntry,
   type RolloutSampleSource,
@@ -84,6 +85,25 @@ export function vilniusHour(tsMs: number): number {
   const h = parseInt(hourPart.value, 10);
   if (h === 24) return 0;
   return Number.isFinite(h) ? h : 0;
+}
+
+/**
+ * Europe/Vilnius local date for a Unix-ms timestamp as a "YYYY-MM-DD"
+ * string. Used to slice the active-bucket loop into per-day counters
+ * that CPU Timeline can render in Active-only mode. Same tz handling
+ * as `vilniusHour` — Intl.DateTimeFormat covers EET/EEST DST switches
+ * which a manual offset would get wrong twice a year.
+ */
+const VILNIUS_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Vilnius",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+export function vilniusDate(tsMs: number): string {
+  // en-CA emits "YYYY-MM-DD" directly — perfect for sortable ISO date keys.
+  return VILNIUS_DATE_FORMATTER.format(new Date(tsMs));
 }
 
 /**
@@ -173,6 +193,23 @@ export function aggregateHost(
   const on = emptyOnOffAggregate();
   const off = emptyOnOffAggregate();
   let totalMinutes = 0;
+  // Per-day active counter accumulator — keyed by Vilnius YYYY-MM-DD.
+  // Populated only in the active branch below (baseline-null hosts
+  // contribute nothing here since they have no active classification).
+  const perDayMap = new Map<string, PerDayActiveCounters>();
+  const ensureDay = (date: string): PerDayActiveCounters => {
+    let d = perDayMap.get(date);
+    if (!d) {
+      d = {
+        date,
+        activeRealMinutes: 0,
+        activeSyntheticMinutes: 0,
+        activeMinutesAbove: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
+      };
+      perDayMap.set(date, d);
+    }
+    return d;
+  };
   // Note: when baseline is null we still process the loop — minutes-
   // above-threshold counters don't depend on the spss baseline and need
   // to stay populated for hosts whose night data was sparse but whose
@@ -210,19 +247,31 @@ export function aggregateHost(
     if (b.source === "history") tgt.realActiveMinutes += b.weightMinutes;
     else tgt.syntheticActiveMinutes += b.weightMinutes;
     tgt.sumSpssCpu += b.spssCpu * b.weightMinutes;
+    // Per-day active aggregate for CPU Timeline Active-only mode. Uses
+    // Vilnius local date so the cell labels match the heatmap's date axis.
+    const day = ensureDay(vilniusDate(b.tsMs));
+    if (b.source === "history") day.activeRealMinutes += b.weightMinutes;
+    else day.activeSyntheticMinutes += b.weightMinutes;
     if (b.totalCpu !== null && Number.isFinite(b.totalCpu)) {
       tgt.sumTotalCpu += b.totalCpu * b.weightMinutes;
       tgt.peakTotalCpu = tgt.peakTotalCpu === null ? b.totalCpu : Math.max(tgt.peakTotalCpu, b.totalCpu);
       // Active-restricted threshold counters — feeds the "Min > X%"
       // column when the user toggles into active-only mode.
       for (const t of ACTIVE_ABOVE_BUCKETS) {
-        if (b.totalCpu > t) tgt.activeMinutesAboveThreshold[t] += b.weightMinutes;
+        if (b.totalCpu > t) {
+          tgt.activeMinutesAboveThreshold[t] += b.weightMinutes;
+          day.activeMinutesAbove[t] += b.weightMinutes;
+        }
       }
     }
     if (b.retellectCpu !== null && Number.isFinite(b.retellectCpu)) {
       tgt.sumRetellectCpu += b.retellectCpu * b.weightMinutes;
     }
   }
+  // Emit per-day aggregates sorted by date so the heatmap can binary-
+  // search or just iterate in order. Days that never appear get omitted
+  // — caller treats absence as "no active data that day".
+  const perDay = Array.from(perDayMap.values()).sort((x, y) => x.date.localeCompare(y.date));
   return {
     hostId,
     baselineSpssCpu: baseline,
@@ -231,6 +280,7 @@ export function aggregateHost(
     on,
     off,
     totalMinutes,
+    perDay,
   };
 }
 

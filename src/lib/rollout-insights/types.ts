@@ -120,6 +120,28 @@ export const emptyOnOffAggregate = (): RolloutOnOffAggregate => ({
   activeMinutesAboveThreshold: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
 });
 
+/**
+ * Per-day per-host active counters. Used by CPU Timeline's heatmap when
+ * the user toggles into Active-only mode — cells then colour by
+ * `activeMinutesAbove[threshold]` for the matching (host, date) pair
+ * instead of the unclassified `cpuTrends.minutesAbove[threshold]`.
+ *
+ * ON / OFF aren't split here because the heatmap shows per-host
+ * per-day load, not split by Retellect direction; Retellect attribution
+ * stays a Rollout Insights concern.
+ */
+export interface PerDayActiveCounters {
+  /** Europe/Vilnius local date, "YYYY-MM-DD". */
+  date: string;
+  /** Active minutes from 1-min history samples this day. */
+  activeRealMinutes: number;
+  /** Active minutes from hourly trend (synthetic 60-min buckets) this day. */
+  activeSyntheticMinutes: number;
+  /** Minute-weighted counters for active minutes where totalCpu exceeded
+   *  each threshold band, weighted same as the whole-window aggregate. */
+  activeMinutesAbove: Record<ActiveAboveBucket, number>;
+}
+
 /** Per-host aggregate, with both ON and OFF directions. */
 export interface RolloutPerHostEntry {
   hostId: string;
@@ -142,6 +164,14 @@ export interface RolloutPerHostEntry {
    * from "host with sample data but no active minutes under threshold".
    */
   totalMinutes: number;
+  /**
+   * Per-day breakdown of active counters. Sorted by date ascending.
+   * Days with no data are omitted to keep the payload small (a 90-day
+   * window with very few busy days returns a 5-element array, not 90).
+   * Consumed by CPU Timeline's heatmap in Active-only mode; the matrix
+   * uses the whole-window `on`/`off` aggregates instead.
+   */
+  perDay: PerDayActiveCounters[];
 }
 
 /** Top-level payload returned by the server fetcher. */

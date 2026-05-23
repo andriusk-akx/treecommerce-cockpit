@@ -1238,28 +1238,32 @@ function computeRolloutInsightsFromAggregate(
     if (!matchedHost) continue;
     const entry = perHostMap.get(matchedHost.hostId);
     if (!entry) continue; // host had no usable items at all
-    // Baseline-aware credit: only hosts with a real baseline contribute
-    // to the active-only aggregates (peak Total CPU, Retellect CPU avg,
-    // hostsOn / hostsOff sets). Hosts WITHOUT a baseline still emit
-    // valid totalCpu samples — those need to flow into the All-tracked
-    // counter so the "Min > X%" column doesn't silently disappear when
-    // a host has sparse night data. Merge unconditionally; the per-host
-    // entry already has empty active aggregates when baseline is null.
     const hasBaseline = entry.baselineSpssCpu !== null;
     if (hasBaseline) g.hostsWithBaseline++;
-    const onMin = entry.on.realActiveMinutes + entry.on.syntheticActiveMinutes;
-    const offMin = entry.off.realActiveMinutes + entry.off.syntheticActiveMinutes;
-    if (hasBaseline && onMin > 0) {
-      g.hostsOn.add(matchedHost.hostId);
-      if (entry.on.peakTotalCpu !== null) g.perHostPeakOn.push(entry.on.peakTotalCpu);
+    // hostsOn / hostsOff classify by ANY Retellect ON/OFF activity in
+    // the window — i.e. tracked minutes, not active minutes. A host
+    // where Retellect ran for a week but never coincided with an
+    // spss-busy minute should still appear as "ON" in the matrix
+    // (Pavilnonys SCO2 was the canonical complaint). Gating by active
+    // minutes was hiding such hosts and producing misleading
+    // "No Retellect data" status on classes with real installs.
+    const onTracked = entry.on.realTrackedMinutes + entry.on.syntheticTrackedMinutes;
+    const offTracked = entry.off.realTrackedMinutes + entry.off.syntheticTrackedMinutes;
+    if (onTracked > 0) g.hostsOn.add(matchedHost.hostId);
+    if (offTracked > 0) g.hostsOff.add(matchedHost.hostId);
+    // Per-host peaks stay gated by ACTIVE minutes — the column is
+    // "avg per-host peak during active min" and a peak from idle data
+    // would mean something different.
+    const onActiveMin = entry.on.realActiveMinutes + entry.on.syntheticActiveMinutes;
+    const offActiveMin = entry.off.realActiveMinutes + entry.off.syntheticActiveMinutes;
+    if (hasBaseline && onActiveMin > 0 && entry.on.peakTotalCpu !== null) {
+      g.perHostPeakOn.push(entry.on.peakTotalCpu);
     }
-    if (hasBaseline && offMin > 0) {
-      g.hostsOff.add(matchedHost.hostId);
-      if (entry.off.peakTotalCpu !== null) g.perHostPeakOff.push(entry.off.peakTotalCpu);
+    if (hasBaseline && offActiveMin > 0 && entry.off.peakTotalCpu !== null) {
+      g.perHostPeakOff.push(entry.off.peakTotalCpu);
     }
-    // Always merge — even baseline-null hosts contribute realTrackedMinutes
-    // and minutesAboveThreshold counters (active accumulators are 0 in
-    // those entries so they don't pollute the active-only metrics).
+    // Merge unconditionally so all aggregates (tracked + active +
+    // threshold counters) flow into the group regardless of baseline.
     g.on = mergeOnOff(g.on, entry.on);
     g.off = mergeOnOff(g.off, entry.off);
   }

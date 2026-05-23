@@ -4,6 +4,7 @@ import type { ReactElement } from "react";
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
+import type { PerDayActiveCounters } from "@/lib/rollout-insights/types";
 import { generateIntervalData, type IntervalSlot } from "./rt-timeline-math";
 import { DataCoverageBanner } from "./DataCoverageBanner";
 import { ProcessCategoryReference } from "./ProcessCategoryReference";
@@ -370,7 +371,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     return result;
   }, [periodDays]);
 
-  const { zabbixByName, cpuDetail, trendByHostDate, retellectByHost, deployedHostIds } = useMemo(() => {
+  const { zabbixByName, cpuDetail, trendByHostDate, retellectByHost, deployedHostIds, perDayActiveByHost } = useMemo(() => {
     const byName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
     const detail = new Map<string, { user: number; system: number; total: number; numCpus: number }>();
     for (const item of zabbix.cpuDetail) {
@@ -410,7 +411,22 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     // an array (so it survives the JSON cache layer); we re-hydrate to a
     // Set here so per-row lookups are O(1).
     const deployedSet = new Set<string>(zabbix.retellectDeployedHostIds ?? []);
-    return { zabbixByName: byName, cpuDetail: detail, trendByHostDate: trendMap, retellectByHost: rtMap, deployedHostIds: deployedSet };
+    // Per-day active counters from the Rollout Insights aggregate. Keyed
+    // hostId → date → counters. Drives the heatmap cells when the user
+    // toggles Count from = "Active only" — cells then use
+    // activeMinutesAbove[threshold] for the matching (host, date) pair
+    // instead of the unclassified cpuTrends.minutesAbove[threshold].
+    // Hosts without spss.cpu items don't appear in rolloutPerHost.perHost,
+    // so their per-day active map is empty and cells render as "—" in
+    // active mode — correct, because we can't classify active without
+    // spss data.
+    const perDayMap = new Map<string, Map<string, PerDayActiveCounters>>();
+    for (const entry of zabbix.rolloutPerHost?.perHost ?? []) {
+      const dayMap = new Map<string, PerDayActiveCounters>();
+      for (const d of entry.perDay ?? []) dayMap.set(d.date, d);
+      perDayMap.set(entry.hostId, dayMap);
+    }
+    return { zabbixByName: byName, cpuDetail: detail, trendByHostDate: trendMap, retellectByHost: rtMap, deployedHostIds: deployedSet, perDayActiveByHost: perDayMap };
   }, [zabbix]);
 
   // Single source of truth lives in rt-overview-helpers.ts (`isRetellectRunning`,
