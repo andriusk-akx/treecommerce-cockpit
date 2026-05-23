@@ -28,7 +28,7 @@ import { mergeOnOff, weightedAvg } from "@/lib/rollout-insights/aggregate";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
-type RolloutStatus = "safe" | "validate" | "optimize" | "do-not-roll-out";
+type RolloutStatus = "safe" | "validate" | "optimize" | "do-not-roll-out" | "unproven";
 type Confidence = "high" | "medium" | "low";
 
 interface MatrixRow {
@@ -106,6 +106,7 @@ const STATUS_LABEL: Record<RolloutStatus, string> = {
   validate: "Validate further",
   optimize: "Optimize first",
   "do-not-roll-out": "Do not roll out",
+  unproven: "No Retellect data",
 };
 
 const STATUS_STYLES: Record<RolloutStatus, string> = {
@@ -113,6 +114,7 @@ const STATUS_STYLES: Record<RolloutStatus, string> = {
   validate: "bg-blue-50 text-blue-700 border-blue-200",
   optimize: "bg-amber-50 text-amber-700 border-amber-200",
   "do-not-roll-out": "bg-red-50 text-red-700 border-red-200",
+  unproven: "bg-gray-100 text-gray-600 border-gray-300",
 };
 
 const STATUS_DOT: Record<RolloutStatus, string> = {
@@ -120,6 +122,7 @@ const STATUS_DOT: Record<RolloutStatus, string> = {
   validate: "bg-blue-500",
   optimize: "bg-amber-500",
   "do-not-roll-out": "bg-red-500",
+  unproven: "bg-gray-400",
 };
 
 const CONFIDENCE_STYLES: Record<Confidence, string> = {
@@ -134,6 +137,9 @@ const STATUS_RANK: Record<RolloutStatus, number> = {
   optimize: 1,
   validate: 2,
   safe: 3,
+  // "unproven" sorts last — these classes haven't been tested so they
+  // shouldn't crowd the top of the matrix where graded decisions live.
+  unproven: 4,
 };
 
 // ─── Component ──────────────────────────────────────────────────────
@@ -416,6 +422,14 @@ export function RtRolloutInsights({
                     </td>
                     <td className="py-3 px-3 text-center text-gray-500">
                       <span className="font-medium text-gray-700">{row.hostCount}</span>
+                      {row.source === "aggregate" && row.hostsWithBaseline < row.hostCount && (
+                        <div
+                          className="text-[10px] text-amber-600"
+                          title={`${row.hostCount - row.hostsWithBaseline} of ${row.hostCount} ${row.hostCount - row.hostsWithBaseline === 1 ? "host" : "hosts"} have no usable spss.cpu baseline (no Zabbix samples, broken agent, or fewer than 30 night samples) and are excluded from the ON/OFF aggregate.`}
+                        >
+                          {row.hostsWithBaseline}/{row.hostCount} with data
+                        </div>
+                      )}
                       <div className="text-[10px] text-gray-400">
                         {row.hostsOn} ON · {row.hostsOff} OFF
                       </div>
@@ -588,8 +602,11 @@ export function RtRolloutInsights({
                 <dd className="mt-0.5 leading-relaxed">
                   Total devices in the CPU class, plus the per-bucket split. ON / OFF reflect
                   whether the host contributed at least one ON-classified minute and at least
-                  one OFF-classified minute respectively. The same host can appear in both
-                  columns if Retellect ran for part of the window and was off for another part.
+                  one OFF-classified minute respectively — the same host can appear in both
+                  if Retellect ran for part of the window. The amber{" "}
+                  <em>&ldquo;X/Y with data&rdquo;</em> sub-line appears when some devices have
+                  no usable baseline (missing <code>spss.cpu</code> items, broken Zabbix agent,
+                  or fewer than 30 overnight samples) and were dropped from the aggregate.
                 </dd>
               </div>
               <div>
@@ -622,10 +639,13 @@ export function RtRolloutInsights({
               <div>
                 <dt className="font-semibold text-gray-800">Status</dt>
                 <dd className="mt-0.5 leading-relaxed">
-                  Rollout band derived from the effective Avg peak Total CPU
-                  (ON-or-OFF, whichever is present): <strong>safe</strong> &lt; 70%,
-                  <strong> validate further</strong> 70–84%, <strong>optimize first</strong> 85–94%,
-                  <strong> do not roll out</strong> ≥ 95%.
+                  Graded only when the class has at least one ON-classified host
+                  (real Retellect evidence). Bands on the Avg peak Total CPU:
+                  <strong> safe</strong> &lt; 70%, <strong>validate further</strong> 70–84%,
+                  <strong> optimize first</strong> 85–94%, <strong>do not roll out</strong> ≥ 95%.
+                  When <em>hostsOn = 0</em> the row is <strong>No Retellect data</strong> regardless
+                  of how cool the OFF baseline runs — without an ON sample we have no evidence the
+                  class behaves the same with the Retellect load added.
                 </dd>
               </div>
               <div>
@@ -1176,15 +1196,26 @@ function computeRolloutInsightsFromAggregate(
     const minutesAboveOnAtThreshold = g.on.activeMinutesAboveThreshold[thKey];
     const minutesAboveOffAtThreshold = g.off.activeMinutesAboveThreshold[thKey];
 
-    // Status — uses peakOn-or-peakOff as effective worst case. Same bands
-    // as legacy so users transitioning between paths see consistent
-    // status labels even when underlying numbers differ slightly.
-    const effectivePeak = peakOn ?? peakOff ?? 0;
+    // Status — requires at least one ON-classified host to make ANY
+    // graded recommendation. Without Retellect data on this CPU class
+    // we cannot honestly say "safe" or "optimize" — the OFF baseline
+    // tells us how hot the hardware runs WITHOUT Retellect, but says
+    // nothing about how it'll behave with the load Retellect adds.
+    // "unproven" is the explicit signal: pilot needed before rollout.
+    //
+    // Once ON evidence exists, bands stay aligned with the legacy
+    // status tree (95/85/70) so users transitioning between paths see
+    // consistent labels.
     let status: RolloutStatus;
-    if (effectivePeak >= 95) status = "do-not-roll-out";
-    else if (effectivePeak >= 85) status = "optimize";
-    else if (effectivePeak >= 70) status = "validate";
-    else status = "safe";
+    if (g.hostsOn.size === 0) {
+      status = "unproven";
+    } else {
+      const effectivePeak = peakOn ?? peakOff ?? 0;
+      if (effectivePeak >= 95) status = "do-not-roll-out";
+      else if (effectivePeak >= 85) status = "optimize";
+      else if (effectivePeak >= 70) status = "validate";
+      else status = "safe";
+    }
 
     // Confidence — driven by total reliable (history-source) minutes
     // across this group. Bands chosen to match the user-agreed decision
@@ -1597,6 +1628,7 @@ function actionsFromMatrix(matrix: MatrixRow[]): { priority: "high" | "medium" |
   const validateClasses = matrix.filter((m) => m.status === "validate").map((m) => m.model);
   const optimizeClasses = matrix.filter((m) => m.status === "optimize").map((m) => m.model);
   const blockedClasses = matrix.filter((m) => m.status === "do-not-roll-out").map((m) => m.model);
+  const unprovenClasses = matrix.filter((m) => m.status === "unproven").map((m) => m.model);
   if (safeClasses.length > 0) {
     actions.push({ priority: "high", text: `Roll out first on safe CPU classes: ${formatList(safeClasses)}.` });
   }
@@ -1608,6 +1640,12 @@ function actionsFromMatrix(matrix: MatrixRow[]): { priority: "high" | "medium" |
   }
   if (blockedClasses.length > 0) {
     actions.push({ priority: "high", text: `Hold rollout on ${formatList(blockedClasses)} until hardware tier is upgraded.` });
+  }
+  if (unprovenClasses.length > 0) {
+    actions.push({
+      priority: "medium",
+      text: `Pilot Retellect on a single host of each unproven class before fleet rollout: ${formatList(unprovenClasses)}.`,
+    });
   }
   if (matrix.some((m) => m.confidence === "low") && actions.length < 4) {
     actions.push({ priority: "medium", text: "Improve process-level observability on the weakest fleet segment before a final decision." });
