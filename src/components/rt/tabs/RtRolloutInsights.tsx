@@ -259,7 +259,8 @@ export function RtRolloutInsights({
                   <th className="text-left py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase">CPU class</th>
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Hosts</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">
-                    Peak CPU · ON vs OFF
+                    Avg peak CPU
+                    <span className="ml-1 normal-case font-normal text-gray-400 lowercase">per host · ON vs OFF</span>
                   </th>
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">
                     Min ≥ {threshold}%
@@ -818,8 +819,16 @@ function computeRolloutInsights(
       }
     }
 
-    const peakOn = onPeaks.length > 0 ? Math.max(...onPeaks) : null;
-    const peakOff = offPeaks.length > 0 ? Math.max(...offPeaks) : null;
+    // Avg of per-host peaks. Each entry in onPeaks/offPeaks is a single
+    // host's max trend-bucket value within the window. Averaging across
+    // hosts smooths single-host outliers (Windows Update spike on one
+    // SCO, antivirus scan, etc.) so the comparison reflects the typical
+    // worst-load moment per host of this class — a better proxy for
+    // Retellect's effect than the absolute maximum across hosts.
+    const mean = (xs: number[]) =>
+      xs.length === 0 ? null : xs.reduce((s, v) => s + v, 0) / xs.length;
+    const peakOn = mean(onPeaks);
+    const peakOff = mean(offPeaks);
     const minAboveOn = onMinDataPresent ? onMin : null;
     const minAboveOff = offMinDataPresent ? offMin : null;
     const deltaPeak = peakOn !== null && peakOff !== null ? peakOn - peakOff : null;
