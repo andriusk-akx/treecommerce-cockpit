@@ -253,13 +253,22 @@ export function RtRolloutInsights({
     const emptyGroups = matrix.filter(
       (r) => r.activeRealMinutes + r.activeSynMinutes === 0,
     ).length;
+    // Always log a one-line summary on the aggregate path. Helps catch the
+    // case where the matrix collapses to a single row unexpectedly (e.g.
+    // model resolver producing the same string for every device). Cheap —
+    // one console line per render.
+    console.info(
+      `[rollout-insights] matrix — rows=${matrix.length} ` +
+        `devices=${pilot.devices.length} perHostPayload=${zabbix.rolloutPerHost?.perHost.length ?? 0} ` +
+        `models=${matrix.map((r) => `${r.model}:${r.hostCount}`).join(",")}`,
+    );
     if (lowConfidence === 0 && noBaselineHosts === 0 && emptyGroups === 0) return;
     console.warn(
       `[rollout-insights] matrix diagnostics — rows=${matrix.length} ` +
         `lowConfidence=${lowConfidence} hostsWithoutBaseline=${noBaselineHosts} ` +
         `zeroActiveGroups=${emptyGroups}`,
     );
-  }, [matrix, useAggregate]);
+  }, [matrix, useAggregate, pilot.devices.length, zabbix.rolloutPerHost?.perHost.length]);
 
   return (
     <>
