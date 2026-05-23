@@ -16,7 +16,7 @@
  * the answer; everything else exists to qualify, not to invite more digging.
  */
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
 import { useRtFilters } from "../RtFiltersContext";
@@ -114,6 +114,15 @@ export function RtRolloutInsights({
   const router = useRouter();
   const pathname = usePathname();
   const urlSearchParams = useSearchParams();
+  // useTransition wraps the router.push so React reports back when the
+  // Server Component navigation is in flight. Period changes trigger a
+  // batched Zabbix trend.get for up to 23 item-chunks sequentially —
+  // typically 5-10 s on the 30/90 d windows. Without a pending flag the
+  // dropdown looked broken: the chip showed the new value instantly but
+  // the matrix kept rendering the previous period's data until the fetch
+  // returned. The flag drives the small "Updating…" pill and the matrix
+  // opacity fade below, so the user can tell something is happening.
+  const [isRefreshing, startTransition] = useTransition();
   useEffect(() => {
     const urlPeriod = urlSearchParams.get("period");
     if (urlPeriod && urlPeriod !== filters.period) {
@@ -125,7 +134,9 @@ export function RtRolloutInsights({
     setFilter("period", v);
     const params = new URLSearchParams(urlSearchParams.toString());
     params.set("period", v);
-    router.push(`${pathname}?${params.toString()}`);
+    startTransition(() => {
+      router.push(`${pathname}?${params.toString()}`);
+    });
   };
 
   const { matrix, drivers, actions, periodDays } = useMemo(() => {
@@ -158,6 +169,25 @@ export function RtRolloutInsights({
           ]}
           onChange={setPeriod}
         />
+        {isRefreshing ? (
+          <span
+            className="inline-flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1"
+            role="status"
+            aria-live="polite"
+          >
+            <svg
+              className="animate-spin w-3 h-3"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
+              <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+            </svg>
+            Updating window…
+          </span>
+        ) : null}
         <FilterSelect
           label="Threshold"
           value={String(threshold)}
@@ -185,6 +215,16 @@ export function RtRolloutInsights({
       </div>
 
       {/* ── A. CPU Rollout Decision Matrix ─────────────────────────── */}
+      {/* Single in-flight dimmer wraps the matrix + drivers + actions so
+          the whole period-dependent surface fades together while the
+          Server Component refetch lands. opacity-60 keeps the previous
+          numbers legible (so the user can still read them) but signals
+          "this is being replaced". pointer-events-none avoids accidental
+          clicks landing on the stale UI. */}
+      <div
+        className={`transition-opacity duration-200 ${isRefreshing ? "opacity-60 pointer-events-none" : ""}`}
+        aria-busy={isRefreshing || undefined}
+      >
       <section className="mb-8">
         <div className="flex items-baseline justify-between mb-2">
           <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
@@ -354,6 +394,7 @@ export function RtRolloutInsights({
           </ul>
         </div>
       </section>
+      </div>
     </>
   );
 }
