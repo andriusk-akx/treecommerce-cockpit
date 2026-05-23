@@ -26,6 +26,7 @@ import type { RolloutOnOffAggregate, RolloutPerHostEntry } from "@/lib/rollout-i
 import { emptyOnOffAggregate } from "@/lib/rollout-insights/types";
 import { mergeOnOff, weightedAvg } from "@/lib/rollout-insights/aggregate";
 import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterHint } from "../filters/RtFilterControls";
+import { OnOffLabel } from "../filters/RtStateBadge";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -446,8 +447,9 @@ export function RtRolloutInsights({
                           {row.hostsWithBaseline}/{row.hostCount} with data
                         </div>
                       )}
-                      <div className="text-[10px] text-gray-400">
-                        {row.hostsOn} ON · {row.hostsOff} OFF
+                      <div className="text-[10px] text-gray-400 inline-flex items-center gap-1">
+                        <span className="tabular-nums">{row.hostsOn}</span> <OnOffLabel state="on" /> ·{" "}
+                        <span className="tabular-nums">{row.hostsOff}</span> <OnOffLabel state="off" />
                       </div>
                     </td>
                     <td className="py-3 px-3">
@@ -457,19 +459,19 @@ export function RtRolloutInsights({
                       {row.source === "aggregate" ? (
                         <>
                           <div className={`font-medium ${retellectColor(row.avgRetellectOn)}`}>
-                            {fmtPct(row.avgRetellectOn)} <span className="text-gray-400 font-normal">ON</span>
+                            {fmtPct(row.avgRetellectOn)} <OnOffLabel state="on" />
                           </div>
                           <div className={`${retellectColor(row.avgRetellectOff)}`}>
-                            {fmtPct(row.avgRetellectOff)} <span className="text-gray-400 font-normal">OFF</span>
+                            {fmtPct(row.avgRetellectOff)} <OnOffLabel state="off" />
                           </div>
                         </>
                       ) : (
                         <>
                           <div className={`font-medium ${minutesColor(row.minAboveOn)}`}>
-                            {fmtMinutes(row.minAboveOn)} <span className="text-gray-400 font-normal">ON</span>
+                            {fmtMinutes(row.minAboveOn)} <OnOffLabel state="on" />
                           </div>
                           <div className={`${minutesColor(row.minAboveOff)}`}>
-                            {fmtMinutes(row.minAboveOff)} <span className="text-gray-400 font-normal">OFF</span>
+                            {fmtMinutes(row.minAboveOff)} <OnOffLabel state="off" />
                           </div>
                         </>
                       )}
@@ -479,14 +481,13 @@ export function RtRolloutInsights({
                         <AboveThresholdCell
                           minutes={row.minutesAboveOnAtThreshold}
                           total={row.totalTrackedOn}
-                          label="ON"
-                          accent
+                          label="on"
                           countFromLabel={cpuCountFrom === "active" ? "busy" : "tracked"}
                         />
                         <AboveThresholdCell
                           minutes={row.minutesAboveOffAtThreshold}
                           total={row.totalTrackedOff}
-                          label="OFF"
+                          label="off"
                           countFromLabel={cpuCountFrom === "active" ? "busy" : "tracked"}
                         />
                       </td>
@@ -851,13 +852,11 @@ function AboveThresholdCell({
   minutes,
   total,
   label,
-  accent,
   countFromLabel,
 }: {
   minutes: number;
   total: number;
-  label: "ON" | "OFF";
-  accent?: boolean;
+  label: "on" | "off";
   /** "tracked" or "busy" — drives the tooltip wording so the user can
    *  tell at a glance which denominator the cell counts against. */
   countFromLabel: "tracked" | "busy";
@@ -889,17 +888,17 @@ function AboveThresholdCell({
         : pct >= 10
           ? `${Math.round(pct)}%`
           : `${pct.toFixed(1)}%`;
-  const labelClasses = accent ? "text-blue-600 font-medium" : "text-gray-400 font-normal";
+  const labelUpper = label === "on" ? "ON" : "OFF";
   return (
     <div
       className={`tabular-nums ${colour}`}
       title={
         pct === null
-          ? `No ${countFromLabel} minutes for ${label}`
-          : `${minutes.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} ${countFromLabel} minutes (${label})`
+          ? `No ${countFromLabel} minutes for ${labelUpper}`
+          : `${minutes.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} ${countFromLabel} minutes (${labelUpper})`
       }
     >
-      {formatted} <span className={`text-[10px] ${labelClasses}`}>{label}</span>
+      {formatted} <OnOffLabel state={label} />
     </div>
   );
 }
@@ -919,8 +918,8 @@ function OnOffBars({
 }) {
   return (
     <div className="space-y-1 max-w-[260px]">
-      <BarRow label="ON" value={peakOn} threshold={threshold} accent observed={hostsOnObserved} />
-      <BarRow label="OFF" value={peakOff} threshold={threshold} accent={false} observed={hostsOffObserved} />
+      <BarRow label="on" value={peakOn} threshold={threshold} observed={hostsOnObserved} />
+      <BarRow label="off" value={peakOff} threshold={threshold} observed={hostsOffObserved} />
     </div>
   );
 }
@@ -929,13 +928,11 @@ function BarRow({
   label,
   value,
   threshold,
-  accent,
   observed,
 }: {
-  label: string;
+  label: "on" | "off";
   value: number | null;
   threshold: number;
-  accent: boolean;
   /** Host count contributing to the avg shown by `value`. Rendered as
    *  a small "from N" sub-label after the percentage so the user can
    *  tell whether the aggregate covers a meaningful sample. */
@@ -952,8 +949,8 @@ function BarRow({
           : "bg-emerald-500";
   return (
     <div className="flex items-center gap-2">
-      <span className={`w-7 text-[10px] font-medium ${accent ? "text-blue-600" : "text-gray-400"}`}>
-        {label}
+      <span className="w-7">
+        <OnOffLabel state={label} />
       </span>
       <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
         {value === null ? (
