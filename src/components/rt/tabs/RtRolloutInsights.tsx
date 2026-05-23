@@ -693,6 +693,19 @@ export function RtRolloutInsights({
                   Only reliable minutes count toward the confidence band.
                 </dd>
               </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Cross-tab consistency note</dt>
+                <dd className="mt-0.5 leading-relaxed">
+                  Active mode reconciles exactly with CPU Timeline cells (same per-day source).
+                  Tracked mode may show a small (&lt;10 %) drift between the matrix counters and
+                  Timeline cells: cpuTrends counts every <code>history.get</code> sample
+                  independently, while the matrix de-duplicates samples to a single per-minute
+                  bucket per host. For periods &gt; 14 days the matrix additionally folds
+                  synthetic minutes from hourly trend (weight 60) into the denominator; Timeline
+                  only counts raw history. Pick a single tab as the source of truth for any
+                  exact-count question.
+                </dd>
+              </div>
             </dl>
           </div>
         </section>
