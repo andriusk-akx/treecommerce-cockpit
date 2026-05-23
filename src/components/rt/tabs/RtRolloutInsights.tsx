@@ -555,7 +555,107 @@ export function RtRolloutInsights({
         </section>
       </div>
 
-      {/* ── D. Where Decision Confidence Is Limited ────────────────── */}
+      {/* ── D. How metrics are calculated ──────────────────────────── */}
+      {useAggregate && (
+        <section className="mb-6">
+          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">
+            How each metric is calculated
+          </h3>
+          <div className="bg-white rounded-lg border border-gray-200 px-5 py-4">
+            <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 text-sm text-gray-600">
+              <div>
+                <dt className="font-semibold text-gray-800">Active threshold (+pp)</dt>
+                <dd className="mt-0.5 leading-relaxed">
+                  {ACTIVE_THRESHOLD_TOOLTIP}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">High-CPU threshold (%)</dt>
+                <dd className="mt-0.5 leading-relaxed">
+                  Absolute <code>system.cpu.util[,,avg1]</code> level used by the &ldquo;Active min &gt; X%&rdquo;
+                  column. Changing it re-aggregates from the already-cached per-host counters
+                  (50/60/70/80/90 bands), so the matrix updates without a Zabbix round-trip.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Hosts</dt>
+                <dd className="mt-0.5 leading-relaxed">
+                  Total devices in the CPU class, plus the per-bucket split. ON / OFF reflect
+                  whether the host contributed at least one ON-classified minute and at least
+                  one OFF-classified minute respectively. The same host can appear in both
+                  columns if Retellect ran for part of the window and was off for another part.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Avg peak Total CPU</dt>
+                <dd className="mt-0.5 leading-relaxed">
+                  For each host with a usable baseline, take the maximum
+                  <code> system.cpu.util[,,avg1]</code> observed during that host&rsquo;s
+                  <em> active</em> minutes (busy windows). The column shows the mean of those
+                  per-host peaks — smooths single-host outliers while still being the worst
+                  moment under load, restricted to busy time so idle hours don&rsquo;t dilute it.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Retellect CPU avg</dt>
+                <dd className="mt-0.5 leading-relaxed">
+                  Sum of all <code>python*.cpu</code> samples in each active minute, averaged
+                  across minutes weighted by minute count. Direct attribution of how much CPU
+                  Retellect itself consumed while the SCO was actually transacting.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Active min &gt; X%</dt>
+                <dd className="mt-0.5 leading-relaxed">
+                  Of all active minutes for this group, the percentage where Total CPU exceeded
+                  the high-CPU threshold. Normalised: the denominator is each group&rsquo;s own
+                  active-minute total, so a 3-host class with 1.8k active minutes and a 40-host
+                  class with 30k active minutes compare on the same scale. Hover for absolute count.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Status</dt>
+                <dd className="mt-0.5 leading-relaxed">
+                  Rollout band derived from the effective Avg peak Total CPU
+                  (ON-or-OFF, whichever is present): <strong>safe</strong> &lt; 70%,
+                  <strong> validate further</strong> 70–84%, <strong>optimize first</strong> 85–94%,
+                  <strong> do not roll out</strong> ≥ 95%.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Confidence</dt>
+                <dd className="mt-0.5 leading-relaxed">
+                  <strong>High</strong> when ≥5 000 reliable (1-min history) active minutes
+                  AND ≥50% of the group&rsquo;s hosts have a computable baseline.
+                  <strong> Medium</strong> at ≥500 reliable minutes.
+                  <strong> Low</strong> otherwise — treat the row as directional, not decisive.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Per-host baseline</dt>
+                <dd className="mt-0.5 leading-relaxed">
+                  Median <code>spss.cpu</code> between 02:00 and 05:00 Europe/Vilnius. Median
+                  (not mean) ignores housekeeping spikes — antivirus, Windows Update — and
+                  reports the steady idle floor that lets the same threshold pp work across
+                  Pentium-tier and i5-tier hardware.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Reliable vs synthetic minutes</dt>
+                <dd className="mt-0.5 leading-relaxed">
+                  Reliable = 1-min samples from Zabbix <code>history.get</code> (last ~14 d
+                  retention). Synthetic = hourly <code>trend.get</code> averages extrapolated to
+                  60 minutes per hour for periods beyond 14 d — conservative (the hour is
+                  marked active only when its hour-average crosses baseline + threshold).
+                  Only reliable minutes count toward the confidence band.
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+      )}
+
+      {/* ── E. Where Decision Confidence Is Limited ────────────────── */}
       <section className="mb-2">
         <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">
           Where Decision Confidence Is Limited
@@ -649,6 +749,14 @@ function FilterSelect({
  * value badge in a muted tone so the user can see "your change is
  * pending, hold on".
  */
+/** One-line definition exposed both in the slider tooltip and in the
+ *  bottom methodology section so they don't drift out of sync. */
+const ACTIVE_THRESHOLD_TOOLTIP =
+  "A minute counts as ACTIVE (busy) when spss.cpu rises above this many " +
+  "percentage points over the host's own nighttime baseline. Baseline = " +
+  "median spss.cpu between 02:00 and 05:00 Europe/Vilnius. Lower values " +
+  "treat more minutes as busy; higher values restrict to heavier load.";
+
 function ActiveThresholdSlider({
   value,
   onChange,
@@ -659,8 +767,16 @@ function ActiveThresholdSlider({
   pending: boolean;
 }) {
   return (
-    <label className="flex items-center gap-2">
-      <span className="text-gray-500 font-medium">Active threshold</span>
+    <label className="flex items-center gap-2" title={ACTIVE_THRESHOLD_TOOLTIP}>
+      <span className="text-gray-500 font-medium inline-flex items-center gap-1">
+        Active threshold
+        <span
+          aria-hidden="true"
+          className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-gray-300 text-[9px] font-semibold text-gray-400 cursor-help"
+        >
+          i
+        </span>
+      </span>
       <input
         type="range"
         min={0}
@@ -670,10 +786,11 @@ function ActiveThresholdSlider({
         onChange={(e) => onChange(parseFloat(e.target.value))}
         className="w-32 accent-blue-600"
         aria-label="Active threshold in percentage points above baseline"
+        title={ACTIVE_THRESHOLD_TOOLTIP}
       />
       <span
         className={`tabular-nums text-xs font-medium ${pending ? "text-amber-600" : "text-gray-700"}`}
-        title={pending ? "Releasing soon — debounce 300 ms" : undefined}
+        title={pending ? "Releasing soon — debounce 300 ms" : ACTIVE_THRESHOLD_TOOLTIP}
       >
         +{value.toFixed(1)} pp
       </span>
