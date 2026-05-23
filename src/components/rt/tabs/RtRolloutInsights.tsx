@@ -51,10 +51,6 @@ interface MatrixRow {
   peakOff: number | null;
   minAboveOn: number | null;
   minAboveOff: number | null;
-  /** ON avg peak − OFF avg peak. Positive = Retellect adds CPU pressure
-   *  on top of baseline; negative = the OFF host(s) happen to peak higher
-   *  for unrelated reasons (typically a small-sample artefact). */
-  deltaPeak: number | null;
   status: RolloutStatus;
   confidence: Confidence;
   /** True when the OFF column has too few hosts/days to compare. */
@@ -383,7 +379,6 @@ export function RtRolloutInsights({
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">
                     {useAggregate ? "Retellect CPU avg" : `Min ≥ ${threshold}%`}
                   </th>
-                  <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Δ peak</th>
                   <th className="text-center py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase">Status</th>
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Confidence</th>
                 </tr>
@@ -429,9 +424,6 @@ export function RtRolloutInsights({
                         </>
                       )}
                     </td>
-                    <td className="py-3 px-3 text-center">
-                      <DeltaPill delta={row.deltaPeak} />
-                    </td>
                     <td className="py-3 px-4 text-center">
                       <span
                         className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] font-medium ${STATUS_STYLES[row.status]}`}
@@ -466,7 +458,7 @@ export function RtRolloutInsights({
               (hourly trend, 60 min/bucket). A minute counts as active when{" "}
               <code>spss.cpu &gt; baseline + {activeThresholdPp} pp</code>; baseline is the median spss.cpu
               between 02:00 and 05:00 Europe/Vilnius. Avg peak Total CPU = mean of per-host peak{" "}
-              <code>system.cpu.util[,,avg1]</code> across active minutes. Δ peak = ON mean &minus; OFF mean.
+              <code>system.cpu.util[,,avg1]</code> across active minutes.
             </p>
           ) : (
             <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
@@ -475,7 +467,6 @@ export function RtRolloutInsights({
               -day window ({matrix.reduce((s, r) => s + r.hostsOnObserved, 0) * periodDays} ON host-days &middot;{" "}
               {matrix.reduce((s, r) => s + r.hostsOffObserved, 0) * periodDays} OFF host-days observed).
               Per-host peak = max hourly trend bucket; column shows the average of those per-host peaks.
-              Δ peak = ON avg &minus; OFF avg.
             </p>
           )
         ) : null}
@@ -741,26 +732,6 @@ function BarRow({
   );
 }
 
-function DeltaPill({ delta }: { delta: number | null }) {
-  if (delta === null) {
-    return <span className="text-[11px] text-gray-400">—</span>;
-  }
-  const isPositive = delta > 0.5;
-  const isNegative = delta < -0.5;
-  const cls = isPositive
-    ? "text-amber-700 bg-amber-50"
-    : isNegative
-      ? "text-emerald-700 bg-emerald-50"
-      : "text-gray-500 bg-gray-100";
-  const sign = isPositive ? "+" : isNegative ? "−" : "±";
-  return (
-    <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-medium ${cls}`}>
-      {sign}
-      {Math.abs(delta).toFixed(1)} pp
-    </span>
-  );
-}
-
 function DriverDecomposition({ drivers }: { drivers: DriverSlice[] }) {
   const total = drivers.reduce((s, d) => s + d.value, 0) || 1;
   // Group evidence-tag labels so the stack header is informative without
@@ -973,7 +944,6 @@ function computeRolloutInsightsFromAggregate(
     const peakOff = mean(g.perHostPeakOff);
     const avgRetellectOn = weightedAvg(g.on, "sumRetellectCpu");
     const avgRetellectOff = weightedAvg(g.off, "sumRetellectCpu");
-    const deltaPeak = peakOn !== null && peakOff !== null ? peakOn - peakOff : null;
     const activeRealMinutes = g.on.realActiveMinutes + g.off.realActiveMinutes;
     const activeSynMinutes = g.on.syntheticActiveMinutes + g.off.syntheticActiveMinutes;
 
@@ -1013,7 +983,6 @@ function computeRolloutInsightsFromAggregate(
       peakOff,
       minAboveOn: null,
       minAboveOff: null,
-      deltaPeak,
       status,
       confidence,
       comparabilityWeak,
@@ -1221,7 +1190,6 @@ function computeRolloutInsights(
     const peakOff = mean(offPeaks);
     const minAboveOn = onMinDataPresent ? onMin : null;
     const minAboveOff = offMinDataPresent ? offMin : null;
-    const deltaPeak = peakOn !== null && peakOff !== null ? peakOn - peakOff : null;
 
     // Status decision tree — deliberately conservative
     const effectivePeak = peakOn ?? peakOff ?? 0;
@@ -1257,7 +1225,6 @@ function computeRolloutInsights(
       peakOff,
       minAboveOn,
       minAboveOff,
-      deltaPeak,
       status,
       confidence,
       comparabilityWeak,
