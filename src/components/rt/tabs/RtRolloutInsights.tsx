@@ -16,7 +16,8 @@
  * the answer; everything else exists to qualify, not to invite more digging.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
 import { useRtFilters } from "../RtFiltersContext";
 import { resolveCpuModel, computeCpuTotal } from "./rt-inventory-helpers";
@@ -102,6 +103,30 @@ export function RtRolloutInsights({
   const threshold = filters.threshold;
   const storeFilter = filters.store;
 
+  // Period selector mirrors RtTimeline's URL-driven pattern. Changing the
+  // dropdown pushes ?period=... into the URL, which triggers the page server
+  // component to refetch the CPU history for the new window. Without the
+  // router.push the dropdown was a no-op — context updated, but the data
+  // remained whatever the page initially fetched, so the matrix never
+  // changed. The useEffect handles the inverse direction (deep-link/back-nav
+  // syncing URL → context).
+  const router = useRouter();
+  const pathname = usePathname();
+  const urlSearchParams = useSearchParams();
+  useEffect(() => {
+    const urlPeriod = urlSearchParams.get("period");
+    if (urlPeriod && urlPeriod !== filters.period) {
+      setFilter("period", urlPeriod);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSearchParams]);
+  const setPeriod = (v: string) => {
+    setFilter("period", v);
+    const params = new URLSearchParams(urlSearchParams.toString());
+    params.set("period", v);
+    router.push(`${pathname}?${params.toString()}`);
+  };
+
   const { matrix, drivers, actions, periodDays } = useMemo(() => {
     return computeRolloutInsights(pilot, zabbix, threshold, storeFilter);
   }, [pilot, zabbix, threshold, storeFilter]);
@@ -130,7 +155,7 @@ export function RtRolloutInsights({
             { v: "30d", l: "30 days" },
             { v: "90d", l: "90 days" },
           ]}
-          onChange={(v) => setFilter("period", v)}
+          onChange={setPeriod}
         />
         <FilterSelect
           label="Threshold"
@@ -605,16 +630,14 @@ function computeRolloutInsights(
   const groups = new Map<string, GroupAcc>();
 
   for (const d of pilot.devices) {
-    // Store filter
+    // Store filter: device.storeName carries the store assignment threaded
+    // from RtPilotData, so we can apply scope strictly. Devices in other
+    // stores are skipped entirely — they don't contribute to the matrix or
+    // the drivers tally. "all" passes everything through unchanged.
+    if (storeFilter !== "all" && d.storeName !== storeFilter) continue;
+
     const matchedHost =
       zabbixByName.get(d.sourceHostKey || "") || zabbixByName.get(d.name);
-    if (storeFilter !== "all") {
-      const storeNameForDevice = pilot.devices.find((x) => x.id === d.id);
-      // The shape provided to RtPilotData doesn't carry storeName on devices
-      // here (it's threaded separately); skip strict filtering — store scope
-      // remains best-effort because device→store mapping isn't on this page.
-      void storeNameForDevice;
-    }
     const model = resolveCpuModel(d.cpuModel, matchedHost?.inventory?.cpuModel ?? null, "Unknown");
     if (!groups.has(model)) {
       groups.set(model, { model, hostsOn: [], hostsOff: [], totalHosts: 0 });
