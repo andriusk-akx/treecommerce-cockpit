@@ -62,7 +62,9 @@ export type ActiveAboveBucket = 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90;
 export const ACTIVE_ABOVE_BUCKETS: readonly ActiveAboveBucket[] = [20, 30, 40, 50, 60, 70, 80, 90] as const;
 
 export interface RolloutOnOffAggregate {
-  /** Total active minutes from 1-min history samples. */
+  /** Total active minutes from 1-min history samples. Active =
+   *  spss.cpu > host baseline + threshold pp. Used for the
+   *  averages and per-host peaks restricted to busy windows. */
   realActiveMinutes: number;
   /** Total active minutes from hourly trend (synthetic 60-min buckets). */
   syntheticActiveMinutes: number;
@@ -75,19 +77,27 @@ export interface RolloutOnOffAggregate {
   /** Peak (max) totalCpu seen during any active minute. Null when no
    *  active minutes contributed to this aggregate. */
   peakTotalCpu: number | null;
+  /** Total tracked minutes from 1-min history samples — any minute
+   *  with a usable totalCpu reading, regardless of active classification.
+   *  Drives the &ldquo;Min &gt; X%&rdquo; denominator so the metric stays
+   *  consistent with the CPU Timeline (which also counts from full-day
+   *  totals, not from busy-only). */
+  realTrackedMinutes: number;
+  /** Total tracked minutes from hourly trend (synthetic 60-min buckets). */
+  syntheticTrackedMinutes: number;
   /**
-   * Minute-weighted counters for "active minutes where totalCpu exceeded
-   * each threshold". Lets the matrix render an apple-to-apple comparison
-   * ("X % of active minutes were above 70 %") regardless of how many
-   * total minutes each CPU class collected — the normalisation removes
-   * the bias where a sparsely-sampled class would otherwise look
-   * artificially cleaner than a densely-sampled one.
+   * Minute-weighted counters for &ldquo;minutes where totalCpu exceeded
+   * each threshold&rdquo; — counted from ALL minutes, not just active
+   * ones. CPU spikes from non-SCO sources (SQL backups, antivirus, OS
+   * housekeeping) used to be invisible here because spss.cpu stays low
+   * while the host runs hot; counting unconditionally restores the
+   * consistency with CPU Timeline at the same threshold band.
    *
    * Convention: strict `>` (a bucket with exactly 70.0 % totalCpu does
    * NOT count toward the 70 bucket). Real history minutes contribute 1,
    * synthetic trend hours contribute 60.
    */
-  activeMinutesAboveThreshold: Record<ActiveAboveBucket, number>;
+  minutesAboveThreshold: Record<ActiveAboveBucket, number>;
 }
 
 /** Empty aggregate factory — used as the zero element for accumulators. */
@@ -98,7 +108,9 @@ export const emptyOnOffAggregate = (): RolloutOnOffAggregate => ({
   sumRetellectCpu: 0,
   sumSpssCpu: 0,
   peakTotalCpu: null,
-  activeMinutesAboveThreshold: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
+  realTrackedMinutes: 0,
+  syntheticTrackedMinutes: 0,
+  minutesAboveThreshold: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
 });
 
 /** Per-host aggregate, with both ON and OFF directions. */

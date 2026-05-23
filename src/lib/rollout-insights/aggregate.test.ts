@@ -206,7 +206,7 @@ describe("aggregateHost", () => {
     expect(entry.off.realActiveMinutes).toBe(1);
   });
 
-  it("accumulates active-minutes-above-threshold counters per bucket band (strict >)", () => {
+  it("accumulates minutes-above-threshold counters per bucket band (strict >, ALL minutes)", () => {
     const buckets: HostBucket[] = [];
     for (let i = 0; i < 30; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 3, i), 2, 0, 5));
     // 3 ON active minutes at totalCpu 75 → above 50, 60, 70 but NOT 80/90
@@ -216,23 +216,53 @@ describe("aggregateHost", () => {
     // 1 ON active minute exactly at 70 (strict >, so does NOT increment 70)
     buckets.push(bucket(vilniusWinterTs("2026-02-10", 14, 5), 10, 2, 70));
     const entry = aggregateHost("h1", buckets, 2);
-    expect(entry.on.activeMinutesAboveThreshold[50]).toBe(6); // all 6 ON active min
-    expect(entry.on.activeMinutesAboveThreshold[60]).toBe(6);
-    expect(entry.on.activeMinutesAboveThreshold[70]).toBe(5); // 70 itself excluded
-    expect(entry.on.activeMinutesAboveThreshold[80]).toBe(2); // only the 92s
-    expect(entry.on.activeMinutesAboveThreshold[90]).toBe(2);
-    expect(entry.off.activeMinutesAboveThreshold[50]).toBe(0);
+    expect(entry.on.minutesAboveThreshold[50]).toBe(6); // all 6 ON busy min
+    expect(entry.on.minutesAboveThreshold[60]).toBe(6);
+    expect(entry.on.minutesAboveThreshold[70]).toBe(5); // 70 itself excluded
+    expect(entry.on.minutesAboveThreshold[80]).toBe(2); // only the 92s
+    expect(entry.on.minutesAboveThreshold[90]).toBe(2);
+    expect(entry.off.minutesAboveThreshold[50]).toBe(0);
+  });
+
+  it("counts minutes-above-threshold for IDLE minutes too (consistency with Timeline)", () => {
+    const buckets: HostBucket[] = [];
+    for (let i = 0; i < 30; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 3, i), 2, 0, 5));
+    // Idle from spss perspective (1% << baseline+2pp = 4%) but totalCpu=95
+    // — e.g. SQL backup running while SCO is quiet. Should still count
+    // toward minutesAboveThreshold[90] so Timeline and Rollout agree.
+    buckets.push(bucket(vilniusWinterTs("2026-02-10", 14, 0), 1, 0, 95));
+    const entry = aggregateHost("h1", buckets, 2);
+    // No retellect signal → bucket is classified OFF
+    expect(entry.off.minutesAboveThreshold[90]).toBe(1);
+    expect(entry.off.minutesAboveThreshold[70]).toBe(1);
+    expect(entry.off.realActiveMinutes).toBe(0); // not active — spss too low
+    // realTrackedMinutes counts every bucket with totalCpu: 30 night baseline + 1 daytime
+    expect(entry.off.realTrackedMinutes).toBe(31);
   });
 
   it("trend buckets contribute weight 60 to the above-threshold counters", () => {
     const buckets: HostBucket[] = [];
     for (let i = 0; i < 30; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 3, i), 2, 0, 5));
-    // One trend hour at totalCpu 85 → active + ON, contributes 60 minutes
+    // One trend hour at totalCpu 85 → contributes 60 minutes regardless of active
     buckets.push(bucket(vilniusWinterTs("2026-02-10", 14, 0), 10, 1.5, 85, "trend"));
     const entry = aggregateHost("h1", buckets, 2);
-    expect(entry.on.activeMinutesAboveThreshold[70]).toBe(60);
-    expect(entry.on.activeMinutesAboveThreshold[80]).toBe(60);
-    expect(entry.on.activeMinutesAboveThreshold[90]).toBe(0);
+    expect(entry.on.minutesAboveThreshold[70]).toBe(60);
+    expect(entry.on.minutesAboveThreshold[80]).toBe(60);
+    expect(entry.on.minutesAboveThreshold[90]).toBe(0);
+    expect(entry.on.syntheticTrackedMinutes).toBe(60);
+  });
+
+  it("populates threshold counters even when baseline is null (sparse night data)", () => {
+    // Only 5 night samples — under default min 30 → baseline = null
+    const buckets: HostBucket[] = [];
+    for (let i = 0; i < 5; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 3, i), 2, 0, 5));
+    // 2 daytime busy-from-CPU minutes at 80 % — should count toward 70/80 buckets
+    buckets.push(bucket(vilniusWinterTs("2026-02-10", 14, 0), null, 0, 80));
+    buckets.push(bucket(vilniusWinterTs("2026-02-10", 14, 1), null, 0, 80));
+    const entry = aggregateHost("h1", buckets, 2);
+    expect(entry.baselineSpssCpu).toBeNull();
+    expect(entry.off.minutesAboveThreshold[70]).toBe(2); // counted despite null baseline
+    expect(entry.off.realActiveMinutes).toBe(0); // active classification unavailable
   });
 });
 

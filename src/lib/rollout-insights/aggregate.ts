@@ -173,41 +173,46 @@ export function aggregateHost(
   const on = emptyOnOffAggregate();
   const off = emptyOnOffAggregate();
   let totalMinutes = 0;
-  if (baseline === null) {
-    return {
-      hostId,
-      baselineSpssCpu: null,
-      baselineSampleCount,
-      hasAnySamples,
-      on,
-      off,
-      totalMinutes,
-    };
-  }
-
+  // Note: when baseline is null we still process the loop — minutes-
+  // above-threshold counters don't depend on the spss baseline and need
+  // to stay populated for hosts whose night data was sparse but whose
+  // totalCpu samples are fine. The active-only accumulators below are
+  // guarded so they skip whenever baseline is missing.
   for (const b of buckets) {
+    // Retellect classification runs unconditionally — even idle-from-
+    // spss minutes count toward the threshold buckets so CPU spikes
+    // from non-SCO sources (SQL backup, antivirus, OS task scheduler)
+    // stay visible. python.cpu sum > onCutoff classifies the bucket as
+    // ON; null/missing python signal classifies as OFF (conservative).
+    const retOn = b.retellectCpu !== null && Number.isFinite(b.retellectCpu) && b.retellectCpu > onCutoff;
+    const tgt = retOn ? on : off;
+
+    // Any-minute totalCpu counters — Min > X% lives here. Counted from
+    // ALL minutes with a usable totalCpu reading so the denominator
+    // matches what CPU Timeline reports at the same threshold.
+    if (b.totalCpu !== null && Number.isFinite(b.totalCpu)) {
+      if (b.source === "history") tgt.realTrackedMinutes += b.weightMinutes;
+      else tgt.syntheticTrackedMinutes += b.weightMinutes;
+      // Strict `>` (a bucket sitting exactly on a threshold edge falls
+      // into the next-lower band, matching the legacy heatmap convention).
+      for (const t of ACTIVE_ABOVE_BUCKETS) {
+        if (b.totalCpu > t) tgt.minutesAboveThreshold[t] += b.weightMinutes;
+      }
+    }
+
+    // Active-only accumulators — Avg peak Total CPU and Retellect CPU avg
+    // restrict to busy windows so idle host-time doesn't dilute the comparison.
+    if (baseline === null) continue;
     if (b.spssCpu === null || !Number.isFinite(b.spssCpu)) continue;
     totalMinutes += b.weightMinutes;
     const isActive = b.spssCpu > baseline + thresholdPp;
     if (!isActive) continue;
-    const retOn = b.retellectCpu !== null && Number.isFinite(b.retellectCpu) && b.retellectCpu > onCutoff;
-    const tgt = retOn ? on : off;
-    // Real vs synthetic split — drives confidence later.
     if (b.source === "history") tgt.realActiveMinutes += b.weightMinutes;
     else tgt.syntheticActiveMinutes += b.weightMinutes;
-    // Weighted accumulators. spss is always present (we just checked);
-    // total and retellect may be missing — accumulate only when present
-    // so the eventual avg = sum / minutesWithSignal is honest.
     tgt.sumSpssCpu += b.spssCpu * b.weightMinutes;
     if (b.totalCpu !== null && Number.isFinite(b.totalCpu)) {
       tgt.sumTotalCpu += b.totalCpu * b.weightMinutes;
       tgt.peakTotalCpu = tgt.peakTotalCpu === null ? b.totalCpu : Math.max(tgt.peakTotalCpu, b.totalCpu);
-      // Active-minutes-above-threshold counters. Strict `>` so a bucket
-      // sitting exactly on a threshold edge falls into the next-lower
-      // band (consistent with how the legacy heatmap labelled cells).
-      for (const t of ACTIVE_ABOVE_BUCKETS) {
-        if (b.totalCpu > t) tgt.activeMinutesAboveThreshold[t] += b.weightMinutes;
-      }
     }
     if (b.retellectCpu !== null && Number.isFinite(b.retellectCpu)) {
       tgt.sumRetellectCpu += b.retellectCpu * b.weightMinutes;
@@ -239,7 +244,7 @@ export function mergeOnOff(
       : Math.max(a.peakTotalCpu, b.peakTotalCpu);
   const mergedAbove = { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 } as Record<ActiveAboveBucket, number>;
   for (const t of ACTIVE_ABOVE_BUCKETS) {
-    mergedAbove[t] = a.activeMinutesAboveThreshold[t] + b.activeMinutesAboveThreshold[t];
+    mergedAbove[t] = a.minutesAboveThreshold[t] + b.minutesAboveThreshold[t];
   }
   return {
     realActiveMinutes: a.realActiveMinutes + b.realActiveMinutes,
@@ -248,7 +253,9 @@ export function mergeOnOff(
     sumRetellectCpu: a.sumRetellectCpu + b.sumRetellectCpu,
     sumSpssCpu: a.sumSpssCpu + b.sumSpssCpu,
     peakTotalCpu: peak,
-    activeMinutesAboveThreshold: mergedAbove,
+    realTrackedMinutes: a.realTrackedMinutes + b.realTrackedMinutes,
+    syntheticTrackedMinutes: a.syntheticTrackedMinutes + b.syntheticTrackedMinutes,
+    minutesAboveThreshold: mergedAbove,
   };
 }
 

@@ -77,16 +77,18 @@ interface MatrixRow {
    *  with no baseline are counted in hostCount but contribute nothing
    *  to the aggregate metrics. */
   hostsWithBaseline: number;
-  /** Active minutes (ON-classified) where totalCpu exceeded the
-   *  Threshold filter. Pre-normalised against the group's ON denominator
-   *  by `pctAboveOn`; absolute count is kept for the tooltip. */
+  /** Minutes (anywhere in the window, NOT restricted to busy) where
+   *  totalCpu exceeded the chosen threshold. Counted unconditionally so
+   *  CPU spikes from non-SCO sources (SQL backup, antivirus, OS task)
+   *  stay visible and the column matches CPU Timeline's minute counts. */
   minutesAboveOnAtThreshold: number;
   minutesAboveOffAtThreshold: number;
-  /** Total active minutes (ON, OFF) — denominators for the percent
-   *  rendering. Apple-to-apple: same denominator per direction even if
-   *  groups have very different absolute minute counts. */
-  totalActiveOn: number;
-  totalActiveOff: number;
+  /** Total tracked minutes per direction (any bucket with a usable
+   *  totalCpu reading). Drives the percent denominator. Apple-to-apple:
+   *  same per-direction denominator even when CPU classes have very
+   *  different absolute minute counts. */
+  totalTrackedOn: number;
+  totalTrackedOff: number;
 }
 
 interface DriverSlice {
@@ -399,9 +401,9 @@ export function RtRolloutInsights({
                   </th>
                   {useAggregate && (
                     <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">
-                      Active min &gt; {threshold}%
+                      Min &gt; {threshold}%
                       <span className="ml-1 normal-case font-normal text-gray-400 lowercase">
-                        % of busy
+                        % of tracked
                       </span>
                     </th>
                   )}
@@ -462,13 +464,13 @@ export function RtRolloutInsights({
                       <td className="py-3 px-3 text-center text-xs">
                         <AboveThresholdCell
                           minutes={row.minutesAboveOnAtThreshold}
-                          total={row.totalActiveOn}
+                          total={row.totalTrackedOn}
                           label="ON"
                           accent
                         />
                         <AboveThresholdCell
                           minutes={row.minutesAboveOffAtThreshold}
-                          total={row.totalActiveOff}
+                          total={row.totalTrackedOff}
                           label="OFF"
                         />
                       </td>
@@ -507,9 +509,10 @@ export function RtRolloutInsights({
               (hourly trend, 60 min/bucket). A minute counts as active when{" "}
               <code>spss.cpu &gt; baseline + {activeThresholdPp} pp</code>; baseline is the median spss.cpu
               between 02:00 and 05:00 Europe/Vilnius. Avg peak Total CPU = mean of per-host peak{" "}
-              <code>system.cpu.util[,,avg1]</code> across active minutes. &ldquo;Active min &gt; {threshold}%&rdquo;
-              divides the active minutes that crossed {threshold}% by the group&rsquo;s total active minutes,
-              so columns are comparable across CPU classes regardless of how many minutes each one collected.
+              <code>system.cpu.util[,,avg1]</code> across active minutes. &ldquo;Min &gt; {threshold}%&rdquo;
+              counts every minute (busy or idle) where Total CPU crossed {threshold}%, normalised against
+              the group&rsquo;s total tracked minutes — matches the CPU Timeline minute counts at the same
+              band so the two views agree.
             </p>
           ) : (
             <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
@@ -628,12 +631,14 @@ export function RtRolloutInsights({
                 </dd>
               </div>
               <div>
-                <dt className="font-semibold text-gray-800">Active min &gt; X%</dt>
+                <dt className="font-semibold text-gray-800">Min &gt; X%</dt>
                 <dd className="mt-0.5 leading-relaxed">
-                  Of all active minutes for this group, the percentage where Total CPU exceeded
-                  the high-CPU threshold. Normalised: the denominator is each group&rsquo;s own
-                  active-minute total, so a 3-host class with 1.8k active minutes and a 40-host
-                  class with 30k active minutes compare on the same scale. Hover for absolute count.
+                  Of all tracked minutes for this group (any minute with a usable Total CPU
+                  reading, whether the SCO was busy or idle), the percentage where Total CPU
+                  exceeded the high-CPU threshold. Counted from every minute — same source as
+                  CPU Timeline — so the two views stay consistent at the same threshold.
+                  Normalised against each group&rsquo;s own tracked-minute total so CPU classes
+                  with very different sample counts compare apple-to-apple. Hover for absolute count.
                 </dd>
               </div>
               <div>
@@ -1191,10 +1196,10 @@ function computeRolloutInsightsFromAggregate(
       thresholdPct >= 30 ? 30 :
       20
     ) as 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90;
-    const totalActiveOn = g.on.realActiveMinutes + g.on.syntheticActiveMinutes;
-    const totalActiveOff = g.off.realActiveMinutes + g.off.syntheticActiveMinutes;
-    const minutesAboveOnAtThreshold = g.on.activeMinutesAboveThreshold[thKey];
-    const minutesAboveOffAtThreshold = g.off.activeMinutesAboveThreshold[thKey];
+    const totalTrackedOn = g.on.realTrackedMinutes + g.on.syntheticTrackedMinutes;
+    const totalTrackedOff = g.off.realTrackedMinutes + g.off.syntheticTrackedMinutes;
+    const minutesAboveOnAtThreshold = g.on.minutesAboveThreshold[thKey];
+    const minutesAboveOffAtThreshold = g.off.minutesAboveThreshold[thKey];
 
     // Status — requires at least one ON-classified host to make ANY
     // graded recommendation. Without Retellect data on this CPU class
@@ -1254,8 +1259,8 @@ function computeRolloutInsightsFromAggregate(
       hostsWithBaseline: g.hostsWithBaseline,
       minutesAboveOnAtThreshold,
       minutesAboveOffAtThreshold,
-      totalActiveOn,
-      totalActiveOff,
+      totalTrackedOn,
+      totalTrackedOff,
     });
   }
 
@@ -1500,8 +1505,8 @@ function computeRolloutInsights(
       hostsWithBaseline: 0,
       minutesAboveOnAtThreshold: onMin,
       minutesAboveOffAtThreshold: offMin,
-      totalActiveOn: 0,
-      totalActiveOff: 0,
+      totalTrackedOn: 0,
+      totalTrackedOff: 0,
     });
   }
 
