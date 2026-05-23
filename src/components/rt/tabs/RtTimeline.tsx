@@ -173,6 +173,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   const threshold = filters.threshold;
   const setThreshold = (v: number) => setFilter("threshold", v);
   const period = filters.period;
+  /**
+   * Shared with the Rollout Insights matrix — same RtFiltersContext key.
+   * "tracked" (default) drives the existing heatmap (counts every minute
+   * above the threshold from cpuTrends). "active" UI is wired but Phase 1
+   * only adapts the banner + dims the heatmap; the per-day active
+   * breakdown ships in Phase 2 when aggregateHost grows perDay counters.
+   */
+  const cpuCountFrom = filters.cpuCountFrom;
 
   // ── Period selector: URL is the source of truth ───────────────────
   //
@@ -875,6 +883,49 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         style={{ fontSize: 13, fontWeight: 600, padding: "3px 6px", border: "1px solid #cbd5e1", borderRadius: 4, width: 64, background: "#f8fafc" }}>
         {[50, 60, 70, 80, 90].map((v) => <option key={v} value={v}>{v}%</option>)}
       </select>
+      {/* Count from — synced with the Rollout Insights matrix. Phase 1
+          ships UI parity (the same control is in both filter bars and
+          the active selection persists across tabs); Phase 2 will plumb
+          per-day active classification into the heatmap cells.
+          Until then, switching to Active only dims the heatmap and
+          replaces it with a banner pointing operators at Rollout. */}
+      <span
+        style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}
+        title="Whether the heatmap counts every minute above the threshold (matches Timeline's traditional behaviour) or restricts to SCO-busy minutes for Retellect-only attribution."
+      >
+        Count from
+        <span style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: 12, height: 12, borderRadius: 9999, border: `1px solid ${C.border}`,
+          fontSize: 8, fontWeight: 700, color: "#94a3b8", cursor: "help",
+        }} aria-hidden="true">i</span>
+      </span>
+      <div style={{ display: "inline-flex", border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", background: "#fff" }} role="radiogroup" aria-label="Count from">
+        {([
+          { id: "tracked" as const, label: "All tracked" },
+          { id: "active" as const, label: "Active only" },
+        ]).map((opt, i) => (
+          <button
+            key={opt.id}
+            type="button"
+            role="radio"
+            aria-checked={cpuCountFrom === opt.id}
+            onClick={() => setFilter("cpuCountFrom", opt.id)}
+            style={{
+              padding: "2px 8px",
+              fontSize: 11,
+              fontWeight: cpuCountFrom === opt.id ? 600 : 400,
+              cursor: "pointer",
+              background: cpuCountFrom === opt.id ? "#eff6ff" : "#fff",
+              color: cpuCountFrom === opt.id ? "#1d4ed8" : "#6b7280",
+              border: 0,
+              borderLeft: i === 0 ? "none" : `1px solid ${C.border}`,
+            }}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
       <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
         {([
           { id: "minAbove" as const, label: "Minutes above threshold", tip: "Sample-minutes per day with CPU ≥ threshold — how long it stayed in trouble." },
@@ -1790,14 +1841,27 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             ? `Heatmap: minutes per day with CPU ≥ ${threshold}% per machine. Click a cell to drill down.`
             : "Heatmap: peak CPU per machine per day. Click a cell to drill down."}
         </p>
-        {metric === "minAbove" && (
-          <p style={{ fontSize: 11, color: "#94a3b8", marginBottom: 10, fontStyle: "italic" }}>
-            Counts every minute above the threshold regardless of SCO activity — equivalent to{" "}
-            <strong>Rollout Insights → Count from: All tracked</strong> at the same threshold.
-            Toggle that view to <em>Active only</em> if you need SCO-busy-time attribution.
-          </p>
+        {metric === "minAbove" && cpuCountFrom === "active" && (
+          // Active-only mode banner — the heatmap can't yet show per-day
+          // active-classified counts because cpuTrends comes from
+          // history.get which doesn't know about per-host adaptive
+          // baselines. We dim the heatmap to make it clear the visible
+          // cells are still "all tracked" data, and point at Rollout
+          // Insights where active-only counts are already aggregated.
+          <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "10px 14px", marginBottom: 10 }}>
+            <p style={{ fontSize: 12, color: "#92400e", margin: 0, lineHeight: 1.5 }}>
+              <strong>Active-only mode in Timeline is preview-only.</strong> The heatmap cells
+              below still show every minute above {threshold}% (same as &ldquo;All tracked&rdquo; mode)
+              because per-day active-classified counts need a separate aggregate pipeline.
+              For class-level active-only numbers, switch to{" "}
+              <strong>Rollout Insights → Active only</strong>. Per-day active heatmap is on the
+              roadmap.
+            </p>
+          </div>
         )}
-        {heatmapTable}
+        <div style={{ opacity: metric === "minAbove" && cpuCountFrom === "active" ? 0.55 : 1, transition: "opacity 150ms" }}>
+          {heatmapTable}
+        </div>
         <div style={{ background: "#eff6ff", borderRadius: 6, padding: "10px 14px", marginTop: 14 }}>
           <p style={{ fontSize: 12, color: "#1e40af", margin: 0 }}>
             <strong>How to use:</strong> Click any cell to open day drill-down. Search to filter hosts. Click column headers to sort. Drag the divider to resize.
