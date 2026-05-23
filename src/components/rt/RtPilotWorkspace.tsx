@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { RtOverview } from "./tabs/RtOverview";
 import { RtInventory } from "./tabs/RtInventory";
@@ -268,7 +269,35 @@ export function RtPilotWorkspace({
   const safeInitial = visibleTabs.find((t) => t.id === initialTab)
     ? initialTab
     : visibleTabs[0]?.id ?? "overview";
-  const [activeTab, setActiveTab] = useState(safeInitial);
+  const [activeTab, _setActiveTab] = useState(safeInitial);
+  // Sync activeTab to the URL `?tab=` param. Without this, any
+  // Rollout-Insights-side filter that calls router.push (period change,
+  // active-threshold slider) re-renders the server component and — when
+  // the Zabbix promise is slow — the Suspense fallback briefly unmounts
+  // this workspace. On remount, useState reinitialises from `initialTab`
+  // which was derived from the URL — and since the URL had no `?tab=`,
+  // the user gets dumped on Overview. Mirroring the active tab to the
+  // URL keeps the Suspense remount idempotent.
+  const router = useRouter();
+  const pathname = usePathname();
+  const urlSearchParams = useSearchParams();
+  const setActiveTab = useCallback(
+    (id: string) => {
+      _setActiveTab(id);
+      const params = new URLSearchParams(urlSearchParams.toString());
+      // "overview" is the implicit default — keep URLs short by omitting
+      // it. Other tabs need to be explicit so the param survives any
+      // filter-driven router.push that comes after.
+      if (id === "overview") params.delete("tab");
+      else params.set("tab", id);
+      const query = params.toString();
+      // router.replace + scroll: false — switching tabs shouldn't add a
+      // history entry per click, and the page already scrolls based on
+      // tab content, so the default scroll-restoration would jump.
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [router, pathname, urlSearchParams],
+  );
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
   function handleSync() {
