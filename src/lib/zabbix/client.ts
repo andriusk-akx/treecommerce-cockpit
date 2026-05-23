@@ -683,10 +683,11 @@ export class ZabbixClient {
   ): Promise<Set<string>> {
     if (hostIds.length === 0) return new Set();
     const safeDays = Math.max(1, Math.min(daysBack, 90));
-    // Cache key prefix bumped to v2 alongside the 0.5 -> 0.1 % threshold
-    // change so previously-cached "0 ON" results from the stricter threshold
-    // are invalidated immediately rather than after the next 5-min TTL.
-    const cacheKey = `zabbix:retellectActiveInPeriodHostIds:v2:${safeDays}d:${hostIds.slice().sort().join(",")}`;
+    // Cache key prefix bumped to v3 each time the underlying scoring
+    // rule changes (v2 = threshold 0.5 -> 0.1, v3 = un-truncated batched
+    // trend.get). Older cached "0 ON" results from the truncated path are
+    // invalidated on first hit after deploy, not on the next 5-min TTL.
+    const cacheKey = `zabbix:retellectActiveInPeriodHostIds:v3:${safeDays}d:${hostIds.slice().sort().join(",")}`;
     return (await cached(
       cacheKey,
       async () => {
@@ -713,24 +714,47 @@ export class ZabbixClient {
         for (const it of byPerfKey) itemHostMap.set(String(it.itemid), String(it.hostid));
         if (itemHostMap.size === 0) return new Set<string>();
 
-        // Step 2: trend.get over the period. Pull value_max so we can
-        // filter zero-only hosts out client-side (trend.get's query
-        // language doesn't support server-side numeric filters).
+        // Step 2: trend.get over the period, batched by item id. Pull
+        // value_max so we can filter zero-only hosts out client-side
+        // (trend.get's query language doesn't support server-side numeric
+        // filters).
+        //
+        // Batching: trend.get bucket is hourly, so a single item can produce
+        // up to 90 d × 24 h = 2160 records. Across the Rimi pilot (~111
+        // matched hosts × ~8 python items per host = ~888 items) the
+        // un-batched query would produce ~1.9M records and silently
+        // truncate at the `limit:` cap, dropping later hosts entirely.
+        // Pavilnonys SCO2 was the canonical victim — 658 records >0.1%
+        // existed in trend data (verified via direct Zabbix probe) yet
+        // the host was missing from the returned set. Chunking by 40
+        // items keeps each call well under the per-response ceiling
+        // (40 × 2160 = ~87k buckets max) while still parallelisable.
         const itemIds = Array.from(itemHostMap.keys());
         const timeFrom = Math.floor(Date.now() / 1000) - safeDays * 24 * 3600;
-        const trends = (await this.request("trend.get", {
-          output: ["itemid", "value_max"],
-          itemids: itemIds,
-          time_from: String(timeFrom),
-          limit: 100000,
-        })) as Array<{ itemid: string; value_max: string }>;
-
+        const BATCH = 40;
+        const batches: string[][] = [];
+        for (let i = 0; i < itemIds.length; i += BATCH) {
+          batches.push(itemIds.slice(i, i + BATCH));
+        }
         const out = new Set<string>();
-        for (const t of trends) {
-          const vmax = parseFloat(t.value_max);
-          if (!Number.isFinite(vmax) || vmax <= 0.1) continue;
-          const hostId = itemHostMap.get(String(t.itemid));
-          if (hostId) out.add(hostId);
+        // Sequential to keep Zabbix happy under load — the API can choke
+        // when 20+ trend.get calls fly in parallel against a hot host.
+        for (const batch of batches) {
+          const trends = (await this.request("trend.get", {
+            output: ["itemid", "value_max"],
+            itemids: batch,
+            time_from: String(timeFrom),
+            // Safety belt — well above the worst-case 40 × 2160 = 87 k
+            // per batch so a misconfigured Zabbix item with sub-hour
+            // bucketing won't silently truncate.
+            limit: 200000,
+          })) as Array<{ itemid: string; value_max: string }>;
+          for (const t of trends) {
+            const vmax = parseFloat(t.value_max);
+            if (!Number.isFinite(vmax) || vmax <= 0.1) continue;
+            const hostId = itemHostMap.get(String(t.itemid));
+            if (hostId) out.add(hostId);
+          }
         }
         return out;
       },
