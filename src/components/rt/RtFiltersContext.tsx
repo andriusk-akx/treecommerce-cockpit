@@ -50,6 +50,15 @@ export interface DashboardFilters {
    * separate field so the two filter UIs don't collide. Bounded 0..10.
    */
   activeThresholdPp: number;
+  /**
+   * "Min > X%" column counting mode. `tracked` counts every minute
+   * with a usable totalCpu reading (matches CPU Timeline); `active`
+   * restricts to busy windows (spss > baseline + activeThresholdPp).
+   * Default `tracked` so a new user opening the dashboard sees the same
+   * numbers across tabs at the same threshold; power users switch to
+   * `active` for Retellect-only attribution.
+   */
+  cpuCountFrom: "tracked" | "active";
   /** Drill-down granularity in minutes (1, 5, 15, 60). 1m = native sample rate. */
   granularity: number;
   /** Drill-down chart mode. */
@@ -64,6 +73,7 @@ export const defaultFilters: DashboardFilters = {
   period: "14d",
   threshold: 70,
   activeThresholdPp: 2.0,
+  cpuCountFrom: "tracked",
   granularity: 1,
   chartMode: "bars",
 };
@@ -81,6 +91,7 @@ const FILTER_LABELS: Array<{
   { key: "period", label: "Period", format: (v) => /^\d+$/.test(String(v)) ? `${v}d` : String(v) },
   { key: "threshold", label: "Threshold", format: (v) => `${v}%` },
   { key: "activeThresholdPp", label: "Active", format: (v) => `${v} pp` },
+  { key: "cpuCountFrom", label: "Count from", format: (v) => v === "active" ? "active only" : "all tracked" },
   { key: "granularity", label: "Granularity", format: (v) => `${v}min` },
   { key: "chartMode", label: "Chart", format: (v) => String(v) },
 ];

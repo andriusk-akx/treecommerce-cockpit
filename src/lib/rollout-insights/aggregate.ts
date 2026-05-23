@@ -213,6 +213,11 @@ export function aggregateHost(
     if (b.totalCpu !== null && Number.isFinite(b.totalCpu)) {
       tgt.sumTotalCpu += b.totalCpu * b.weightMinutes;
       tgt.peakTotalCpu = tgt.peakTotalCpu === null ? b.totalCpu : Math.max(tgt.peakTotalCpu, b.totalCpu);
+      // Active-restricted threshold counters — feeds the "Min > X%"
+      // column when the user toggles into active-only mode.
+      for (const t of ACTIVE_ABOVE_BUCKETS) {
+        if (b.totalCpu > t) tgt.activeMinutesAboveThreshold[t] += b.weightMinutes;
+      }
     }
     if (b.retellectCpu !== null && Number.isFinite(b.retellectCpu)) {
       tgt.sumRetellectCpu += b.retellectCpu * b.weightMinutes;
@@ -243,8 +248,10 @@ export function mergeOnOff(
       ? a.peakTotalCpu
       : Math.max(a.peakTotalCpu, b.peakTotalCpu);
   const mergedAbove = { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 } as Record<ActiveAboveBucket, number>;
+  const mergedActiveAbove = { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 } as Record<ActiveAboveBucket, number>;
   for (const t of ACTIVE_ABOVE_BUCKETS) {
     mergedAbove[t] = a.minutesAboveThreshold[t] + b.minutesAboveThreshold[t];
+    mergedActiveAbove[t] = a.activeMinutesAboveThreshold[t] + b.activeMinutesAboveThreshold[t];
   }
   return {
     realActiveMinutes: a.realActiveMinutes + b.realActiveMinutes,
@@ -256,6 +263,7 @@ export function mergeOnOff(
     realTrackedMinutes: a.realTrackedMinutes + b.realTrackedMinutes,
     syntheticTrackedMinutes: a.syntheticTrackedMinutes + b.syntheticTrackedMinutes,
     minutesAboveThreshold: mergedAbove,
+    activeMinutesAboveThreshold: mergedActiveAbove,
   };
 }
 

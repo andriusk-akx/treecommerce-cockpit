@@ -157,6 +157,7 @@ export function RtRolloutInsights({
   const threshold = filters.threshold;
   const storeFilter = filters.store;
   const activeThresholdPpFromFilter = filters.activeThresholdPp;
+  const cpuCountFrom = filters.cpuCountFrom;
 
   // Period selector mirrors RtTimeline's URL-driven pattern. Changing the
   // dropdown pushes ?period=... into the URL, which triggers the page server
@@ -244,8 +245,8 @@ export function RtRolloutInsights({
     [pilot, zabbix, threshold, storeFilter],
   );
   const aggregate = useMemo(
-    () => computeRolloutInsightsFromAggregate(pilot, zabbix, storeFilter, threshold),
-    [pilot, zabbix, storeFilter, threshold],
+    () => computeRolloutInsightsFromAggregate(pilot, zabbix, storeFilter, threshold, cpuCountFrom),
+    [pilot, zabbix, storeFilter, threshold, cpuCountFrom],
   );
   const useAggregate = aggregate !== null;
   const matrix = useAggregate ? aggregate!.matrix : legacy.matrix;
@@ -323,7 +324,7 @@ export function RtRolloutInsights({
             Updating window…
           </span>
         ) : null}
-        {useAggregate && (
+        {useAggregate && cpuCountFrom === "active" && (
           <ActiveThresholdSlider
             value={sliderValue}
             onChange={setSliderValue}
@@ -345,6 +346,12 @@ export function RtRolloutInsights({
           ]}
           onChange={(v) => setFilter("threshold", Number(v))}
         />
+        {useAggregate && (
+          <CountFromToggle
+            value={cpuCountFrom}
+            onChange={(v) => setFilter("cpuCountFrom", v)}
+          />
+        )}
         <FilterSelect
           label="Store"
           value={filters.store}
@@ -403,7 +410,7 @@ export function RtRolloutInsights({
                     <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">
                       Min &gt; {threshold}%
                       <span className="ml-1 normal-case font-normal text-gray-400 lowercase">
-                        % of tracked
+                        {cpuCountFrom === "active" ? "% of busy" : "% of tracked"}
                       </span>
                     </th>
                   )}
@@ -510,9 +517,8 @@ export function RtRolloutInsights({
               <code>spss.cpu &gt; baseline + {activeThresholdPp} pp</code>; baseline is the median spss.cpu
               between 02:00 and 05:00 Europe/Vilnius. Avg peak Total CPU = mean of per-host peak{" "}
               <code>system.cpu.util[,,avg1]</code> across active minutes. &ldquo;Min &gt; {threshold}%&rdquo;
-              counts every minute (busy or idle) where Total CPU crossed {threshold}%, normalised against
-              the group&rsquo;s total tracked minutes — matches the CPU Timeline minute counts at the same
-              band so the two views agree.
+              counts from {cpuCountFrom === "active" ? "active (busy) minutes only" : "all tracked minutes (matches CPU Timeline)"} — toggle via the
+              &ldquo;Count from&rdquo; control above.
             </p>
           ) : (
             <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
@@ -633,12 +639,16 @@ export function RtRolloutInsights({
               <div>
                 <dt className="font-semibold text-gray-800">Min &gt; X%</dt>
                 <dd className="mt-0.5 leading-relaxed">
-                  Of all tracked minutes for this group (any minute with a usable Total CPU
-                  reading, whether the SCO was busy or idle), the percentage where Total CPU
-                  exceeded the high-CPU threshold. Counted from every minute — same source as
-                  CPU Timeline — so the two views stay consistent at the same threshold.
-                  Normalised against each group&rsquo;s own tracked-minute total so CPU classes
-                  with very different sample counts compare apple-to-apple. Hover for absolute count.
+                  Percentage of minutes where Total CPU crossed the high-CPU threshold,
+                  normalised so CPU classes with different sample counts compare apple-to-apple.
+                  The &ldquo;Count from&rdquo; toggle switches the denominator:
+                  {" "}<strong>All tracked</strong> counts every minute with a usable Total CPU
+                  reading — same source as CPU Timeline, so the two views agree at the same
+                  threshold. <strong>Active only</strong> restricts to busy windows
+                  (spss &gt; baseline + active threshold) and is useful when the question is
+                  &ldquo;What does Retellect itself cost when the SCO is transacting?&rdquo; —
+                  it intentionally excludes non-SCO CPU sources (SQL backups, antivirus,
+                  OS housekeeping). Hover the cell for absolute count.
                 </dd>
               </div>
               <div>
@@ -825,6 +835,65 @@ function ActiveThresholdSlider({
       >
         +{value.toFixed(1)} pp
       </span>
+    </label>
+  );
+}
+
+/**
+ * Segmented control: "Count from [All tracked | Active only]".
+ *
+ * Drives the &ldquo;Min &gt; X%&rdquo; column behaviour. All-tracked
+ * counts every minute with a totalCpu reading (matches CPU Timeline);
+ * active-only restricts to busy windows (spss above baseline + active-
+ * threshold pp) for pure Retellect attribution. Default is tracked so
+ * the matrix agrees with Timeline at the same threshold — switching to
+ * active is a power-user move.
+ */
+function CountFromToggle({
+  value,
+  onChange,
+}: {
+  value: "tracked" | "active";
+  onChange: (v: "tracked" | "active") => void;
+}) {
+  const baseBtn =
+    "px-2 py-0.5 text-[11px] font-medium transition";
+  const activeCls = "bg-blue-50 text-blue-700";
+  const inactiveCls = "text-gray-500 hover:text-gray-700";
+  return (
+    <label className="flex items-center gap-2">
+      <span
+        className="text-gray-500 font-medium inline-flex items-center gap-1"
+        title="Whether the Min > X% column counts from every tracked minute (Timeline-consistent) or only from busy minutes (Retellect attribution)."
+      >
+        Count from
+        <span
+          aria-hidden="true"
+          className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-gray-300 text-[9px] font-semibold text-gray-400 cursor-help"
+        >
+          i
+        </span>
+      </span>
+      <div className="inline-flex border border-gray-200 rounded overflow-hidden bg-white" role="radiogroup" aria-label="Count from">
+        <button
+          type="button"
+          role="radio"
+          aria-checked={value === "tracked"}
+          className={`${baseBtn} ${value === "tracked" ? activeCls : inactiveCls}`}
+          onClick={() => onChange("tracked")}
+        >
+          All tracked
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={value === "active"}
+          className={`${baseBtn} border-l border-gray-200 ${value === "active" ? activeCls : inactiveCls}`}
+          onClick={() => onChange("active")}
+        >
+          Active only
+        </button>
+      </div>
     </label>
   );
 }
@@ -1106,6 +1175,7 @@ function computeRolloutInsightsFromAggregate(
   zabbix: ZabbixData,
   storeFilter: string,
   thresholdPct: number,
+  cpuCountFrom: "tracked" | "active",
 ): { matrix: MatrixRow[]; periodDays: number; activeThresholdPp: number } | null {
   const payload = zabbix.rolloutPerHost;
   if (!payload || payload.perHost.length === 0) return null;
@@ -1196,10 +1266,21 @@ function computeRolloutInsightsFromAggregate(
       thresholdPct >= 30 ? 30 :
       20
     ) as 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90;
-    const totalTrackedOn = g.on.realTrackedMinutes + g.on.syntheticTrackedMinutes;
-    const totalTrackedOff = g.off.realTrackedMinutes + g.off.syntheticTrackedMinutes;
-    const minutesAboveOnAtThreshold = g.on.minutesAboveThreshold[thKey];
-    const minutesAboveOffAtThreshold = g.off.minutesAboveThreshold[thKey];
+    // Mode-aware: tracked uses every minute (matches CPU Timeline),
+    // active restricts to busy windows. Same columns either way; only
+    // the denominator and matching counter swap.
+    const totalTrackedOn = cpuCountFrom === "active"
+      ? g.on.realActiveMinutes + g.on.syntheticActiveMinutes
+      : g.on.realTrackedMinutes + g.on.syntheticTrackedMinutes;
+    const totalTrackedOff = cpuCountFrom === "active"
+      ? g.off.realActiveMinutes + g.off.syntheticActiveMinutes
+      : g.off.realTrackedMinutes + g.off.syntheticTrackedMinutes;
+    const minutesAboveOnAtThreshold = cpuCountFrom === "active"
+      ? g.on.activeMinutesAboveThreshold[thKey]
+      : g.on.minutesAboveThreshold[thKey];
+    const minutesAboveOffAtThreshold = cpuCountFrom === "active"
+      ? g.off.activeMinutesAboveThreshold[thKey]
+      : g.off.minutesAboveThreshold[thKey];
 
     // Status — requires at least one ON-classified host to make ANY
     // graded recommendation. Without Retellect data on this CPU class

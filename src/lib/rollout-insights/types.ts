@@ -79,25 +79,31 @@ export interface RolloutOnOffAggregate {
   peakTotalCpu: number | null;
   /** Total tracked minutes from 1-min history samples — any minute
    *  with a usable totalCpu reading, regardless of active classification.
-   *  Drives the &ldquo;Min &gt; X%&rdquo; denominator so the metric stays
-   *  consistent with the CPU Timeline (which also counts from full-day
-   *  totals, not from busy-only). */
+   *  Drives the &ldquo;Min &gt; X%&rdquo; denominator in &ldquo;all tracked&rdquo;
+   *  mode (default; consistent with CPU Timeline). */
   realTrackedMinutes: number;
   /** Total tracked minutes from hourly trend (synthetic 60-min buckets). */
   syntheticTrackedMinutes: number;
   /**
    * Minute-weighted counters for &ldquo;minutes where totalCpu exceeded
-   * each threshold&rdquo; — counted from ALL minutes, not just active
-   * ones. CPU spikes from non-SCO sources (SQL backups, antivirus, OS
-   * housekeeping) used to be invisible here because spss.cpu stays low
-   * while the host runs hot; counting unconditionally restores the
-   * consistency with CPU Timeline at the same threshold band.
+   * each threshold&rdquo; — counted from ALL minutes (tracked mode).
+   * Catches CPU spikes from non-SCO sources (SQL backup, antivirus, OS
+   * housekeeping) so the column matches CPU Timeline at the same band.
    *
    * Convention: strict `>` (a bucket with exactly 70.0 % totalCpu does
    * NOT count toward the 70 bucket). Real history minutes contribute 1,
    * synthetic trend hours contribute 60.
    */
   minutesAboveThreshold: Record<ActiveAboveBucket, number>;
+  /**
+   * Same convention as `minutesAboveThreshold`, but restricted to
+   * ACTIVE buckets only (spss &gt; baseline + threshold pp). Drives the
+   * &ldquo;Min &gt; X%&rdquo; column when the user toggles the matrix into
+   * &ldquo;active-only&rdquo; mode — useful when they want pure Retellect
+   * attribution and intentionally exclude non-SCO CPU sources. Denominator
+   * for that mode is realActiveMinutes + syntheticActiveMinutes.
+   */
+  activeMinutesAboveThreshold: Record<ActiveAboveBucket, number>;
 }
 
 /** Empty aggregate factory — used as the zero element for accumulators. */
@@ -111,6 +117,7 @@ export const emptyOnOffAggregate = (): RolloutOnOffAggregate => ({
   realTrackedMinutes: 0,
   syntheticTrackedMinutes: 0,
   minutesAboveThreshold: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
+  activeMinutesAboveThreshold: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
 });
 
 /** Per-host aggregate, with both ON and OFF directions. */
