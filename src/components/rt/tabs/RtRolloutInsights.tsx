@@ -21,6 +21,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
 import { useRtFilters } from "../RtFiltersContext";
 import { resolveCpuModel, computeCpuTotal } from "./rt-inventory-helpers";
+import { isRetellectActiveToday } from "./rt-overview-helpers";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -619,6 +620,38 @@ function computeRolloutInsights(
     cpuSnapshotByHost.set(hostId, computeCpuTotal(p.user, p.system, p.total));
   }
 
+  // Build the live "Retellect ON" host set the same way RtOverview does:
+  // sum python*.cpu per host, mark a host ON when the latest sample is fresh
+  // (24-hour window via isRetellectActiveToday) AND total CPU > 0.01%.
+  //
+  // Why not use Device.retellectEnabled from the DB: that flag is essentially
+  // never populated in Rimi prod (every device reads false), so the previous
+  // implementation classified every device as OFF and the Decision Matrix's
+  // Peak ON column was always empty. The live signal — "did this host
+  // emit meaningful python.cpu telemetry in the last 24 h" — is what every
+  // other tab on this page already uses (RtOverview tile, RtTimeline RT-ACT
+  // dot, RtInventory filter).
+  const refMs = Date.now();
+  const retellectCpuByHostId = new Map<string, number>();
+  const retellectFreshestMsByHostId = new Map<string, number>();
+  for (const proc of zabbix.procCpu || []) {
+    if (proc.category !== "retellect") continue;
+    const lastMs = proc.lastClock ? new Date(proc.lastClock).getTime() : 0;
+    if (lastMs > 0) {
+      const prev = retellectFreshestMsByHostId.get(proc.hostId) || 0;
+      if (lastMs > prev) retellectFreshestMsByHostId.set(proc.hostId, lastMs);
+      const cur = retellectCpuByHostId.get(proc.hostId) || 0;
+      retellectCpuByHostId.set(proc.hostId, cur + Math.max(0, proc.cpuValue));
+    }
+  }
+  const retellectLiveHostIds = new Set<string>();
+  for (const [hid, totalCpu] of retellectCpuByHostId) {
+    const freshestMs = retellectFreshestMsByHostId.get(hid) || 0;
+    if (isRetellectActiveToday({ freshestMs, refMs, totalCpu })) {
+      retellectLiveHostIds.add(hid);
+    }
+  }
+
   // Group devices by CPU class, splitting by Retellect ON/OFF
   type GroupAcc = {
     model: string;
@@ -645,7 +678,9 @@ function computeRolloutInsights(
     const g = groups.get(model)!;
     g.totalHosts++;
     if (!matchedHost) continue;
-    if (d.retellectEnabled) g.hostsOn.push({ hostId: matchedHost.hostId });
+    // Live python.cpu activity (24 h window) — see retellectLiveHostIds above
+    // for why this replaced d.retellectEnabled.
+    if (retellectLiveHostIds.has(matchedHost.hostId)) g.hostsOn.push({ hostId: matchedHost.hostId });
     else g.hostsOff.push({ hostId: matchedHost.hostId });
   }
 
