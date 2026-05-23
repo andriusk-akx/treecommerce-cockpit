@@ -474,11 +474,13 @@ export function RtRolloutInsights({
                           total={row.totalTrackedOn}
                           label="ON"
                           accent
+                          countFromLabel={cpuCountFrom === "active" ? "busy" : "tracked"}
                         />
                         <AboveThresholdCell
                           minutes={row.minutesAboveOffAtThreshold}
                           total={row.totalTrackedOff}
                           label="OFF"
+                          countFromLabel={cpuCountFrom === "active" ? "busy" : "tracked"}
                         />
                       </td>
                     )}
@@ -913,11 +915,15 @@ function AboveThresholdCell({
   total,
   label,
   accent,
+  countFromLabel,
 }: {
   minutes: number;
   total: number;
   label: "ON" | "OFF";
   accent?: boolean;
+  /** "tracked" or "busy" — drives the tooltip wording so the user can
+   *  tell at a glance which denominator the cell counts against. */
+  countFromLabel: "tracked" | "busy";
 }) {
   const pct = total > 0 ? (minutes / total) * 100 : null;
   const colour =
@@ -930,21 +936,30 @@ function AboveThresholdCell({
           : pct > 0
             ? "text-gray-600"
             : "text-emerald-700";
+  // Visible value:
+  //   • "—" when there is no denominator data at all
+  //   • "<0.1%" when minutes > 0 but the percent rounds below 0.1 — keeps
+  //     the user from concluding "no data" when in fact a handful of
+  //     minutes crossed the threshold; the tooltip still carries the
+  //     absolute count
+  //   • Otherwise a rounded percent
   const formatted = pct === null
     ? "—"
-    : pct < 0.05
-      ? "0%"
-      : pct >= 10
-        ? `${Math.round(pct)}%`
-        : `${pct.toFixed(1)}%`;
+    : minutes > 0 && pct < 0.1
+      ? "<0.1%"
+      : pct < 0.05
+        ? "0%"
+        : pct >= 10
+          ? `${Math.round(pct)}%`
+          : `${pct.toFixed(1)}%`;
   const labelClasses = accent ? "text-blue-600 font-medium" : "text-gray-400 font-normal";
   return (
     <div
       className={`tabular-nums ${colour}`}
       title={
         pct === null
-          ? `No active minutes for ${label}`
-          : `${minutes.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} active minutes (${label})`
+          ? `No ${countFromLabel} minutes for ${label}`
+          : `${minutes.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} ${countFromLabel} minutes (${label})`
       }
     >
       {formatted} <span className={`text-[10px] ${labelClasses}`}>{label}</span>

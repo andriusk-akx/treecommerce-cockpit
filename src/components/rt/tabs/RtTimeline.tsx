@@ -1790,6 +1790,13 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             ? `Heatmap: minutes per day with CPU ≥ ${threshold}% per machine. Click a cell to drill down.`
             : "Heatmap: peak CPU per machine per day. Click a cell to drill down."}
         </p>
+        {metric === "minAbove" && (
+          <p style={{ fontSize: 11, color: "#94a3b8", marginBottom: 10, fontStyle: "italic" }}>
+            Counts every minute above the threshold regardless of SCO activity — equivalent to{" "}
+            <strong>Rollout Insights → Count from: All tracked</strong> at the same threshold.
+            Toggle that view to <em>Active only</em> if you need SCO-busy-time attribution.
+          </p>
+        )}
         {heatmapTable}
         <div style={{ background: "#eff6ff", borderRadius: 6, padding: "10px 14px", marginTop: 14 }}>
           <p style={{ fontSize: 12, color: "#1e40af", margin: 0 }}>
