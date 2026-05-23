@@ -42,6 +42,14 @@ export interface DashboardFilters {
   period: string;
   /** Timeline threshold (used by heatmap colour and exceed count). */
   threshold: number;
+  /**
+   * Rollout Insights "active" threshold in **percentage points** above
+   * each host's spss.cpu baseline. A minute counts as active when
+   * `spss.cpu > baseline + activeThresholdPp`. Conceptually different
+   * from `threshold` (which is an absolute heatmap %); kept as a
+   * separate field so the two filter UIs don't collide. Bounded 0..10.
+   */
+  activeThresholdPp: number;
   /** Drill-down granularity in minutes (1, 5, 15, 60). 1m = native sample rate. */
   granularity: number;
   /** Drill-down chart mode. */
@@ -55,6 +63,7 @@ export const defaultFilters: DashboardFilters = {
   retellectInstalled: null,
   period: "14d",
   threshold: 70,
+  activeThresholdPp: 2.0,
   granularity: 1,
   chartMode: "bars",
 };
@@ -71,6 +80,7 @@ const FILTER_LABELS: Array<{
   { key: "retellectInstalled", label: "Retellect", format: (v) => v === "today" ? "active today" : v === "installed" ? "installed" : "" },
   { key: "period", label: "Period", format: (v) => /^\d+$/.test(String(v)) ? `${v}d` : String(v) },
   { key: "threshold", label: "Threshold", format: (v) => `${v}%` },
+  { key: "activeThresholdPp", label: "Active", format: (v) => `${v} pp` },
   { key: "granularity", label: "Granularity", format: (v) => `${v}min` },
   { key: "chartMode", label: "Chart", format: (v) => String(v) },
 ];
@@ -118,10 +128,16 @@ interface ProviderProps {
    * Empty/undefined means no URL override; localStorage (then defaults) wins.
    */
   initialPeriod?: string;
+  /**
+   * Same pattern as initialPeriod — seeded from page `?at=` URL param so
+   * SSR + client first render use the URL value rather than localStorage
+   * / defaults. Drives the Rollout Insights minute classification.
+   */
+  initialActiveThresholdPp?: number;
   children: ReactNode;
 }
 
-export function RtFiltersProvider({ pilotId, initialPeriod, children }: ProviderProps) {
+export function RtFiltersProvider({ pilotId, initialPeriod, initialActiveThresholdPp, children }: ProviderProps) {
   const storageKey = `rtFilters:${pilotId}`;
 
   // Initialise from localStorage via lazy init. This file is "use client", so
@@ -131,9 +147,11 @@ export function RtFiltersProvider({ pilotId, initialPeriod, children }: Provider
   // the URL-derived `initialPeriod` first so server and client agree on the
   // axis width from the very first render (see ProviderProps doc above).
   const [filters, setFilters] = useState<DashboardFilters>(() => {
-    const seed: DashboardFilters = initialPeriod
-      ? { ...defaultFilters, period: initialPeriod }
-      : defaultFilters;
+    const seed: DashboardFilters = {
+      ...defaultFilters,
+      ...(initialPeriod ? { period: initialPeriod } : {}),
+      ...(initialActiveThresholdPp !== undefined ? { activeThresholdPp: initialActiveThresholdPp } : {}),
+    };
     if (typeof window === "undefined") return seed;
     try {
       const raw = window.localStorage.getItem(storageKey);
@@ -146,6 +164,7 @@ export function RtFiltersProvider({ pilotId, initialPeriod, children }: Provider
         ...defaultFilters,
         ...parsed,
         ...(initialPeriod ? { period: initialPeriod } : {}),
+        ...(initialActiveThresholdPp !== undefined ? { activeThresholdPp: initialActiveThresholdPp } : {}),
       };
       // Migration 2026-04-28: drill-down granularity used to expose 1/5/15/60
       // presets. The 5- and 15-minute buckets were dropped, but legacy

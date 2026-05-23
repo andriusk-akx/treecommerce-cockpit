@@ -8,6 +8,8 @@ import { fetchSource } from "@/lib/data-source";
 import type { ProcessCategory } from "@/lib/zabbix/types";
 import { getCurrentUser } from "@/lib/auth/sessions";
 import { canAccessPilot, allowedTabsFor } from "@/lib/auth/permissions";
+import { fetchRolloutPerHost } from "@/lib/rollout-insights/fetcher";
+import type { RolloutPerHostPayload } from "@/lib/rollout-insights/types";
 
 type ProcCpuPayload = {
   itemId: string;
@@ -26,7 +28,7 @@ export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ pilotId: string }>;
-  searchParams: Promise<{ tab?: string; period?: string }>;
+  searchParams: Promise<{ tab?: string; period?: string; at?: string }>;
 }
 
 /**
@@ -45,10 +47,29 @@ function parsePeriodDays(raw: string | undefined): number {
   return Math.min(Math.max(1, n), 365);
 }
 
+/**
+ * Default "active" threshold (percentage points above each host's
+ * spss.cpu baseline). 2 pp is the value the team agreed on after
+ * sampling several Rimi hosts and seeing typical diurnal swing was
+ * 1.5–2.5 pp on quiet stores. Slider on the page can override this
+ * (`?at=` URL param). Bounded 0..10 pp — values outside that range
+ * either trivialise the classification (0 = every minute counts as
+ * active) or collapse it to silence (10 pp threshold means only
+ * Pentium-tier hosts under sustained busy load classify as active).
+ */
+const ACTIVE_THRESHOLD_PP_DEFAULT = 2.0;
+function parseActiveThresholdPp(raw: string | undefined): number {
+  if (!raw) return ACTIVE_THRESHOLD_PP_DEFAULT;
+  const n = parseFloat(raw);
+  if (!Number.isFinite(n)) return ACTIVE_THRESHOLD_PP_DEFAULT;
+  return Math.min(Math.max(0, n), 10);
+}
+
 export default async function RetellectPilotPage({ params, searchParams }: Props) {
   const { pilotId } = await params;
-  const { tab, period: periodParam } = await searchParams;
+  const { tab, period: periodParam, at: atParam } = await searchParams;
   const periodDays = parsePeriodDays(periodParam);
+  const activeThresholdPp = parseActiveThresholdPp(atParam);
 
   const user = await getCurrentUser();
   if (!user) redirect(`/login?next=/retellect/${pilotId}`);
@@ -108,7 +129,7 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
   // sibling `loading.tsx` covering the Phase 1 (auth + DB pilot fetch)
   // window so the user sees a populated layout from click 0.
   const pilotData: RtPilotData = buildPilotData(pilot);
-  const zabbixDataPromise = loadZabbixDataPayload(pilotId, expectedHostKeys, periodDays);
+  const zabbixDataPromise = loadZabbixDataPayload(pilotId, expectedHostKeys, periodDays, activeThresholdPp);
 
   return (
     <Suspense fallback={<ZabbixLoadingFallback pilot={pilotData} />}>
@@ -117,6 +138,7 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
         zabbixDataPromise={zabbixDataPromise}
         initialTab={tab || "overview"}
         initialPeriod={periodParam}
+        initialActiveThresholdPp={activeThresholdPp}
         allowedTabs={Array.from(allowedTabs)}
       />
     </Suspense>
@@ -129,6 +151,7 @@ async function RtPilotPageContent({
   zabbixDataPromise,
   initialTab,
   initialPeriod,
+  initialActiveThresholdPp,
   allowedTabs,
 }: {
   pilot: RtPilotData;
@@ -144,6 +167,13 @@ async function RtPilotPageContent({
    * heatmap axis until the client's URL-sync useEffect caught up.
    */
   initialPeriod: string | undefined;
+  /**
+   * Active threshold (percentage points above each host's baseline) used
+   * by Rollout Insights to classify a minute as active vs idle. Threaded
+   * from `?at=` URL param so the slider's URL persistence pattern works
+   * end-to-end (SSR + client). See `parseActiveThresholdPp` for bounds.
+   */
+  initialActiveThresholdPp: number;
   allowedTabs: string[];
 }) {
   const zabbix = await zabbixDataPromise;
@@ -153,6 +183,7 @@ async function RtPilotPageContent({
       zabbix={zabbix}
       initialTab={initialTab}
       initialPeriod={initialPeriod}
+      initialActiveThresholdPp={initialActiveThresholdPp}
       allowedTabs={allowedTabs}
     />
   );
@@ -305,6 +336,14 @@ async function loadZabbixDataPayload(
    * fetchers are per-poll-cycle data that doesn't depend on the window.
    */
   periodDays: number = 14,
+  /**
+   * Percentage points above each host's spss.cpu baseline used by
+   * Rollout Insights to classify a bucket as active. Only the
+   * rollout-per-host fetcher reads it. Underlying raw bucket data is
+   * cached threshold-independently, so slider changes re-aggregate the
+   * cached data instead of re-querying Zabbix.
+   */
+  activeThresholdPp: number = 2.0,
 ): Promise<ZabbixData> {
   const [
     zabbixResult,
@@ -315,6 +354,7 @@ async function loadZabbixDataPayload(
     zabbixAgentHealthResult,
     zabbixDeployedHostIds,
     zabbixActiveInPeriodHostIds,
+    zabbixRolloutPerHostResult,
   ] = await Promise.all([
     fetchSource(`zabbix-rt-resources-${pilotId}`, {
       source: "zabbix",
@@ -518,6 +558,41 @@ async function loadZabbixDataPayload(
         return Array.from(active);
       },
     }),
+    // Phase 1 Rollout Insights aggregate: per-host minute-level analytics
+    // with per-host adaptive baseline (median spss.cpu in 02-05h Vilnius
+    // window). Used by the Decision Matrix to compute "avg CPU during
+    // active minutes, split by Retellect ON/OFF" — see
+    // src/lib/rollout-insights/. Cache key includes BOTH periodDays and
+    // activeThresholdPp so changing either re-aggregates (raw Zabbix
+    // payload is cached threshold-independently inside the fetcher).
+    fetchSource(`zabbix-rt-rollout-perhost-${pilotId}-${periodDays}d-at${activeThresholdPp}`, {
+      source: "zabbix",
+      label: "Rollout Insights aggregate (per host)",
+      env: "prod",
+      freshFor: FRESH_MS.history,
+      fetcher: async (): Promise<RolloutPerHostPayload> => {
+        const client = getZabbixClient();
+        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
+        const matchedHostIds = new Set<string>();
+        for (const h of allHosts) {
+          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
+        }
+        if (matchedHostIds.size === 0) {
+          return {
+            activeThresholdPp,
+            periodDays,
+            generatedAt: new Date().toISOString(),
+            perHost: [],
+          };
+        }
+        return await fetchRolloutPerHost(
+          client,
+          Array.from(matchedHostIds),
+          periodDays,
+          activeThresholdPp,
+        );
+      },
+    }),
   ]);
 
   const zabbixHosts = zabbixResult.data || [];
@@ -528,6 +603,7 @@ async function loadZabbixDataPayload(
   const agentHealth = zabbixAgentHealthResult.data || [];
   const deployedHostIds = zabbixDeployedHostIds.data || [];
   const activeInPeriodHostIds = zabbixActiveInPeriodHostIds.data || [];
+  const rolloutPerHost: RolloutPerHostPayload | null = zabbixRolloutPerHostResult.data || null;
 
   // Build Zabbix live data payload
   return {
@@ -612,5 +688,6 @@ async function loadZabbixDataPayload(
     // to never-deployed hosts.
     retellectDeployedHostIds: deployedHostIds as string[],
     retellectActiveInPeriodHostIds: activeInPeriodHostIds as string[],
+    rolloutPerHost,
   };
 }

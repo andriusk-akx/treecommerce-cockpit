@@ -22,6 +22,9 @@ import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
 import { useRtFilters } from "../RtFiltersContext";
 import { resolveCpuModel, computeCpuTotal } from "./rt-inventory-helpers";
 import { isRetellectActiveToday } from "./rt-overview-helpers";
+import type { RolloutOnOffAggregate, RolloutPerHostEntry } from "@/lib/rollout-insights/types";
+import { emptyOnOffAggregate } from "@/lib/rollout-insights/types";
+import { mergeOnOff, weightedAvg } from "@/lib/rollout-insights/aggregate";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -40,9 +43,10 @@ interface MatrixRow {
   hostsOnObserved: number;
   hostsOffObserved: number;
   /** Average per-host peak CPU across the observed hosts in the group.
-   *  Each per-host peak = max trend-bucket value across the period for
-   *  that host. Averaging smooths single-host outliers so the metric
-   *  reflects what's typical for the class rather than the worst spike. */
+   *  - Legacy compute: max trend-bucket value across the FULL period.
+   *  - Aggregate compute: max totalCpu across that host's ACTIVE buckets
+   *    only (busy windows where spss.cpu was above baseline + threshold).
+   *  Averaging across hosts smooths single-host outliers either way. */
   peakOn: number | null;
   peakOff: number | null;
   minAboveOn: number | null;
@@ -55,6 +59,28 @@ interface MatrixRow {
   confidence: Confidence;
   /** True when the OFF column has too few hosts/days to compare. */
   comparabilityWeak: boolean;
+  /** Compute path that produced this row. The aggregate path uses the
+   *  Phase 1 per-host minute-level analytics and exposes the extra
+   *  retellect/active-minutes fields below; legacy path uses the older
+   *  snapshot+daily-trend approximation. */
+  source: "aggregate" | "legacy";
+  /** Avg Retellect CPU % across active minutes classified Retellect ON.
+   *  Aggregate path only — null in legacy. Surfaces "direct Retellect
+   *  attribution" so the comparison isn't just total-CPU based. */
+  avgRetellectOn: number | null;
+  /** Avg Retellect CPU % across active minutes classified Retellect OFF.
+   *  Should be close to 0; deviations indicate a host whose python items
+   *  fired below the 0.5% ON cutoff (drove false-OFF classification). */
+  avgRetellectOff: number | null;
+  /** Sum of real (history) active minutes across ON + OFF in this group.
+   *  Drives the confidence band and the coverage footer. */
+  activeRealMinutes: number;
+  /** Sum of synthetic (60-min trend) active minutes across ON + OFF. */
+  activeSynMinutes: number;
+  /** Hosts that had a computable baseline (≥30 night samples). Hosts
+   *  with no baseline are counted in hostCount but contribute nothing
+   *  to the aggregate metrics. */
+  hostsWithBaseline: number;
 }
 
 interface DriverSlice {
@@ -152,9 +178,33 @@ export function RtRolloutInsights({
     });
   };
 
-  const { matrix, drivers, actions, periodDays } = useMemo(() => {
-    return computeRolloutInsights(pilot, zabbix, threshold, storeFilter);
-  }, [pilot, zabbix, threshold, storeFilter]);
+  // Two compute paths:
+  //   • aggregate — Phase 1 per-host minute-level analytics (server-fetched
+  //     as `zabbix.rolloutPerHost`). Preferred when present because it
+  //     restricts averages to active minutes and surfaces direct Retellect
+  //     attribution alongside total CPU.
+  //   • legacy — snapshot+daily-trend approximation that ran before Phase 1.
+  //     Falls back when the per-host fetch returned null/empty (Zabbix
+  //     unreachable, no matched hosts in pilot). Drivers + actions still
+  //     come from the legacy path either way — Phase 2 will move drivers
+  //     onto the new aggregate; for now the snapshot-based decomposition
+  //     is informative enough.
+  const legacy = useMemo(
+    () => computeRolloutInsights(pilot, zabbix, threshold, storeFilter),
+    [pilot, zabbix, threshold, storeFilter],
+  );
+  const aggregate = useMemo(
+    () => computeRolloutInsightsFromAggregate(pilot, zabbix, storeFilter),
+    [pilot, zabbix, storeFilter],
+  );
+  const useAggregate = aggregate !== null;
+  const matrix = useAggregate ? aggregate!.matrix : legacy.matrix;
+  const periodDays = useAggregate ? aggregate!.periodDays : legacy.periodDays;
+  const activeThresholdPp = useAggregate ? aggregate!.activeThresholdPp : null;
+  // Actions derived from the active matrix so they reflect the correct
+  // status mix; drivers stay from legacy compute (snapshot-based).
+  const actions = useMemo(() => actionsFromMatrix(matrix), [matrix]);
+  const drivers = legacy.drivers;
 
   return (
     <>
@@ -163,8 +213,11 @@ export function RtRolloutInsights({
         <div>
           <h2 className="text-lg font-semibold text-gray-800">Rollout Insights</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            Decision summary for {pilot.name} — last {periodDays} days, threshold {threshold}%.
-            One read tells you which CPU classes to roll out, hold, or optimize.
+            Decision summary for {pilot.name} — last {periodDays} days
+            {useAggregate
+              ? `, active threshold +${activeThresholdPp} pp (above each host's night-time spss.cpu baseline)`
+              : `, threshold ${threshold}%`}
+            . One read tells you which CPU classes to roll out, hold, or optimize.
           </p>
         </div>
       </div>
@@ -259,11 +312,13 @@ export function RtRolloutInsights({
                   <th className="text-left py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase">CPU class</th>
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Hosts</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">
-                    Avg peak CPU
-                    <span className="ml-1 normal-case font-normal text-gray-400 lowercase">per host · ON vs OFF</span>
+                    {useAggregate ? "Avg peak Total CPU" : "Avg peak CPU"}
+                    <span className="ml-1 normal-case font-normal text-gray-400 lowercase">
+                      {useAggregate ? "during active min · ON vs OFF" : "per host · ON vs OFF"}
+                    </span>
                   </th>
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">
-                    Min ≥ {threshold}%
+                    {useAggregate ? "Retellect CPU avg" : `Min ≥ ${threshold}%`}
                   </th>
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Δ peak</th>
                   <th className="text-center py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase">Status</th>
@@ -291,12 +346,25 @@ export function RtRolloutInsights({
                       <OnOffBars peakOn={row.peakOn} peakOff={row.peakOff} threshold={threshold} hostsOnObserved={row.hostsOnObserved} hostsOffObserved={row.hostsOffObserved} />
                     </td>
                     <td className="py-3 px-3 text-center text-xs">
-                      <div className={`font-medium ${minutesColor(row.minAboveOn)}`}>
-                        {fmtMinutes(row.minAboveOn)} <span className="text-gray-400 font-normal">ON</span>
-                      </div>
-                      <div className={`${minutesColor(row.minAboveOff)}`}>
-                        {fmtMinutes(row.minAboveOff)} <span className="text-gray-400 font-normal">OFF</span>
-                      </div>
+                      {row.source === "aggregate" ? (
+                        <>
+                          <div className={`font-medium ${retellectColor(row.avgRetellectOn)}`}>
+                            {fmtPct(row.avgRetellectOn)} <span className="text-gray-400 font-normal">ON</span>
+                          </div>
+                          <div className={`${retellectColor(row.avgRetellectOff)}`}>
+                            {fmtPct(row.avgRetellectOff)} <span className="text-gray-400 font-normal">OFF</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className={`font-medium ${minutesColor(row.minAboveOn)}`}>
+                            {fmtMinutes(row.minAboveOn)} <span className="text-gray-400 font-normal">ON</span>
+                          </div>
+                          <div className={`${minutesColor(row.minAboveOff)}`}>
+                            {fmtMinutes(row.minAboveOff)} <span className="text-gray-400 font-normal">OFF</span>
+                          </div>
+                        </>
+                      )}
                     </td>
                     <td className="py-3 px-3 text-center">
                       <DeltaPill delta={row.deltaPeak} />
@@ -323,14 +391,30 @@ export function RtRolloutInsights({
           </div>
         )}
         {matrix.length > 0 ? (
-          <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
-            Coverage: {matrix.reduce((s, r) => s + r.hostsOnObserved, 0)} ON-hosts &middot;{" "}
-            {matrix.reduce((s, r) => s + r.hostsOffObserved, 0)} OFF-hosts across the last {periodDays}
-            -day window ({matrix.reduce((s, r) => s + r.hostsOnObserved, 0) * periodDays} ON host-days &middot;{" "}
-            {matrix.reduce((s, r) => s + r.hostsOffObserved, 0) * periodDays} OFF host-days observed).
-            Per-host peak = max hourly trend bucket; column shows the average of those per-host peaks.
-            Δ peak = ON avg &minus; OFF avg.
-          </p>
+          useAggregate ? (
+            <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
+              Coverage: {matrix.reduce((s, r) => s + r.hostsOnObserved, 0)} ON-hosts &middot;{" "}
+              {matrix.reduce((s, r) => s + r.hostsOffObserved, 0)} OFF-hosts (per-bucket classification — a
+              host can appear in both columns) across the last {periodDays}-day window.
+              {" "}
+              Active minutes total{" "}
+              {matrix.reduce((s, r) => s + r.activeRealMinutes, 0).toLocaleString("en-US")} reliable
+              {" "}/ {matrix.reduce((s, r) => s + r.activeSynMinutes, 0).toLocaleString("en-US")} synthetic
+              (hourly trend, 60 min/bucket). A minute counts as active when{" "}
+              <code>spss.cpu &gt; baseline + {activeThresholdPp} pp</code>; baseline is the median spss.cpu
+              between 02:00 and 05:00 Europe/Vilnius. Avg peak Total CPU = mean of per-host peak{" "}
+              <code>system.cpu.util[,,avg1]</code> across active minutes. Δ peak = ON mean &minus; OFF mean.
+            </p>
+          ) : (
+            <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
+              Coverage: {matrix.reduce((s, r) => s + r.hostsOnObserved, 0)} ON-hosts &middot;{" "}
+              {matrix.reduce((s, r) => s + r.hostsOffObserved, 0)} OFF-hosts across the last {periodDays}
+              -day window ({matrix.reduce((s, r) => s + r.hostsOnObserved, 0) * periodDays} ON host-days &middot;{" "}
+              {matrix.reduce((s, r) => s + r.hostsOffObserved, 0) * periodDays} OFF host-days observed).
+              Per-host peak = max hourly trend bucket; column shows the average of those per-host peaks.
+              Δ peak = ON avg &minus; OFF avg.
+            </p>
+          )
         ) : null}
       </section>
 
@@ -645,7 +729,195 @@ function minutesColor(n: number | null): string {
   return "text-emerald-700";
 }
 
+/** Compact percentage formatter for the aggregate-path Retellect column. */
+function fmtPct(n: number | null): string {
+  if (n === null || !Number.isFinite(n)) return "—";
+  if (n < 0.05) return "0.0%";
+  return `${n.toFixed(1)}%`;
+}
+
+/** Colour band for the Retellect-avg cell. Anything above ~5 % during
+ *  active minutes is a meaningful CPU pressure source on these tiers. */
+function retellectColor(n: number | null): string {
+  if (n === null) return "text-gray-400";
+  if (n >= 10) return "text-red-600";
+  if (n >= 5) return "text-amber-700";
+  if (n > 0) return "text-gray-600";
+  return "text-emerald-700";
+}
+
 // ─── Compute layer ──────────────────────────────────────────────────
+
+/**
+ * Phase 1 aggregate-based compute path.
+ *
+ * Reads `zabbix.rolloutPerHost` (per-host aggregates already filtered to
+ * active minutes and split by Retellect ON/OFF on the server) and groups
+ * by CPU model. Each row carries:
+ *
+ *   • Peak Total CPU per direction = avg across hosts of each host's max
+ *     totalCpu during its own active windows. Reuses the "avg of per-host
+ *     peaks" convention agreed for legacy compute (see 2b1f961 commit and
+ *     [[feedback_settings_architecture]]), now restricted to busy minutes
+ *     so idle host time can't dilute the comparison.
+ *   • Avg Retellect CPU per direction = weighted average of retellectCpu
+ *     across active minutes, weighted by minute count. Surfaces direct
+ *     Retellect attribution alongside the total-CPU outcome.
+ *   • Active minute counts (real history vs synthetic hourly) drive both
+ *     the confidence band and the coverage footer.
+ *
+ * Per-bucket classification means a single host can contribute to BOTH
+ * the ON and the OFF aggregate (different minutes in the window had
+ * Retellect on vs off). hostsOn / hostsOff therefore count hosts that
+ * contributed at least one minute to each direction — their sum can
+ * exceed hostCount, which is expected and called out in the UI footer.
+ *
+ * Returns null when the per-host payload is missing or empty so the
+ * caller can fall back to the legacy snapshot+trend path without losing
+ * the matrix entirely.
+ */
+function computeRolloutInsightsFromAggregate(
+  pilot: RtPilotData,
+  zabbix: ZabbixData,
+  storeFilter: string,
+): { matrix: MatrixRow[]; periodDays: number; activeThresholdPp: number } | null {
+  const payload = zabbix.rolloutPerHost;
+  if (!payload || payload.perHost.length === 0) return null;
+
+  const perHostMap = new Map<string, RolloutPerHostEntry>(
+    payload.perHost.map((p) => [p.hostId, p]),
+  );
+  const zabbixByName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
+
+  type GroupAcc = {
+    model: string;
+    totalHosts: number;
+    hostsWithBaseline: number;
+    hostsOn: Set<string>;
+    hostsOff: Set<string>;
+    /** Per-host peak totalCpu observed in ON-classified active minutes.
+     *  Aggregated as "avg of per-host peaks", same convention as legacy. */
+    perHostPeakOn: number[];
+    perHostPeakOff: number[];
+    on: RolloutOnOffAggregate;
+    off: RolloutOnOffAggregate;
+  };
+  const groups = new Map<string, GroupAcc>();
+
+  for (const d of pilot.devices) {
+    if (storeFilter !== "all" && d.storeName !== storeFilter) continue;
+    const matchedHost = zabbixByName.get(d.sourceHostKey || "") || zabbixByName.get(d.name);
+    const model = resolveCpuModel(d.cpuModel, matchedHost?.inventory?.cpuModel ?? null, "Unknown");
+    let g = groups.get(model);
+    if (!g) {
+      g = {
+        model,
+        totalHosts: 0,
+        hostsWithBaseline: 0,
+        hostsOn: new Set(),
+        hostsOff: new Set(),
+        perHostPeakOn: [],
+        perHostPeakOff: [],
+        on: emptyOnOffAggregate(),
+        off: emptyOnOffAggregate(),
+      };
+      groups.set(model, g);
+    }
+    g.totalHosts++;
+    if (!matchedHost) continue;
+    const entry = perHostMap.get(matchedHost.hostId);
+    if (!entry) continue; // host had no usable items at all
+    if (entry.baselineSpssCpu === null) continue; // baseline not computable
+    g.hostsWithBaseline++;
+    const onMin = entry.on.realActiveMinutes + entry.on.syntheticActiveMinutes;
+    const offMin = entry.off.realActiveMinutes + entry.off.syntheticActiveMinutes;
+    if (onMin > 0) {
+      g.hostsOn.add(matchedHost.hostId);
+      if (entry.on.peakTotalCpu !== null) g.perHostPeakOn.push(entry.on.peakTotalCpu);
+      g.on = mergeOnOff(g.on, entry.on);
+    }
+    if (offMin > 0) {
+      g.hostsOff.add(matchedHost.hostId);
+      if (entry.off.peakTotalCpu !== null) g.perHostPeakOff.push(entry.off.peakTotalCpu);
+      g.off = mergeOnOff(g.off, entry.off);
+    }
+  }
+
+  // Pure: mean of a non-empty number array, null when empty. Same shape
+  // as the legacy `mean` helper so the matrix rows look identical to the
+  // legacy path for the headline column.
+  const mean = (xs: number[]) =>
+    xs.length === 0 ? null : xs.reduce((s, v) => s + v, 0) / xs.length;
+
+  const matrix: MatrixRow[] = [];
+  for (const g of groups.values()) {
+    const peakOn = mean(g.perHostPeakOn);
+    const peakOff = mean(g.perHostPeakOff);
+    const avgRetellectOn = weightedAvg(g.on, "sumRetellectCpu");
+    const avgRetellectOff = weightedAvg(g.off, "sumRetellectCpu");
+    const deltaPeak = peakOn !== null && peakOff !== null ? peakOn - peakOff : null;
+    const activeRealMinutes = g.on.realActiveMinutes + g.off.realActiveMinutes;
+    const activeSynMinutes = g.on.syntheticActiveMinutes + g.off.syntheticActiveMinutes;
+
+    // Status — uses peakOn-or-peakOff as effective worst case. Same bands
+    // as legacy so users transitioning between paths see consistent
+    // status labels even when underlying numbers differ slightly.
+    const effectivePeak = peakOn ?? peakOff ?? 0;
+    let status: RolloutStatus;
+    if (effectivePeak >= 95) status = "do-not-roll-out";
+    else if (effectivePeak >= 85) status = "optimize";
+    else if (effectivePeak >= 70) status = "validate";
+    else status = "safe";
+
+    // Confidence — driven by total reliable (history-source) minutes
+    // across this group. Bands chosen to match the user-agreed decision
+    // #6: high ≥5 000 reliable minutes (~3 host-days at 1-min cadence),
+    // medium ≥500, low otherwise. Hosts-without-baseline ratio is also
+    // a damper: if half the group's hosts couldn't get a baseline, even
+    // a fat minute count is shaky.
+    const baselineCoverage = g.totalHosts > 0 ? g.hostsWithBaseline / g.totalHosts : 0;
+    let confidence: Confidence;
+    if (activeRealMinutes >= 5000 && baselineCoverage >= 0.5) confidence = "high";
+    else if (activeRealMinutes >= 500) confidence = "medium";
+    else confidence = "low";
+
+    // Comparability — at least 2 hosts contributing to each direction.
+    const comparabilityWeak = !(g.hostsOn.size >= 2 && g.hostsOff.size >= 2);
+
+    matrix.push({
+      model: g.model,
+      hostCount: g.totalHosts,
+      hostsOn: g.hostsOn.size,
+      hostsOff: g.hostsOff.size,
+      hostsOnObserved: g.perHostPeakOn.length,
+      hostsOffObserved: g.perHostPeakOff.length,
+      peakOn,
+      peakOff,
+      minAboveOn: null,
+      minAboveOff: null,
+      deltaPeak,
+      status,
+      confidence,
+      comparabilityWeak,
+      source: "aggregate",
+      avgRetellectOn,
+      avgRetellectOff,
+      activeRealMinutes,
+      activeSynMinutes,
+      hostsWithBaseline: g.hostsWithBaseline,
+    });
+  }
+
+  matrix.sort((a, b) => {
+    if (a.model === "Unknown" && b.model !== "Unknown") return 1;
+    if (b.model === "Unknown" && a.model !== "Unknown") return -1;
+    const r = STATUS_RANK[a.status] - STATUS_RANK[b.status];
+    if (r !== 0) return r;
+    return (b.peakOn ?? b.peakOff ?? 0) - (a.peakOn ?? a.peakOff ?? 0);
+  });
+
+  return { matrix, periodDays: payload.periodDays, activeThresholdPp: payload.activeThresholdPp };
+}
 
 /**
  * Build everything the page renders from the same in-memory snapshot the
@@ -871,6 +1143,12 @@ function computeRolloutInsights(
       status,
       confidence,
       comparabilityWeak,
+      source: "legacy",
+      avgRetellectOn: null,
+      avgRetellectOff: null,
+      activeRealMinutes: 0,
+      activeSynMinutes: 0,
+      hostsWithBaseline: 0,
     });
   }
 
@@ -978,56 +1256,41 @@ function computeRolloutInsights(
   // Hide slices that round to 0 — keeps the bar honest
   void avg;
 
-  // ─── Recommended actions ──────────────────────────────────────────
-  // Derive from the matrix — short, ranked, executive-readable.
-  const actions: { priority: "high" | "medium" | "low"; text: string }[] = [];
-
-  const safeClasses = matrix.filter((m) => m.status === "safe").map((m) => m.model);
-  const validateClasses = matrix.filter((m) => m.status === "validate").map((m) => m.model);
-  const optimizeClasses = matrix
-    .filter((m) => m.status === "optimize")
-    .map((m) => m.model);
-  const blockedClasses = matrix
-    .filter((m) => m.status === "do-not-roll-out")
-    .map((m) => m.model);
-
-  if (safeClasses.length > 0) {
-    actions.push({
-      priority: "high",
-      text: `Roll out first on safe CPU classes: ${formatList(safeClasses)}.`,
-    });
-  }
-  if (validateClasses.length > 0) {
-    actions.push({
-      priority: "medium",
-      text: `Validate borderline classes under controlled peak load: ${formatList(validateClasses)}.`,
-    });
-  }
-  if (optimizeClasses.length > 0) {
-    actions.push({
-      priority: "high",
-      text: `Optimize background and system load before rollout on: ${formatList(optimizeClasses)}.`,
-    });
-  }
-  if (blockedClasses.length > 0) {
-    actions.push({
-      priority: "high",
-      text: `Hold rollout on ${formatList(blockedClasses)} until hardware tier is upgraded.`,
-    });
-  }
-  if (matrix.some((m) => m.confidence === "low") && actions.length < 4) {
-    actions.push({
-      priority: "medium",
-      text: "Improve process-level observability on the weakest fleet segment before a final decision.",
-    });
-  }
-
   return {
     matrix,
     drivers,
-    actions: actions.slice(0, 4),
+    actions: actionsFromMatrix(matrix),
     periodDays,
   };
+}
+
+/**
+ * Derive 1–4 ranked actions from a matrix. Shared by legacy and aggregate
+ * compute paths so the page surface stays consistent regardless of which
+ * data source produced the matrix.
+ */
+function actionsFromMatrix(matrix: MatrixRow[]): { priority: "high" | "medium" | "low"; text: string }[] {
+  const actions: { priority: "high" | "medium" | "low"; text: string }[] = [];
+  const safeClasses = matrix.filter((m) => m.status === "safe").map((m) => m.model);
+  const validateClasses = matrix.filter((m) => m.status === "validate").map((m) => m.model);
+  const optimizeClasses = matrix.filter((m) => m.status === "optimize").map((m) => m.model);
+  const blockedClasses = matrix.filter((m) => m.status === "do-not-roll-out").map((m) => m.model);
+  if (safeClasses.length > 0) {
+    actions.push({ priority: "high", text: `Roll out first on safe CPU classes: ${formatList(safeClasses)}.` });
+  }
+  if (validateClasses.length > 0) {
+    actions.push({ priority: "medium", text: `Validate borderline classes under controlled peak load: ${formatList(validateClasses)}.` });
+  }
+  if (optimizeClasses.length > 0) {
+    actions.push({ priority: "high", text: `Optimize background and system load before rollout on: ${formatList(optimizeClasses)}.` });
+  }
+  if (blockedClasses.length > 0) {
+    actions.push({ priority: "high", text: `Hold rollout on ${formatList(blockedClasses)} until hardware tier is upgraded.` });
+  }
+  if (matrix.some((m) => m.confidence === "low") && actions.length < 4) {
+    actions.push({ priority: "medium", text: "Improve process-level observability on the weakest fleet segment before a final decision." });
+  }
+  return actions.slice(0, 4);
 }
 
 function formatList(items: string[]): string {

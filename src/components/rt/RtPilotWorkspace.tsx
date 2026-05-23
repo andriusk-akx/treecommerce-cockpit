@@ -17,6 +17,7 @@ import { RtDataHealth } from "./tabs/RtDataHealth";
 // across tabs via the provider; the bar can be turned back on by importing
 // it alongside RtFiltersProvider and rendering above the tabs.
 import { RtFiltersProvider } from "./RtFiltersContext";
+import type { RolloutPerHostPayload } from "@/lib/rollout-insights/types";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -185,6 +186,22 @@ export interface ZabbixData {
    * zero-only template-scaffold hosts.
    */
   retellectActiveInPeriodHostIds?: string[];
+  /**
+   * Rollout Insights Phase 1 aggregate: per-host minute-level analytics
+   * with per-host adaptive baselines (median spss.cpu in 02-05h Vilnius
+   * window), classified per-bucket as active/idle and Retellect ON/OFF.
+   *
+   * Computed server-side from minute history (last 14 d) + hourly trend
+   * (older days, synthesised as 60 minutes per hour). The client groups
+   * by CPU model to render the Decision Matrix — see RtRolloutInsights
+   * for the rendering logic and src/lib/rollout-insights/ for the
+   * computation.
+   *
+   * Null when the server fetch failed cleanly (Zabbix unreachable, no
+   * matched hosts in pilot) — the dashboard falls back to the legacy
+   * snapshot-based matrix path so the user still sees something.
+   */
+  rolloutPerHost?: RolloutPerHostPayload | null;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
@@ -217,6 +234,7 @@ export function RtPilotWorkspace({
   zabbix,
   initialTab,
   initialPeriod,
+  initialActiveThresholdPp,
   allowedTabs,
 }: {
   pilot: RtPilotData;
@@ -231,6 +249,13 @@ export function RtPilotWorkspace({
    * RtFiltersProvider for the full rationale.
    */
   initialPeriod?: string;
+  /**
+   * Active threshold (`?at=` URL param, pp above per-host baseline) for
+   * Rollout Insights minute classification. Same SSR-hydration pattern
+   * as `initialPeriod` so the dashboard renders with the URL value from
+   * paint zero rather than flashing the default and then re-rendering.
+   */
+  initialActiveThresholdPp?: number;
   /** Permission keys the current user is allowed to see in this pilot. */
   allowedTabs: string[];
 }) {
@@ -271,7 +296,7 @@ export function RtPilotWorkspace({
   ).length;
 
   return (
-    <RtFiltersProvider pilotId={pilot.id} initialPeriod={initialPeriod}>
+    <RtFiltersProvider pilotId={pilot.id} initialPeriod={initialPeriod} initialActiveThresholdPp={initialActiveThresholdPp}>
     <div>
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
