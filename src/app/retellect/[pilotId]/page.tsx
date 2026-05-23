@@ -504,30 +504,18 @@ async function loadZabbixDataPayload(
       env: "prod",
       freshFor: FRESH_MS.registry,
       fetcher: async (): Promise<string[]> => {
-        const t0 = Date.now();
-        try {
-          const client = getZabbixClient();
-          const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
-          const matchedHostIds = new Set<string>();
-          for (const h of allHosts) {
-            if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
-          }
-          if (matchedHostIds.size === 0) {
-            console.warn(`[active-in-period:${periodDays}d] matchedHostIds is empty`);
-            return [];
-          }
-          const active = await client.getRetellectActiveInPeriodHostIds(
-            Array.from(matchedHostIds),
-            periodDays,
-          );
-          const ms = Date.now() - t0;
-          console.log(`[active-in-period:${periodDays}d] matched=${matchedHostIds.size} active=${active.size} (${ms}ms)`);
-          return Array.from(active);
-        } catch (e) {
-          const ms = Date.now() - t0;
-          console.error(`[active-in-period:${periodDays}d] FAILED after ${ms}ms:`, e);
-          throw e;
+        const client = getZabbixClient();
+        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
+        const matchedHostIds = new Set<string>();
+        for (const h of allHosts) {
+          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
         }
+        if (matchedHostIds.size === 0) return [];
+        const active = await client.getRetellectActiveInPeriodHostIds(
+          Array.from(matchedHostIds),
+          periodDays,
+        );
+        return Array.from(active);
       },
     }),
   ]);
