@@ -33,11 +33,24 @@ interface MatrixRow {
   hostCount: number;
   hostsOn: number;
   hostsOff: number;
+  /** Hosts with at least one usable trend/snapshot sample contributing
+   *  to peakOn. May be < hostsOn when a host has python.cpu activity
+   *  but no system.cpu.util trend data (e.g. agent state=1 across the
+   *  window). Drives the "from N hosts" sub-label under the bar. */
+  hostsOnObserved: number;
+  hostsOffObserved: number;
+  /** Average per-host peak CPU across the observed hosts in the group.
+   *  Each per-host peak = max trend-bucket value across the period for
+   *  that host. Averaging smooths single-host outliers so the metric
+   *  reflects what's typical for the class rather than the worst spike. */
   peakOn: number | null;
   peakOff: number | null;
   minAboveOn: number | null;
   minAboveOff: number | null;
-  deltaPeak: number | null; // peakOn - peakOff
+  /** ON avg peak − OFF avg peak. Positive = Retellect adds CPU pressure
+   *  on top of baseline; negative = the OFF host(s) happen to peak higher
+   *  for unrelated reasons (typically a small-sample artefact). */
+  deltaPeak: number | null;
   status: RolloutStatus;
   confidence: Confidence;
   /** True when the OFF column has too few hosts/days to compare. */
@@ -274,7 +287,7 @@ export function RtRolloutInsights({
                       </div>
                     </td>
                     <td className="py-3 px-3">
-                      <OnOffBars peakOn={row.peakOn} peakOff={row.peakOff} threshold={threshold} />
+                      <OnOffBars peakOn={row.peakOn} peakOff={row.peakOff} threshold={threshold} hostsOnObserved={row.hostsOnObserved} hostsOffObserved={row.hostsOffObserved} />
                     </td>
                     <td className="py-3 px-3 text-center text-xs">
                       <div className={`font-medium ${minutesColor(row.minAboveOn)}`}>
@@ -308,6 +321,16 @@ export function RtRolloutInsights({
             </table>
           </div>
         )}
+        {matrix.length > 0 ? (
+          <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
+            Coverage: {matrix.reduce((s, r) => s + r.hostsOnObserved, 0)} ON-hosts &middot;{" "}
+            {matrix.reduce((s, r) => s + r.hostsOffObserved, 0)} OFF-hosts across the last {periodDays}
+            -day window ({matrix.reduce((s, r) => s + r.hostsOnObserved, 0) * periodDays} ON host-days &middot;{" "}
+            {matrix.reduce((s, r) => s + r.hostsOffObserved, 0) * periodDays} OFF host-days observed).
+            Per-host peak = max hourly trend bucket; column shows the average of those per-host peaks.
+            Δ peak = ON avg &minus; OFF avg.
+          </p>
+        ) : null}
       </section>
 
       {/* ── B + C side by side on wide screens, stacked on narrow ── */}
@@ -434,15 +457,19 @@ function OnOffBars({
   peakOn,
   peakOff,
   threshold,
+  hostsOnObserved,
+  hostsOffObserved,
 }: {
   peakOn: number | null;
   peakOff: number | null;
   threshold: number;
+  hostsOnObserved: number;
+  hostsOffObserved: number;
 }) {
   return (
-    <div className="space-y-1 max-w-[220px]">
-      <BarRow label="ON" value={peakOn} threshold={threshold} accent />
-      <BarRow label="OFF" value={peakOff} threshold={threshold} accent={false} />
+    <div className="space-y-1 max-w-[260px]">
+      <BarRow label="ON" value={peakOn} threshold={threshold} accent observed={hostsOnObserved} />
+      <BarRow label="OFF" value={peakOff} threshold={threshold} accent={false} observed={hostsOffObserved} />
     </div>
   );
 }
@@ -452,11 +479,16 @@ function BarRow({
   value,
   threshold,
   accent,
+  observed,
 }: {
   label: string;
   value: number | null;
   threshold: number;
   accent: boolean;
+  /** Host count contributing to the avg shown by `value`. Rendered as
+   *  a small "from N" sub-label after the percentage so the user can
+   *  tell whether the aggregate covers a meaningful sample. */
+  observed: number;
 }) {
   const pct = value !== null ? Math.min(100, Math.max(0, value)) : 0;
   const color =
@@ -498,6 +530,9 @@ function BarRow({
         }`}
       >
         {value === null ? "—" : `${value.toFixed(0)}%`}
+      </span>
+      <span className="w-[60px] text-left text-[10px] text-gray-400 leading-tight">
+        from {observed} {observed === 1 ? "host" : "hosts"}
       </span>
     </div>
   );
@@ -817,6 +852,8 @@ function computeRolloutInsights(
       hostCount: g.totalHosts,
       hostsOn: onSamples,
       hostsOff: offSamples,
+      hostsOnObserved: onPeaks.length,
+      hostsOffObserved: offPeaks.length,
       peakOn,
       peakOff,
       minAboveOn,
