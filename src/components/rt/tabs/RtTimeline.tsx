@@ -468,16 +468,27 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         // Keep parallel arrays of full trend data (max/avg/min) so cell tooltips
         // can show day-level context alongside the displayed peak.
         let dayTrends: (ZabbixCpuTrend | null)[];
+        // Per-day active counters from rolloutPerHost — drives the heatmap
+        // when the user toggles into Count from = "Active only". null when
+        // the host isn't in rolloutPerHost (no spss.cpu items, broken
+        // agent) or the day has no active minutes.
+        let dayActives: (PerDayActiveCounters | null)[];
         if (zHost && hasTrendData) {
           const hostTrends = trendByHostDate.get(zHost.hostId);
+          const hostPerDayActive = perDayActiveByHost.get(zHost.hostId);
           dayTrends = dates.map((d) => {
             const dateStr = d.toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" });
             return hostTrends?.get(dateStr) ?? null;
+          });
+          dayActives = dates.map((d) => {
+            const dateStr = d.toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" });
+            return hostPerDayActive?.get(dateStr) ?? null;
           });
           peaks = dayTrends.map((t) => t ? t.max : null);
         } else {
           peaks = Array<number | null>(days).fill(null);
           dayTrends = Array<ZabbixCpuTrend | null>(days).fill(null);
+          dayActives = Array<PerDayActiveCounters | null>(days).fill(null);
         }
         // Aggregate sample-level minute counts across the visible period.
         // `minutesAbove` and `totalMinutes` are the new exceedance metric:
@@ -492,6 +503,19 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           if (!t) continue;
           if (t.minutesAbove) minutesAbove += t.minutesAbove[thKey] ?? 0;
           if (typeof t.totalSamples === "number") totalMinutes += t.totalSamples;
+        }
+        // Parallel sum for Active-only mode — pulls from the per-day
+        // active counters in rolloutPerHost. Used by the sort/stats
+        // bar when cpuCountFrom === "active" so totals match cells.
+        // thKey is one of the precomputed bands {20,…,90} so the index
+        // is type-safe by construction.
+        const activeThKey = thKey as 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90;
+        let activeMinutesAbove = 0;
+        let activeTotalMinutes = 0;
+        for (const a of dayActives) {
+          if (!a) continue;
+          activeMinutesAbove += a.activeMinutesAbove[activeThKey] ?? 0;
+          activeTotalMinutes += a.activeRealMinutes + a.activeSyntheticMinutes;
         }
         const exceedDays = peaks.filter((p): p is number => p !== null && p >= threshold).length;
         // Live Retellect signal — same definition as RtOverview: python.cpu items
@@ -553,9 +577,9 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             : effectiveCores > 0
               ? `${effectiveCores}-core (model unknown)`
               : "—";
-        return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: resolvedCpuModel, deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, rtActive, rtDeployed, rtActiveToday, currentCpu: Math.round(cpuTotal * 10) / 10, cores: effectiveCores, coresSource, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, exceedDays, minutesAbove, totalMinutes };
+        return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: resolvedCpuModel, deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, rtActive, rtDeployed, rtActiveToday, currentCpu: Math.round(cpuTotal * 10) / 10, cores: effectiveCores, coresSource, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, dayActives, exceedDays, minutesAbove, totalMinutes, activeMinutesAbove, activeTotalMinutes };
       });
-  }, [pilot, zabbixByName, cpuDetail, trendByHostDate, retellectByHost, storeFilter, threshold, periodDays, dates, hasTrendData]);
+  }, [pilot, zabbixByName, cpuDetail, trendByHostDate, perDayActiveByHost, retellectByHost, storeFilter, threshold, periodDays, dates, hasTrendData]);
 
   // Unique CPU model list for the dropdown — derived from currently visible
   // (post-store-filter) rows so we don't offer models that aren't applicable.
@@ -1229,11 +1253,26 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           // Metric switch — "peak" shows day-MAX %, "minAbove" shows the
           // minute-count above the active threshold for the same day. Both
           // colour by their own buckets; "exceeded" still drives bold/white.
-          const minAbove = trend?.minutesAbove?.[thKey] ?? 0;
+          // Count-from switch: All tracked uses cpuTrends (every minute);
+          // Active only uses rolloutPerHost.perHost[].perDay[] (busy-only).
+          const dayActive = row.dayActives?.[i];
+          const minAbove = cpuCountFrom === "active"
+            ? (dayActive?.activeMinutesAbove[thKey] ?? 0)
+            : (trend?.minutesAbove?.[thKey] ?? 0);
+          // hasValue for Active only requires perDay data — hosts without
+          // spss.cpu items (no baseline computable) won't have it; cells
+          // render as a striped "—" to make that absence visible rather
+          // than misread as "no spikes".
+          const hasActiveValue = cpuCountFrom === "active" ? !!dayActive : true;
+          const hasMinAboveValue = metric === "minAbove" ? hasActiveValue : true;
+          // Active-only mode with no perDay entry for this (host, day) →
+          // we genuinely can't render a count; otherwise hasValue stays
+          // driven by the trend record like before.
+          const cellHasValue = hasValue && hasMinAboveValue;
           const exceeded = metric === "peak"
-            ? (hasValue && (peak ?? 0) >= threshold)
-            : (hasValue && minAbove > 0);
-          const bg = !hasValue
+            ? (cellHasValue && (peak ?? 0) >= threshold)
+            : (cellHasValue && minAbove > 0);
+          const bg = !cellHasValue
             ? "#f9fafb"
             : metric === "peak"
               ? ((peak ?? 0) >= 90 ? C.criticalBg
@@ -1250,7 +1289,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 : minAbove >= 1  ? C.thresholdBg
                 : C.belowBg);
           const cellLabel = (() => {
-            if (!hasValue) return "—";
+            if (!cellHasValue) return "—";
             if (metric === "peak") return Math.round(peak!);
             if (minAbove === 0) return "0";
             if (minAbove >= 1000) return `${(minAbove / 1000).toFixed(1)}k`;
@@ -1858,26 +1897,18 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             : "Heatmap: peak CPU per machine per day. Click a cell to drill down."}
         </p>
         {metric === "minAbove" && cpuCountFrom === "active" && (
-          // Active-only mode banner — the heatmap can't yet show per-day
-          // active-classified counts because cpuTrends comes from
-          // history.get which doesn't know about per-host adaptive
-          // baselines. We dim the heatmap to make it clear the visible
-          // cells are still "all tracked" data, and point at Rollout
-          // Insights where active-only counts are already aggregated.
-          <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "10px 14px", marginBottom: 10 }}>
-            <p style={{ fontSize: 12, color: "#92400e", margin: 0, lineHeight: 1.5 }}>
-              <strong>Active-only mode in Timeline is preview-only.</strong> The heatmap cells
-              below still show every minute above {threshold}% (same as &ldquo;All tracked&rdquo; mode)
-              because per-day active-classified counts need a separate aggregate pipeline.
-              For class-level active-only numbers, switch to{" "}
-              <strong>Rollout Insights → Active only</strong>. Per-day active heatmap is on the
-              roadmap.
+          <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 6, padding: "10px 14px", marginBottom: 10 }}>
+            <p style={{ fontSize: 12, color: "#1e40af", margin: 0, lineHeight: 1.5 }}>
+              <strong>Active-only heatmap.</strong> Each cell counts only minutes where the SCO
+              was busy (<code>spss.cpu &gt; baseline + active threshold</code>) AND total CPU was
+              above {threshold}%. Hosts without an spss.cpu signal show striped &ldquo;—&rdquo;
+              cells — we can&rsquo;t classify activity without that signal. Switch to{" "}
+              <strong>All tracked</strong> to count every minute above {threshold}% regardless of
+              SCO activity (matches the historic Timeline behaviour).
             </p>
           </div>
         )}
-        <div style={{ opacity: metric === "minAbove" && cpuCountFrom === "active" ? 0.55 : 1, transition: "opacity 150ms" }}>
-          {heatmapTable}
-        </div>
+        {heatmapTable}
         <div style={{ background: "#eff6ff", borderRadius: 6, padding: "10px 14px", marginTop: 14 }}>
           <p style={{ fontSize: 12, color: "#1e40af", margin: 0 }}>
             <strong>How to use:</strong> Click any cell to open day drill-down. Search to filter hosts. Click column headers to sort. Drag the divider to resize.
