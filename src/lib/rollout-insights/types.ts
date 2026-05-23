@@ -50,13 +50,16 @@ export type RolloutSampleSource = "history" | "trend";
  *                               weighted averages across multiple hosts
  *                               (avg = sum / minutes).
  */
-/** Threshold bucket keys for the "minutes above X%" counters. Aligned
- *  with the legacy heatmap thresholds (50/60/70/80/90) so the matrix
- *  column reuses the existing `threshold` filter UI. Tracked as
- *  minute-weighted counters: a real history minute contributes 1, a
- *  synthetic trend hour contributes 60. */
-export type ActiveAboveBucket = 50 | 60 | 70 | 80 | 90;
-export const ACTIVE_ABOVE_BUCKETS: readonly ActiveAboveBucket[] = [50, 60, 70, 80, 90] as const;
+/** Threshold bucket keys for the "minutes above X%" counters. Includes
+ *  20/30/40 bands below the legacy 50/60/70/80/90 so the column stays
+ *  informative on hardware whose typical busy-minute peak sits in the
+ *  30–50% range — observed on Rimi i3-4330/i3-6100 SCOs where median
+ *  per-host peak active-min Total CPU is ~51%, so 70% catches only the
+ *  worst 10% of hosts and most rows would otherwise show 0%. Tracked
+ *  as minute-weighted counters: a real history minute contributes 1,
+ *  a synthetic trend hour contributes 60. */
+export type ActiveAboveBucket = 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90;
+export const ACTIVE_ABOVE_BUCKETS: readonly ActiveAboveBucket[] = [20, 30, 40, 50, 60, 70, 80, 90] as const;
 
 export interface RolloutOnOffAggregate {
   /** Total active minutes from 1-min history samples. */
@@ -95,7 +98,7 @@ export const emptyOnOffAggregate = (): RolloutOnOffAggregate => ({
   sumRetellectCpu: 0,
   sumSpssCpu: 0,
   peakTotalCpu: null,
-  activeMinutesAboveThreshold: { 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
+  activeMinutesAboveThreshold: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
 });
 
 /** Per-host aggregate, with both ON and OFF directions. */

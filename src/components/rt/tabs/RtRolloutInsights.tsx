@@ -326,6 +326,9 @@ export function RtRolloutInsights({
           label="High-CPU threshold"
           value={String(threshold)}
           options={[
+            { v: "20", l: "20%" },
+            { v: "30", l: "30%" },
+            { v: "40", l: "40%" },
             { v: "50", l: "50%" },
             { v: "60", l: "60%" },
             { v: "70", l: "70%" },
@@ -573,8 +576,11 @@ export function RtRolloutInsights({
                 <dt className="font-semibold text-gray-800">High-CPU threshold (%)</dt>
                 <dd className="mt-0.5 leading-relaxed">
                   Absolute <code>system.cpu.util[,,avg1]</code> level used by the &ldquo;Active min &gt; X%&rdquo;
-                  column. Changing it re-aggregates from the already-cached per-host counters
-                  (50/60/70/80/90 bands), so the matrix updates without a Zabbix round-trip.
+                  column. Tunable across 20/30/40/50/60/70/80/90 bands precomputed per host —
+                  changing it re-aggregates from cache without a Zabbix round-trip. Pick a lower
+                  band when typical busy peaks sit below 50% (Rimi i3-4330/i3-6100 hardware
+                  spends most active minutes in the 30–60% range; 70% catches only the
+                  worst-loaded hosts and most rows would read 0%).
                 </dd>
               </div>
               <div>
@@ -1155,7 +1161,16 @@ function computeRolloutInsightsFromAggregate(
     // Snap the user-chosen heatmap threshold (50/60/70/80/90) onto the
     // available buckets so the column reads from a precomputed counter
     // instead of replaying every bucket per render.
-    const thKey = (thresholdPct >= 90 ? 90 : thresholdPct >= 80 ? 80 : thresholdPct >= 70 ? 70 : thresholdPct >= 60 ? 60 : 50) as 50 | 60 | 70 | 80 | 90;
+    const thKey = (
+      thresholdPct >= 90 ? 90 :
+      thresholdPct >= 80 ? 80 :
+      thresholdPct >= 70 ? 70 :
+      thresholdPct >= 60 ? 60 :
+      thresholdPct >= 50 ? 50 :
+      thresholdPct >= 40 ? 40 :
+      thresholdPct >= 30 ? 30 :
+      20
+    ) as 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90;
     const totalActiveOn = g.on.realActiveMinutes + g.on.syntheticActiveMinutes;
     const totalActiveOff = g.off.realActiveMinutes + g.off.syntheticActiveMinutes;
     const minutesAboveOnAtThreshold = g.on.activeMinutesAboveThreshold[thKey];

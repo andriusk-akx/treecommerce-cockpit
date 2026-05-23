@@ -237,7 +237,7 @@ export function mergeOnOff(
     : b.peakTotalCpu === null
       ? a.peakTotalCpu
       : Math.max(a.peakTotalCpu, b.peakTotalCpu);
-  const mergedAbove = { 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 } as Record<ActiveAboveBucket, number>;
+  const mergedAbove = { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 } as Record<ActiveAboveBucket, number>;
   for (const t of ACTIVE_ABOVE_BUCKETS) {
     mergedAbove[t] = a.activeMinutesAboveThreshold[t] + b.activeMinutesAboveThreshold[t];
   }
