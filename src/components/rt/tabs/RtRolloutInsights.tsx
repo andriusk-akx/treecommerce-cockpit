@@ -16,7 +16,7 @@
  * the answer; everything else exists to qualify, not to invite more digging.
  */
 
-import { useEffect, useMemo, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
 import { useRtFilters } from "../RtFiltersContext";
@@ -142,6 +142,7 @@ export function RtRolloutInsights({
   const { filters, setFilter } = useRtFilters();
   const threshold = filters.threshold;
   const storeFilter = filters.store;
+  const activeThresholdPpFromFilter = filters.activeThresholdPp;
 
   // Period selector mirrors RtTimeline's URL-driven pattern. Changing the
   // dropdown pushes ?period=... into the URL, which triggers the page server
@@ -178,6 +179,41 @@ export function RtRolloutInsights({
     });
   };
 
+  // Active-threshold slider — local state with 300 ms debounce before URL
+  // push. The slider drags through ~21 discrete positions (0–10 pp in
+  // 0.5 pp steps); without debouncing every step would fire its own
+  // router.push and trigger a Server Component refetch, swamping Zabbix.
+  // The local state keeps the UI responsive; URL sync runs once the user
+  // stops moving the handle. URL → context sync covers the inverse
+  // direction (deep-link / back-nav).
+  const [sliderValue, setSliderValue] = useState(activeThresholdPpFromFilter);
+  useEffect(() => {
+    setSliderValue(activeThresholdPpFromFilter);
+  }, [activeThresholdPpFromFilter]);
+  useEffect(() => {
+    const urlAt = urlSearchParams.get("at");
+    if (!urlAt) return;
+    const parsed = parseFloat(urlAt);
+    if (!Number.isFinite(parsed)) return;
+    if (parsed !== filters.activeThresholdPp) {
+      setFilter("activeThresholdPp", parsed);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSearchParams]);
+  useEffect(() => {
+    if (sliderValue === activeThresholdPpFromFilter) return;
+    const t = setTimeout(() => {
+      setFilter("activeThresholdPp", sliderValue);
+      const params = new URLSearchParams(urlSearchParams.toString());
+      params.set("at", String(sliderValue));
+      startTransition(() => {
+        router.push(`${pathname}?${params.toString()}`);
+      });
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sliderValue]);
+
   // Two compute paths:
   //   • aggregate — Phase 1 per-host minute-level analytics (server-fetched
   //     as `zabbix.rolloutPerHost`). Preferred when present because it
@@ -205,6 +241,25 @@ export function RtRolloutInsights({
   // status mix; drivers stay from legacy compute (snapshot-based).
   const actions = useMemo(() => actionsFromMatrix(matrix), [matrix]);
   const drivers = legacy.drivers;
+
+  // Client-side anomaly surfacing — fires once per rendered matrix so
+  // operators investigating "why does row X look weird" can grep the
+  // browser console for the summary instead of digging into payloads.
+  // Counts only; the actual numbers are visible in the UI itself.
+  useEffect(() => {
+    if (!useAggregate) return;
+    const lowConfidence = matrix.filter((r) => r.confidence === "low").length;
+    const noBaselineHosts = matrix.reduce((s, r) => s + (r.hostCount - r.hostsWithBaseline), 0);
+    const emptyGroups = matrix.filter(
+      (r) => r.activeRealMinutes + r.activeSynMinutes === 0,
+    ).length;
+    if (lowConfidence === 0 && noBaselineHosts === 0 && emptyGroups === 0) return;
+    console.warn(
+      `[rollout-insights] matrix diagnostics — rows=${matrix.length} ` +
+        `lowConfidence=${lowConfidence} hostsWithoutBaseline=${noBaselineHosts} ` +
+        `zeroActiveGroups=${emptyGroups}`,
+    );
+  }, [matrix, useAggregate]);
 
   return (
     <>
@@ -254,18 +309,26 @@ export function RtRolloutInsights({
             Updating window…
           </span>
         ) : null}
-        <FilterSelect
-          label="Threshold"
-          value={String(threshold)}
-          options={[
-            { v: "50", l: "50%" },
-            { v: "60", l: "60%" },
-            { v: "70", l: "70%" },
-            { v: "80", l: "80%" },
-            { v: "90", l: "90%" },
-          ]}
-          onChange={(v) => setFilter("threshold", Number(v))}
-        />
+        {useAggregate ? (
+          <ActiveThresholdSlider
+            value={sliderValue}
+            onChange={setSliderValue}
+            pending={sliderValue !== activeThresholdPpFromFilter}
+          />
+        ) : (
+          <FilterSelect
+            label="Threshold"
+            value={String(threshold)}
+            options={[
+              { v: "50", l: "50%" },
+              { v: "60", l: "60%" },
+              { v: "70", l: "70%" },
+              { v: "80", l: "80%" },
+              { v: "90", l: "90%" },
+            ]}
+            onChange={(v) => setFilter("threshold", Number(v))}
+          />
+        )}
         <FilterSelect
           label="Store"
           value={filters.store}
@@ -534,6 +597,61 @@ function FilterSelect({
           </option>
         ))}
       </select>
+    </label>
+  );
+}
+
+/**
+ * Active-threshold slider — only renders on the aggregate compute path.
+ *
+ * Why a slider here (vs the legacy 5-step Threshold dropdown): the active
+ * threshold is a CONTINUOUS tuning parameter — "how aggressive should
+ * we be at calling a minute 'busy'?". A coarse dropdown would prevent
+ * users from feeling out the value's effect on the matrix in small
+ * steps, which is the whole point of letting them adjust it. 0.5 pp
+ * resolution matches the meaningful step size given typical diurnal
+ * swing of 1–3 pp on Rimi hosts.
+ *
+ * Bounds 0–10 pp:
+ *   • 0 pp = every minute above the baseline counts (trivial — every
+ *     bucket where the agent reported any data is active).
+ *   • 10 pp = only sustained heavy load counts (Pentium-tier hosts
+ *     working hard); higher values collapse the matrix to silence on
+ *     mid-tier hardware.
+ *
+ * Pending state (`pending` prop) reflects the debounce window — the
+ * value moved but the URL push hasn't fired yet. Renders the inline
+ * value badge in a muted tone so the user can see "your change is
+ * pending, hold on".
+ */
+function ActiveThresholdSlider({
+  value,
+  onChange,
+  pending,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  pending: boolean;
+}) {
+  return (
+    <label className="flex items-center gap-2">
+      <span className="text-gray-500 font-medium">Active threshold</span>
+      <input
+        type="range"
+        min={0}
+        max={10}
+        step={0.5}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="w-32 accent-blue-600"
+        aria-label="Active threshold in percentage points above baseline"
+      />
+      <span
+        className={`tabular-nums text-xs font-medium ${pending ? "text-amber-600" : "text-gray-700"}`}
+        title={pending ? "Releasing soon — debounce 300 ms" : undefined}
+      >
+        +{value.toFixed(1)} pp
+      </span>
     </label>
   );
 }

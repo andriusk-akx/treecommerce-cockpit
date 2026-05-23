@@ -338,6 +338,36 @@ export function aggregateRawBuckets(
   const perHost = raw.perHostBuckets.map(({ hostId, buckets }) =>
     aggregateHost(hostId, buckets, thresholdPp),
   );
+  // Observability: surface conditions that wouldn't crash the page but
+  // mean the matrix is built from suspect data. Logged once per request
+  // (per host) so they show up in Railway logs without spamming. The UI
+  // already badges these states; the log is for "why does X look weird".
+  let warnedTotalActiveZero = 0;
+  let warnedNoBaseline = 0;
+  let warnedHasSamplesButNoMinutes = 0;
+  for (const entry of perHost) {
+    const onMin = entry.on.realActiveMinutes + entry.on.syntheticActiveMinutes;
+    const offMin = entry.off.realActiveMinutes + entry.off.syntheticActiveMinutes;
+    if (entry.baselineSpssCpu === null && entry.hasAnySamples) {
+      warnedNoBaseline++;
+    }
+    if (entry.hasAnySamples && entry.totalMinutes > 0 && onMin + offMin === 0) {
+      // Sample data exists but nothing crossed the active threshold —
+      // usually a quiet host or threshold set too high. Worth noting once
+      // per host so a sudden flood of these flags a config drift.
+      warnedHasSamplesButNoMinutes++;
+    }
+    if (!entry.hasAnySamples) {
+      warnedTotalActiveZero++;
+    }
+  }
+  const totalHosts = perHost.length;
+  if (totalHosts > 0 && (warnedNoBaseline > 0 || warnedHasSamplesButNoMinutes > 0 || warnedTotalActiveZero === totalHosts)) {
+    console.warn(
+      `[rollout-insights] aggregate diagnostics — period=${raw.periodDays}d threshold=+${thresholdPp}pp hosts=${totalHosts}: ` +
+        `baselineMissing=${warnedNoBaseline} hasSamplesButNoActiveMinutes=${warnedHasSamplesButNoMinutes} zeroDataHosts=${warnedTotalActiveZero}`,
+    );
+  }
   return {
     activeThresholdPp: thresholdPp,
     periodDays: raw.periodDays,
