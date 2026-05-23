@@ -77,6 +77,16 @@ interface MatrixRow {
    *  with no baseline are counted in hostCount but contribute nothing
    *  to the aggregate metrics. */
   hostsWithBaseline: number;
+  /** Active minutes (ON-classified) where totalCpu exceeded the
+   *  Threshold filter. Pre-normalised against the group's ON denominator
+   *  by `pctAboveOn`; absolute count is kept for the tooltip. */
+  minutesAboveOnAtThreshold: number;
+  minutesAboveOffAtThreshold: number;
+  /** Total active minutes (ON, OFF) — denominators for the percent
+   *  rendering. Apple-to-apple: same denominator per direction even if
+   *  groups have very different absolute minute counts. */
+  totalActiveOn: number;
+  totalActiveOff: number;
 }
 
 interface DriverSlice {
@@ -226,8 +236,8 @@ export function RtRolloutInsights({
     [pilot, zabbix, threshold, storeFilter],
   );
   const aggregate = useMemo(
-    () => computeRolloutInsightsFromAggregate(pilot, zabbix, storeFilter),
-    [pilot, zabbix, storeFilter],
+    () => computeRolloutInsightsFromAggregate(pilot, zabbix, storeFilter, threshold),
+    [pilot, zabbix, storeFilter, threshold],
   );
   const useAggregate = aggregate !== null;
   const matrix = useAggregate ? aggregate!.matrix : legacy.matrix;
@@ -305,26 +315,25 @@ export function RtRolloutInsights({
             Updating window…
           </span>
         ) : null}
-        {useAggregate ? (
+        {useAggregate && (
           <ActiveThresholdSlider
             value={sliderValue}
             onChange={setSliderValue}
             pending={sliderValue !== activeThresholdPpFromFilter}
           />
-        ) : (
-          <FilterSelect
-            label="Threshold"
-            value={String(threshold)}
-            options={[
-              { v: "50", l: "50%" },
-              { v: "60", l: "60%" },
-              { v: "70", l: "70%" },
-              { v: "80", l: "80%" },
-              { v: "90", l: "90%" },
-            ]}
-            onChange={(v) => setFilter("threshold", Number(v))}
-          />
         )}
+        <FilterSelect
+          label="High-CPU threshold"
+          value={String(threshold)}
+          options={[
+            { v: "50", l: "50%" },
+            { v: "60", l: "60%" },
+            { v: "70", l: "70%" },
+            { v: "80", l: "80%" },
+            { v: "90", l: "90%" },
+          ]}
+          onChange={(v) => setFilter("threshold", Number(v))}
+        />
         <FilterSelect
           label="Store"
           value={filters.store}
@@ -379,6 +388,14 @@ export function RtRolloutInsights({
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">
                     {useAggregate ? "Retellect CPU avg" : `Min ≥ ${threshold}%`}
                   </th>
+                  {useAggregate && (
+                    <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">
+                      Active min &gt; {threshold}%
+                      <span className="ml-1 normal-case font-normal text-gray-400 lowercase">
+                        % of busy
+                      </span>
+                    </th>
+                  )}
                   <th className="text-center py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase">Status</th>
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Confidence</th>
                 </tr>
@@ -424,6 +441,21 @@ export function RtRolloutInsights({
                         </>
                       )}
                     </td>
+                    {useAggregate && (
+                      <td className="py-3 px-3 text-center text-xs">
+                        <AboveThresholdCell
+                          minutes={row.minutesAboveOnAtThreshold}
+                          total={row.totalActiveOn}
+                          label="ON"
+                          accent
+                        />
+                        <AboveThresholdCell
+                          minutes={row.minutesAboveOffAtThreshold}
+                          total={row.totalActiveOff}
+                          label="OFF"
+                        />
+                      </td>
+                    )}
                     <td className="py-3 px-4 text-center">
                       <span
                         className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] font-medium ${STATUS_STYLES[row.status]}`}
@@ -458,7 +490,9 @@ export function RtRolloutInsights({
               (hourly trend, 60 min/bucket). A minute counts as active when{" "}
               <code>spss.cpu &gt; baseline + {activeThresholdPp} pp</code>; baseline is the median spss.cpu
               between 02:00 and 05:00 Europe/Vilnius. Avg peak Total CPU = mean of per-host peak{" "}
-              <code>system.cpu.util[,,avg1]</code> across active minutes.
+              <code>system.cpu.util[,,avg1]</code> across active minutes. &ldquo;Active min &gt; {threshold}%&rdquo;
+              divides the active minutes that crossed {threshold}% by the group&rsquo;s total active minutes,
+              so columns are comparable across CPU classes regardless of how many minutes each one collected.
             </p>
           ) : (
             <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
@@ -644,6 +678,60 @@ function ActiveThresholdSlider({
         +{value.toFixed(1)} pp
       </span>
     </label>
+  );
+}
+
+/**
+ * "Active min &gt; X %" cell — normalised as % of the group's busy
+ * minutes for this direction (ON or OFF). Showing % is the apple-to-
+ * apple form: a 3-host i3-6100 group with 1 800 active min and a
+ * 40-host i3-4330 group with 30 000 active min would otherwise look
+ * incomparable on absolute count.
+ *
+ * Absolute count goes into the tooltip so the reader can sanity-check
+ * "is this 80 % computed from 4 minutes or 4 000 minutes?".
+ */
+function AboveThresholdCell({
+  minutes,
+  total,
+  label,
+  accent,
+}: {
+  minutes: number;
+  total: number;
+  label: "ON" | "OFF";
+  accent?: boolean;
+}) {
+  const pct = total > 0 ? (minutes / total) * 100 : null;
+  const colour =
+    pct === null
+      ? "text-gray-400"
+      : pct >= 50
+        ? "text-red-600"
+        : pct >= 20
+          ? "text-amber-700"
+          : pct > 0
+            ? "text-gray-600"
+            : "text-emerald-700";
+  const formatted = pct === null
+    ? "—"
+    : pct < 0.05
+      ? "0%"
+      : pct >= 10
+        ? `${Math.round(pct)}%`
+        : `${pct.toFixed(1)}%`;
+  const labelClasses = accent ? "text-blue-600 font-medium" : "text-gray-400 font-normal";
+  return (
+    <div
+      className={`tabular-nums ${colour}`}
+      title={
+        pct === null
+          ? `No active minutes for ${label}`
+          : `${minutes.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} active minutes (${label})`
+      }
+    >
+      {formatted} <span className={`text-[10px] ${labelClasses}`}>{label}</span>
+    </div>
   );
 }
 
@@ -869,6 +957,7 @@ function computeRolloutInsightsFromAggregate(
   pilot: RtPilotData,
   zabbix: ZabbixData,
   storeFilter: string,
+  thresholdPct: number,
 ): { matrix: MatrixRow[]; periodDays: number; activeThresholdPp: number } | null {
   const payload = zabbix.rolloutPerHost;
   if (!payload || payload.perHost.length === 0) return null;
@@ -946,6 +1035,14 @@ function computeRolloutInsightsFromAggregate(
     const avgRetellectOff = weightedAvg(g.off, "sumRetellectCpu");
     const activeRealMinutes = g.on.realActiveMinutes + g.off.realActiveMinutes;
     const activeSynMinutes = g.on.syntheticActiveMinutes + g.off.syntheticActiveMinutes;
+    // Snap the user-chosen heatmap threshold (50/60/70/80/90) onto the
+    // available buckets so the column reads from a precomputed counter
+    // instead of replaying every bucket per render.
+    const thKey = (thresholdPct >= 90 ? 90 : thresholdPct >= 80 ? 80 : thresholdPct >= 70 ? 70 : thresholdPct >= 60 ? 60 : 50) as 50 | 60 | 70 | 80 | 90;
+    const totalActiveOn = g.on.realActiveMinutes + g.on.syntheticActiveMinutes;
+    const totalActiveOff = g.off.realActiveMinutes + g.off.syntheticActiveMinutes;
+    const minutesAboveOnAtThreshold = g.on.activeMinutesAboveThreshold[thKey];
+    const minutesAboveOffAtThreshold = g.off.activeMinutesAboveThreshold[thKey];
 
     // Status — uses peakOn-or-peakOff as effective worst case. Same bands
     // as legacy so users transitioning between paths see consistent
@@ -992,6 +1089,10 @@ function computeRolloutInsightsFromAggregate(
       activeRealMinutes,
       activeSynMinutes,
       hostsWithBaseline: g.hostsWithBaseline,
+      minutesAboveOnAtThreshold,
+      minutesAboveOffAtThreshold,
+      totalActiveOn,
+      totalActiveOff,
     });
   }
 
@@ -1234,6 +1335,10 @@ function computeRolloutInsights(
       activeRealMinutes: 0,
       activeSynMinutes: 0,
       hostsWithBaseline: 0,
+      minutesAboveOnAtThreshold: onMin,
+      minutesAboveOffAtThreshold: offMin,
+      totalActiveOn: 0,
+      totalActiveOff: 0,
     });
   }
 

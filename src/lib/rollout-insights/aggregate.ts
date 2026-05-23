@@ -25,7 +25,9 @@
  */
 
 import {
+  ACTIVE_ABOVE_BUCKETS,
   emptyOnOffAggregate,
+  type ActiveAboveBucket,
   type RolloutOnOffAggregate,
   type RolloutPerHostEntry,
   type RolloutSampleSource,
@@ -200,6 +202,12 @@ export function aggregateHost(
     if (b.totalCpu !== null && Number.isFinite(b.totalCpu)) {
       tgt.sumTotalCpu += b.totalCpu * b.weightMinutes;
       tgt.peakTotalCpu = tgt.peakTotalCpu === null ? b.totalCpu : Math.max(tgt.peakTotalCpu, b.totalCpu);
+      // Active-minutes-above-threshold counters. Strict `>` so a bucket
+      // sitting exactly on a threshold edge falls into the next-lower
+      // band (consistent with how the legacy heatmap labelled cells).
+      for (const t of ACTIVE_ABOVE_BUCKETS) {
+        if (b.totalCpu > t) tgt.activeMinutesAboveThreshold[t] += b.weightMinutes;
+      }
     }
     if (b.retellectCpu !== null && Number.isFinite(b.retellectCpu)) {
       tgt.sumRetellectCpu += b.retellectCpu * b.weightMinutes;
@@ -229,6 +237,10 @@ export function mergeOnOff(
     : b.peakTotalCpu === null
       ? a.peakTotalCpu
       : Math.max(a.peakTotalCpu, b.peakTotalCpu);
+  const mergedAbove = { 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 } as Record<ActiveAboveBucket, number>;
+  for (const t of ACTIVE_ABOVE_BUCKETS) {
+    mergedAbove[t] = a.activeMinutesAboveThreshold[t] + b.activeMinutesAboveThreshold[t];
+  }
   return {
     realActiveMinutes: a.realActiveMinutes + b.realActiveMinutes,
     syntheticActiveMinutes: a.syntheticActiveMinutes + b.syntheticActiveMinutes,
@@ -236,6 +248,7 @@ export function mergeOnOff(
     sumRetellectCpu: a.sumRetellectCpu + b.sumRetellectCpu,
     sumSpssCpu: a.sumSpssCpu + b.sumSpssCpu,
     peakTotalCpu: peak,
+    activeMinutesAboveThreshold: mergedAbove,
   };
 }
 

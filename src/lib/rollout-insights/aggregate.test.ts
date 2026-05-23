@@ -205,6 +205,35 @@ describe("aggregateHost", () => {
     expect(entry.on.realActiveMinutes).toBe(0);
     expect(entry.off.realActiveMinutes).toBe(1);
   });
+
+  it("accumulates active-minutes-above-threshold counters per bucket band (strict >)", () => {
+    const buckets: HostBucket[] = [];
+    for (let i = 0; i < 30; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 3, i), 2, 0, 5));
+    // 3 ON active minutes at totalCpu 75 → above 50, 60, 70 but NOT 80/90
+    for (let i = 0; i < 3; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 14, i), 10, 2, 75));
+    // 2 ON active minutes at totalCpu 92 → above 50, 60, 70, 80, 90
+    for (let i = 3; i < 5; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 14, i), 10, 2, 92));
+    // 1 ON active minute exactly at 70 (strict >, so does NOT increment 70)
+    buckets.push(bucket(vilniusWinterTs("2026-02-10", 14, 5), 10, 2, 70));
+    const entry = aggregateHost("h1", buckets, 2);
+    expect(entry.on.activeMinutesAboveThreshold[50]).toBe(6); // all 6 ON active min
+    expect(entry.on.activeMinutesAboveThreshold[60]).toBe(6);
+    expect(entry.on.activeMinutesAboveThreshold[70]).toBe(5); // 70 itself excluded
+    expect(entry.on.activeMinutesAboveThreshold[80]).toBe(2); // only the 92s
+    expect(entry.on.activeMinutesAboveThreshold[90]).toBe(2);
+    expect(entry.off.activeMinutesAboveThreshold[50]).toBe(0);
+  });
+
+  it("trend buckets contribute weight 60 to the above-threshold counters", () => {
+    const buckets: HostBucket[] = [];
+    for (let i = 0; i < 30; i++) buckets.push(bucket(vilniusWinterTs("2026-02-10", 3, i), 2, 0, 5));
+    // One trend hour at totalCpu 85 → active + ON, contributes 60 minutes
+    buckets.push(bucket(vilniusWinterTs("2026-02-10", 14, 0), 10, 1.5, 85, "trend"));
+    const entry = aggregateHost("h1", buckets, 2);
+    expect(entry.on.activeMinutesAboveThreshold[70]).toBe(60);
+    expect(entry.on.activeMinutesAboveThreshold[80]).toBe(60);
+    expect(entry.on.activeMinutesAboveThreshold[90]).toBe(0);
+  });
 });
 
 // ─── mergeOnOff + weightedAvg ───────────────────────────────────────

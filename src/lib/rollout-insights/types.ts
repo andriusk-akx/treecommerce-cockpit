@@ -50,6 +50,14 @@ export type RolloutSampleSource = "history" | "trend";
  *                               weighted averages across multiple hosts
  *                               (avg = sum / minutes).
  */
+/** Threshold bucket keys for the "minutes above X%" counters. Aligned
+ *  with the legacy heatmap thresholds (50/60/70/80/90) so the matrix
+ *  column reuses the existing `threshold` filter UI. Tracked as
+ *  minute-weighted counters: a real history minute contributes 1, a
+ *  synthetic trend hour contributes 60. */
+export type ActiveAboveBucket = 50 | 60 | 70 | 80 | 90;
+export const ACTIVE_ABOVE_BUCKETS: readonly ActiveAboveBucket[] = [50, 60, 70, 80, 90] as const;
+
 export interface RolloutOnOffAggregate {
   /** Total active minutes from 1-min history samples. */
   realActiveMinutes: number;
@@ -64,6 +72,19 @@ export interface RolloutOnOffAggregate {
   /** Peak (max) totalCpu seen during any active minute. Null when no
    *  active minutes contributed to this aggregate. */
   peakTotalCpu: number | null;
+  /**
+   * Minute-weighted counters for "active minutes where totalCpu exceeded
+   * each threshold". Lets the matrix render an apple-to-apple comparison
+   * ("X % of active minutes were above 70 %") regardless of how many
+   * total minutes each CPU class collected — the normalisation removes
+   * the bias where a sparsely-sampled class would otherwise look
+   * artificially cleaner than a densely-sampled one.
+   *
+   * Convention: strict `>` (a bucket with exactly 70.0 % totalCpu does
+   * NOT count toward the 70 bucket). Real history minutes contribute 1,
+   * synthetic trend hours contribute 60.
+   */
+  activeMinutesAboveThreshold: Record<ActiveAboveBucket, number>;
 }
 
 /** Empty aggregate factory — used as the zero element for accumulators. */
@@ -74,6 +95,7 @@ export const emptyOnOffAggregate = (): RolloutOnOffAggregate => ({
   sumRetellectCpu: 0,
   sumSpssCpu: 0,
   peakTotalCpu: null,
+  activeMinutesAboveThreshold: { 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
 });
 
 /** Per-host aggregate, with both ON and OFF directions. */
