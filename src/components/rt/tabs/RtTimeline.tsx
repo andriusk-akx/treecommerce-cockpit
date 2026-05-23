@@ -5,6 +5,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
 import type { PerDayActiveCounters } from "@/lib/rollout-insights/types";
+import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterDivider } from "../filters/RtFilterControls";
 import { generateIntervalData, type IntervalSlot } from "./rt-timeline-math";
 import { DataCoverageBanner } from "./DataCoverageBanner";
 import { ProcessCategoryReference } from "./ProcessCategoryReference";
@@ -919,114 +920,75 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   })();
 
   const filterBar = (compact: boolean) => (
-    // Two-row layout (explicit, not flex-wrap-driven):
-    //   Row 1 — primary: threshold → metric toggle → store → CPU → 14d/Custom.
-    //           Threshold + metric sit together because the threshold defines
-    //           when a cell is hot and the metric defines what it shows.
-    //   Row 2 — secondary slicers: Group by, Retellect.
-    // Each row uses flex with wrap fallback for narrow viewports.
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: compact ? "5px 10px" : "8px 14px", background: "#fff", border: `1px solid ${C.border}`, borderRadius: compact ? 6 : 8, marginBottom: compact ? 6 : 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: compact ? 8 : 12, flexWrap: "wrap" }}>
-      <span style={{ fontSize: 10, textTransform: "uppercase", color: "#212529", fontWeight: 700, letterSpacing: "0.04em" }}>Threshold</span>
-      <select value={threshold} onChange={(e) => setThreshold(Number(e.target.value))}
-        style={{ fontSize: 13, fontWeight: 600, padding: "3px 6px", border: "1px solid #cbd5e1", borderRadius: 4, width: 64, background: "#f8fafc" }}>
-        {[20, 30, 40, 50, 60, 70, 80, 90].map((v) => <option key={v} value={v}>{v}%</option>)}
-      </select>
-      {/* Count from — synced with the Rollout Insights matrix. Phase 1
-          ships UI parity (the same control is in both filter bars and
-          the active selection persists across tabs); Phase 2 will plumb
-          per-day active classification into the heatmap cells.
-          Until then, switching to Active only dims the heatmap and
-          replaces it with a banner pointing operators at Rollout. */}
-      <span
-        style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}
-        title="Whether the heatmap counts every minute above the threshold (matches Timeline's traditional behaviour) or restricts to SCO-busy minutes for Retellect-only attribution."
-      >
-        Count from
-        <span style={{
-          display: "inline-flex", alignItems: "center", justifyContent: "center",
-          width: 12, height: 12, borderRadius: 9999, border: `1px solid ${C.border}`,
-          fontSize: 8, fontWeight: 700, color: "#94a3b8", cursor: "help",
-        }} aria-hidden="true">i</span>
-      </span>
-      <div style={{ display: "inline-flex", border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden", background: "#fff" }} role="radiogroup" aria-label="Count from">
-        {([
-          { id: "tracked" as const, label: "All tracked" },
-          { id: "active" as const, label: "Active only" },
-        ]).map((opt, i) => (
-          <button
-            key={opt.id}
-            type="button"
-            role="radio"
-            aria-checked={cpuCountFrom === opt.id}
-            onClick={() => setFilter("cpuCountFrom", opt.id)}
-            style={{
-              padding: "2px 8px",
-              fontSize: 11,
-              fontWeight: cpuCountFrom === opt.id ? 600 : 400,
-              cursor: "pointer",
-              background: cpuCountFrom === opt.id ? "#eff6ff" : "#fff",
-              color: cpuCountFrom === opt.id ? "#1d4ed8" : "#6b7280",
-              border: 0,
-              borderLeft: i === 0 ? "none" : `1px solid ${C.border}`,
-            }}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-      <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-        {([
-          { id: "minAbove" as const, label: "Minutes above threshold", tip: "Sample-minutes per day with CPU ≥ threshold — how long it stayed in trouble." },
-          { id: "peak" as const, label: "Peak %", tip: "Day-MAX CPU% per host — how high it spiked." },
-        ]).map((m) => (
-          <button key={m.id} onClick={() => setMetric(m.id)} title={m.tip} style={{
-            padding: "2px 8px", borderRadius: 12, fontSize: 11, cursor: "pointer",
-            border: metric === m.id ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
-            background: metric === m.id ? C.pillActive : "#fff",
-            color: metric === m.id ? "#fff" : "#495057",
-            fontWeight: metric === m.id ? 600 : 400,
-          }}>{m.label}</button>
-        ))}
-      </div>
-      <div style={{ width: 1, height: 16, background: C.border }} />
-      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }}>Store</span>
-      <select value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)}
-        style={{ fontSize: 12, padding: "3px 6px", border: "1px solid #dee2e6", borderRadius: 4, maxWidth: 200 }}>
-        <option value="all">All</option>
-        {pilot.stores.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
-      </select>
-      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }}>CPU</span>
-      <select value={cpuModelFilter} onChange={(e) => setCpuModelFilter(e.target.value)}
-        style={{ fontSize: 12, padding: "3px 6px", border: "1px solid #dee2e6", borderRadius: 4, maxWidth: 180 }}
-        title="Narrow the heatmap to one hardware class">
-        <option value="all">All</option>
-        {cpuModelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
-      </select>
-      </div>
-      {/* Row 2 — secondary slicers, all label-prefixed so first-time users
-          immediately know what each control does. "Period" gets an explicit
-          label because the unit ("14d", "30d") is otherwise ambiguous. */}
-      <div style={{ display: "flex", alignItems: "center", gap: compact ? 8 : 12, flexWrap: "wrap" }}>
-      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }} title="How many days of history to show">Period</span>
-      <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-        {PERIODS.map((p) => (
-          <button key={p.id} onClick={() => { setPeriod(p.id); setShowCustomPeriod(false); }} style={{
-            padding: "2px 8px", borderRadius: 12, fontSize: 11, cursor: "pointer",
-            border: period === p.id && !showCustomPeriod ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
-            background: period === p.id && !showCustomPeriod ? C.pillActive : "#fff",
-            color: period === p.id && !showCustomPeriod ? "#fff" : "#495057", fontWeight: period === p.id && !showCustomPeriod ? 600 : 400,
-          }} title={`Show the last ${p.days} days`}>{p.label}</button>
-        ))}
-        <button onClick={() => setShowCustomPeriod(!showCustomPeriod)} style={{
-          padding: "2px 8px", borderRadius: 12, fontSize: 11, cursor: "pointer",
-          border: showCustomPeriod || !isPresetPeriod ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
-          background: showCustomPeriod || !isPresetPeriod ? C.pillActive : "#fff",
-          color: showCustomPeriod || !isPresetPeriod ? "#fff" : "#495057",
-          fontWeight: showCustomPeriod || !isPresetPeriod ? 600 : 400,
-        }} title="Pick a custom number of days">Custom</button>
+    // Visual layer shared with RtRolloutInsights — primitives in
+    // src/components/rt/filters/RtFilterControls.tsx. Two-row layout:
+    //   Row 1 — primary: threshold, metric, count-from, store, CPU.
+    //   Row 2 — secondary slicers: period (presets + custom), group-by,
+    //           Retellect filter pills, hide-silent toggle.
+    // Switching tabs preserves the user's filter context AND the visual
+    // surface — same label styling, dropdown look, segmented buttons.
+    // The `compact` flag tightens spacing for the drill-down sub-view.
+    <FilterBar>
+      <FilterRow>
+        <FilterSelect
+          label="Threshold"
+          value={String(threshold)}
+          options={[20, 30, 40, 50, 60, 70, 80, 90].map((v) => ({ v: String(v), l: `${v}%` }))}
+          onChange={(v) => setThreshold(Number(v))}
+        />
+        <FilterSegmented<"minAbove" | "peak">
+          label="Metric"
+          value={metric}
+          options={[
+            { v: "minAbove", l: "Minutes above threshold", title: "Sample-minutes per day with CPU > threshold — how long it stayed in trouble." },
+            { v: "peak", l: "Peak %", title: "Day-MAX CPU% per host — how high it spiked." },
+          ]}
+          onChange={setMetric}
+        />
+        <FilterSegmented<"tracked" | "active">
+          label="Count from"
+          value={cpuCountFrom}
+          info="Whether the heatmap counts every minute above the threshold (matches the historic Timeline behaviour) or restricts to SCO-busy minutes for Retellect-only attribution."
+          options={[
+            { v: "tracked", l: "All tracked" },
+            { v: "active", l: "Active only" },
+          ]}
+          onChange={(v) => setFilter("cpuCountFrom", v)}
+        />
+        <FilterDivider />
+        <FilterSelect
+          label="Store"
+          value={storeFilter}
+          options={[{ v: "all", l: "All stores" }, ...pilot.stores.map((s) => ({ v: s.name, l: s.name }))]}
+          onChange={setStoreFilter}
+        />
+        <FilterSelect
+          label="CPU"
+          value={cpuModelFilter}
+          options={[{ v: "all", l: "All" }, ...cpuModelOptions.map((m) => ({ v: m, l: m }))]}
+          onChange={setCpuModelFilter}
+          title="Narrow the heatmap to one hardware class"
+        />
+      </FilterRow>
+      <FilterRow>
+        <FilterSegmented<string>
+          label="Period"
+          value={showCustomPeriod || !isPresetPeriod ? "__custom__" : period}
+          options={[
+            ...PERIODS.map((p) => ({ v: p.id, l: p.label, title: `Show the last ${p.days} days` })),
+            { v: "__custom__", l: "Custom", title: "Pick a custom number of days" },
+          ]}
+          onChange={(v) => {
+            if (v === "__custom__") {
+              setShowCustomPeriod(true);
+            } else {
+              setPeriod(v);
+              setShowCustomPeriod(false);
+            }
+          }}
+        />
         {showCustomPeriod && (
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <div className="inline-flex items-center gap-1">
             <input
               type="number"
               min="1"
@@ -1041,42 +1003,37 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 }
               }}
               placeholder="days"
-              style={{ width: 48, fontSize: 11, padding: "2px 6px", border: "1px solid #dee2e6", borderRadius: 4, textAlign: "center", outline: "none" }}
+              className="w-12 text-xs px-1.5 py-1 border border-gray-200 rounded text-center bg-white text-gray-700 focus:outline-none focus:border-blue-400"
             />
-            <span style={{ fontSize: 10, color: C.textSec }}>d</span>
-            <button onClick={() => {
-              const v = Math.max(1, Math.min(365, parseInt(customPeriodDays) || 14));
-              setCustomPeriodDays(String(v));
-              setPeriod(String(v));
-            }} style={{
-              padding: "2px 8px", borderRadius: 4, fontSize: 10, cursor: "pointer",
-              border: "1px solid #dee2e6", background: "#f8f9fa", color: "#495057",
-            }}>Apply</button>
+            <span className="text-[10px] text-gray-400">d</span>
+            <button
+              onClick={() => {
+                const v = Math.max(1, Math.min(365, parseInt(customPeriodDays) || 14));
+                setCustomPeriodDays(String(v));
+                setPeriod(String(v));
+              }}
+              className="px-2 py-0.5 text-[11px] border border-gray-200 rounded bg-gray-50 text-gray-700 hover:bg-gray-100"
+            >
+              Apply
+            </button>
           </div>
         )}
-        {!isPresetPeriod && (
-          <span style={{ fontSize: 10, color: "#c9cdd1" }}>({periodDays}d)</span>
+        {!isPresetPeriod && !showCustomPeriod && (
+          <span className="text-[10px] text-gray-300">({periodDays}d)</span>
         )}
-      </div>
-      <div style={{ width: 1, height: 16, background: C.border }} />
-      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }} title="How rows are bucketed in the heatmap">Group by</span>
-      <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-        {([
-          { id: "host" as const, label: "Host", tip: "One row per cash register — the most detailed view." },
-          { id: "cpu" as const, label: "CPU model", tip: "Group by hardware model (e.g. WN Beetle M3)." },
-          { id: "store" as const, label: "Store", tip: "Group by retail location." },
-        ]).map((g) => (
-          <button key={g.id} onClick={() => setGroupBy(g.id)} title={g.tip} style={{
-            padding: "2px 8px", borderRadius: 12, fontSize: 11, cursor: "pointer",
-            border: groupBy === g.id ? `1px solid ${C.pillActive}` : "1px solid #dee2e6",
-            background: groupBy === g.id ? C.pillActive : "#fff",
-            color: groupBy === g.id ? "#fff" : "#495057",
-            fontWeight: groupBy === g.id ? 600 : 400,
-          }}>{g.label}</button>
-        ))}
-      </div>
-      <div style={{ width: 1, height: 16, background: C.border }} />
-      <span style={{ fontSize: 10, textTransform: "uppercase", color: C.headerText, fontWeight: 600 }} title="Filter by Retellect telemetry">Filter</span>
+        <FilterDivider />
+        <FilterSegmented<"host" | "cpu" | "store">
+          label="Group by"
+          value={groupBy}
+          options={[
+            { v: "host", l: "Host", title: "One row per cash register — the most detailed view." },
+            { v: "cpu", l: "CPU model", title: "Group by hardware model (e.g. WN Beetle M3)." },
+            { v: "store", l: "Store", title: "Group by retail location." },
+          ]}
+          onChange={setGroupBy}
+        />
+        <FilterDivider />
+        <span className="text-gray-500 font-medium" title="Filter by Retellect telemetry">Filter</span>
       {/* Two mutually-exclusive Retellect filter pills (post-2026-05-07,
           relabelled 2026-05-22 — "Today" was ambiguous and the pill ordered
           before "Installed", which is conceptually a SUPERSET. New order
@@ -1092,69 +1049,51 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           Internal id stays "today" / "installed" to keep localStorage
           payloads from earlier sessions valid; only the visible label moves.
           Clicking the active one deselects (returns to "show all"). */}
-      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-        {([
-          { id: "installed" as const, label: "Retellect Installed", dot: "#0ea5e9", bgActive: "#eff6ff", borderActive: "#bfdbfe", textActive: "#1e40af", tip: "Show only hosts where Retellect items are configured in the Zabbix template (deployment registry — includes deployed-but-idle hosts). Matches the RT INST column dot." },
-          { id: "today" as const, label: "Retellect Active", dot: "#10b981", bgActive: "#ecfdf5", borderActive: "#a7f3d0", textActive: "#065f46", tip: "Show only hosts with meaningful Retellect (python.cpu) activity in the last 24 h. Matches the RT ACT column dot." },
-        ]).map((p) => {
-          const active = retellectInstalled === p.id;
-          return (
-            <button
-              key={String(p.id)}
-              type="button"
-              onClick={() => setRetellectInstalled(active ? null : p.id)}
-              title={p.tip}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                padding: "2px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer",
-                border: active ? `1px solid ${p.borderActive}` : "1px solid #dee2e6",
-                background: active ? p.bgActive : "#fff",
-                color: active ? p.textActive : "#495057",
-                fontWeight: active ? 600 : 400,
-              }}
-            >
-              <span style={{
-                width: 8, height: 8, borderRadius: "50%",
-                background: active ? p.dot : "#cbd5e1",
-              }} />
-              {p.label}
-            </button>
-          );
-        })}
-        {/* "Hide silent hosts" — drops rows that have not sent a single CPU
-            sample within the active period. Disabled when global trend data is
-            missing (the indicator on the right already explains why). The
-            count tells the user up-front how many rows will disappear. */}
-        <button
-          type="button"
-          onClick={() => setHideEmptyHosts((v) => !v)}
-          title={
-            hasTrendData
-              ? `Hide hosts with no CPU samples in the selected period (${silentHostCount} currently silent).`
-              : "No trend data available — silent-host filtering is disabled."
-          }
-          disabled={!hasTrendData}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 6,
-            padding: "2px 10px", borderRadius: 12, fontSize: 11,
-            cursor: hasTrendData ? "pointer" : "not-allowed",
-            border: hideEmptyHosts ? "1px solid #fbbf24" : "1px solid #dee2e6",
-            background: hideEmptyHosts ? "#fffbeb" : "#fff",
-            color: hideEmptyHosts ? "#92400e" : "#495057",
-            fontWeight: hideEmptyHosts ? 600 : 400,
-            opacity: hasTrendData ? 1 : 0.5,
-          }}
-        >
-          <span style={{
-            width: 8, height: 8, borderRadius: "50%",
-            background: hideEmptyHosts ? "#f59e0b" : "#cbd5e1",
-          }} />
-          Hide silent{silentHostCount > 0 ? ` (${silentHostCount})` : ""}
-        </button>
-      </div>
-      {compact && <span style={{ fontSize: 10, color: hasTrendData ? "#059669" : "#c9cdd1", marginLeft: "auto" }}>{hasTrendData ? "✓ Live Zabbix trends" : "⚠ No trend data"}</span>}
-      </div>
-    </div>
+        <div className="inline-flex items-center gap-1">
+          {([
+            { id: "installed" as const, label: "Retellect Installed", dot: "bg-sky-500", activeCls: "border-blue-200 bg-blue-50 text-blue-800", tip: "Show only hosts where Retellect items are configured in the Zabbix template (deployment registry — includes deployed-but-idle hosts). Matches the RT INST column dot." },
+            { id: "today" as const, label: "Retellect Active", dot: "bg-emerald-500", activeCls: "border-emerald-200 bg-emerald-50 text-emerald-800", tip: "Show only hosts with meaningful Retellect (python.cpu) activity in the last 24 h. Matches the RT ACT column dot." },
+          ]).map((p) => {
+            const active = retellectInstalled === p.id;
+            return (
+              <button
+                key={String(p.id)}
+                type="button"
+                onClick={() => setRetellectInstalled(active ? null : p.id)}
+                title={p.tip}
+                className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] border rounded-full transition ${active ? `${p.activeCls} font-medium` : "border-gray-200 bg-white text-gray-600 hover:text-gray-800"}`}
+              >
+                <span className={`w-2 h-2 rounded-full ${active ? p.dot : "bg-gray-300"}`} />
+                {p.label}
+              </button>
+            );
+          })}
+          {/* "Hide silent hosts" — drops rows that have not sent a single CPU
+              sample within the active period. Disabled when global trend data is
+              missing (the indicator on the right already explains why). The
+              count tells the user up-front how many rows will disappear. */}
+          <button
+            type="button"
+            onClick={() => setHideEmptyHosts((v) => !v)}
+            title={
+              hasTrendData
+                ? `Hide hosts with no CPU samples in the selected period (${silentHostCount} currently silent).`
+                : "No trend data available — silent-host filtering is disabled."
+            }
+            disabled={!hasTrendData}
+            className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] border rounded-full transition ${hideEmptyHosts ? "border-amber-300 bg-amber-50 text-amber-800 font-medium" : "border-gray-200 bg-white text-gray-600 hover:text-gray-800"} ${hasTrendData ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}
+          >
+            <span className={`w-2 h-2 rounded-full ${hideEmptyHosts ? "bg-amber-500" : "bg-gray-300"}`} />
+            Hide silent{silentHostCount > 0 ? ` (${silentHostCount})` : ""}
+          </button>
+        </div>
+        {compact && (
+          <span className={`ml-auto text-[10px] ${hasTrendData ? "text-emerald-600" : "text-gray-300"}`}>
+            {hasTrendData ? "✓ Live Zabbix trends" : "⚠ No trend data"}
+          </span>
+        )}
+      </FilterRow>
+    </FilterBar>
   );
 
   // ─── Heatmap row renderer (extracted so grouped + flat views share it) ─

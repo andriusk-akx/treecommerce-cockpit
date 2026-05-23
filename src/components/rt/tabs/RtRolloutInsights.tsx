@@ -25,6 +25,7 @@ import { isRetellectActiveToday } from "./rt-overview-helpers";
 import type { RolloutOnOffAggregate, RolloutPerHostEntry } from "@/lib/rollout-insights/types";
 import { emptyOnOffAggregate } from "@/lib/rollout-insights/types";
 import { mergeOnOff, weightedAvg } from "@/lib/rollout-insights/aggregate";
+import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterHint } from "../filters/RtFilterControls";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -292,79 +293,85 @@ export function RtRolloutInsights({
         </div>
       </div>
 
-      {/* ── Filters — minimal: period / threshold / store ──────────── */}
-      <div className="bg-white rounded-lg border border-gray-200 px-4 py-3 mb-5 flex flex-wrap items-center gap-4 text-xs">
-        <FilterSelect
-          label="Period"
-          value={filters.period}
-          options={[
-            { v: "7d", l: "7 days" },
-            { v: "14d", l: "14 days" },
-            { v: "30d", l: "30 days" },
-            { v: "90d", l: "90 days" },
-          ]}
-          onChange={setPeriod}
-        />
-        {isRefreshing ? (
-          <span
-            className="inline-flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1"
-            role="status"
-            aria-live="polite"
-          >
-            <svg
-              className="animate-spin w-3 h-3"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
+      {/* ── Filters — period / (active threshold) / high-cpu / count from / store ── */}
+      <FilterBar>
+        <FilterRow>
+          <FilterSelect
+            label="Period"
+            value={filters.period}
+            options={[
+              { v: "7d", l: "7 days" },
+              { v: "14d", l: "14 days" },
+              { v: "30d", l: "30 days" },
+              { v: "90d", l: "90 days" },
+            ]}
+            onChange={setPeriod}
+          />
+          {isRefreshing ? (
+            <span
+              className="inline-flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1"
+              role="status"
+              aria-live="polite"
             >
-              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
-              <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-            </svg>
-            Updating window…
-          </span>
-        ) : null}
-        {useAggregate && cpuCountFrom === "active" && (
-          <ActiveThresholdSlider
-            value={sliderValue}
-            onChange={setSliderValue}
-            pending={sliderValue !== activeThresholdPpFromFilter}
+              <svg
+                className="animate-spin w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
+                <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+              </svg>
+              Updating window…
+            </span>
+          ) : null}
+          {useAggregate && cpuCountFrom === "active" && (
+            <ActiveThresholdSlider
+              value={sliderValue}
+              onChange={setSliderValue}
+              pending={sliderValue !== activeThresholdPpFromFilter}
+            />
+          )}
+          <FilterSelect
+            label="High-CPU threshold"
+            value={String(threshold)}
+            options={[
+              { v: "20", l: "20%" },
+              { v: "30", l: "30%" },
+              { v: "40", l: "40%" },
+              { v: "50", l: "50%" },
+              { v: "60", l: "60%" },
+              { v: "70", l: "70%" },
+              { v: "80", l: "80%" },
+              { v: "90", l: "90%" },
+            ]}
+            onChange={(v) => setFilter("threshold", Number(v))}
           />
-        )}
-        <FilterSelect
-          label="High-CPU threshold"
-          value={String(threshold)}
-          options={[
-            { v: "20", l: "20%" },
-            { v: "30", l: "30%" },
-            { v: "40", l: "40%" },
-            { v: "50", l: "50%" },
-            { v: "60", l: "60%" },
-            { v: "70", l: "70%" },
-            { v: "80", l: "80%" },
-            { v: "90", l: "90%" },
-          ]}
-          onChange={(v) => setFilter("threshold", Number(v))}
-        />
-        {useAggregate && (
-          <CountFromToggle
-            value={cpuCountFrom}
-            onChange={(v) => setFilter("cpuCountFrom", v)}
+          {useAggregate && (
+            <FilterSegmented<"tracked" | "active">
+              label="Count from"
+              value={cpuCountFrom}
+              info="Whether the Min > X% column counts every tracked minute (matches CPU Timeline) or only busy minutes (Retellect attribution)."
+              options={[
+                { v: "tracked", l: "All tracked" },
+                { v: "active", l: "Active only" },
+              ]}
+              onChange={(v) => setFilter("cpuCountFrom", v)}
+            />
+          )}
+          <FilterSelect
+            label="Store"
+            value={filters.store}
+            options={[
+              { v: "all", l: "All stores" },
+              ...pilot.stores.map((s) => ({ v: s.name, l: s.name })),
+            ]}
+            onChange={(v) => setFilter("store", v)}
           />
-        )}
-        <FilterSelect
-          label="Store"
-          value={filters.store}
-          options={[
-            { v: "all", l: "All stores" },
-            ...pilot.stores.map((s) => ({ v: s.name, l: s.name })),
-          ]}
-          onChange={(v) => setFilter("store", v)}
-        />
-        <span className="text-gray-300 ml-auto text-[11px]">
-          Filters persist across tabs
-        </span>
-      </div>
+          <FilterHint>Filters persist across tabs</FilterHint>
+        </FilterRow>
+      </FilterBar>
 
       {/* ── A. CPU Rollout Decision Matrix ─────────────────────────── */}
       {/* Single in-flight dimmer wraps the matrix + drivers + actions so
@@ -752,35 +759,11 @@ export function RtRolloutInsights({
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────
-
-function FilterSelect({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: { v: string; l: string }[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <label className="flex items-center gap-2">
-      <span className="text-gray-500 font-medium">{label}</span>
-      <select
-        className="border border-gray-200 rounded px-2 py-1 text-xs bg-white text-gray-700 focus:outline-none focus:border-blue-400"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {options.map((o) => (
-          <option key={o.v} value={o.v}>
-            {o.l}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
+// (FilterSelect, FilterSegmented, FilterBar etc. live in
+//  src/components/rt/filters/RtFilterControls.tsx so the Timeline tab
+//  picks up the same visual language. Only specialised controls — the
+//  Active-threshold slider, OnOffBars, AboveThresholdCell — stay local
+//  because they're meaningful only inside this matrix.)
 
 /**
  * Active-threshold slider — only renders on the aggregate compute path.
@@ -850,65 +833,6 @@ function ActiveThresholdSlider({
       >
         +{value.toFixed(1)} pp
       </span>
-    </label>
-  );
-}
-
-/**
- * Segmented control: "Count from [All tracked | Active only]".
- *
- * Drives the &ldquo;Min &gt; X%&rdquo; column behaviour. All-tracked
- * counts every minute with a totalCpu reading (matches CPU Timeline);
- * active-only restricts to busy windows (spss above baseline + active-
- * threshold pp) for pure Retellect attribution. Default is tracked so
- * the matrix agrees with Timeline at the same threshold — switching to
- * active is a power-user move.
- */
-function CountFromToggle({
-  value,
-  onChange,
-}: {
-  value: "tracked" | "active";
-  onChange: (v: "tracked" | "active") => void;
-}) {
-  const baseBtn =
-    "px-2 py-0.5 text-[11px] font-medium transition";
-  const activeCls = "bg-blue-50 text-blue-700";
-  const inactiveCls = "text-gray-500 hover:text-gray-700";
-  return (
-    <label className="flex items-center gap-2">
-      <span
-        className="text-gray-500 font-medium inline-flex items-center gap-1"
-        title="Whether the Min > X% column counts from every tracked minute (Timeline-consistent) or only from busy minutes (Retellect attribution)."
-      >
-        Count from
-        <span
-          aria-hidden="true"
-          className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-gray-300 text-[9px] font-semibold text-gray-400 cursor-help"
-        >
-          i
-        </span>
-      </span>
-      <div className="inline-flex border border-gray-200 rounded overflow-hidden bg-white" role="radiogroup" aria-label="Count from">
-        <button
-          type="button"
-          role="radio"
-          aria-checked={value === "tracked"}
-          className={`${baseBtn} ${value === "tracked" ? activeCls : inactiveCls}`}
-          onClick={() => onChange("tracked")}
-        >
-          All tracked
-        </button>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={value === "active"}
-          className={`${baseBtn} border-l border-gray-200 ${value === "active" ? activeCls : inactiveCls}`}
-          onClick={() => onChange("active")}
-        >
-          Active only
-        </button>
-      </div>
     </label>
   );
 }

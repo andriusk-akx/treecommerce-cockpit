@@ -339,12 +339,14 @@ describe("ZabbixClient.getCpuHistoryDaily", () => {
       min: 30,
       avg: 60, // (30+60+90)/3 = 60.0
     });
-    // Per-threshold counters reflect the three samples.
-    expect(r[0].minutesAbove[50]).toBe(2); // 60, 90
-    expect(r[0].minutesAbove[60]).toBe(2); // 60, 90 (>=60)
-    expect(r[0].minutesAbove[70]).toBe(1); // 90
-    expect(r[0].minutesAbove[80]).toBe(1); // 90
-    expect(r[0].minutesAbove[90]).toBe(1); // 90
+    // Per-threshold counters reflect the three samples — strict `>`
+    // matches the aggregateHost convention (a sample exactly at 60
+    // does NOT increment the 60 bucket; it goes to the next-lower band).
+    expect(r[0].minutesAbove[50]).toBe(2); // 60, 90 (both > 50)
+    expect(r[0].minutesAbove[60]).toBe(1); // 90 only (60 itself excluded by strict >)
+    expect(r[0].minutesAbove[70]).toBe(1); // 90 only
+    expect(r[0].minutesAbove[80]).toBe(1); // 90 only
+    expect(r[0].minutesAbove[90]).toBe(0); // 90 itself excluded
     expect(r[0].totalSamples).toBe(3);
   });
 
