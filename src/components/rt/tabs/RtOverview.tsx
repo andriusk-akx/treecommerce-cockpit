@@ -483,7 +483,31 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             </div>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
-              <span>{pilot.devices.filter((d) => d.retellectEnabled).length} devices with Retellect enabled</span>
+              <span>{(() => {
+                // Count devices where Retellect is installed by ANY of the
+                // three signals — same union the CPU Matrix and Timeline
+                // RT INST dot uses. The DB flag `Device.retellectEnabled`
+                // is essentially never populated in Rimi prod (drove the
+                // original "0 devices" bug), so we layer on:
+                //   • retellectDeployedHostIds (current Zabbix template)
+                //   • retellectActiveInPeriodHostIds (period-aware trend)
+                //   • rolloutPerHost.perHost[].on.realTracked +
+                //     syntheticTracked > 0 (aggregate ON minutes)
+                const deployed = new Set<string>(zabbix.retellectDeployedHostIds ?? []);
+                for (const id of zabbix.retellectActiveInPeriodHostIds ?? []) deployed.add(id);
+                for (const entry of zabbix.rolloutPerHost?.perHost ?? []) {
+                  const onTracked = entry.on.realTrackedMinutes + entry.on.syntheticTrackedMinutes;
+                  if (onTracked > 0) deployed.add(entry.hostId);
+                }
+                const byName = new Map(zabbix.hosts.map((h) => [h.hostName, h.hostId]));
+                let count = 0;
+                for (const d of pilot.devices) {
+                  const hostId = byName.get(d.sourceHostKey || "") || byName.get(d.name);
+                  if (hostId && deployed.has(hostId)) count++;
+                  else if (d.retellectEnabled) count++; // legacy DB flag fallback
+                }
+                return count;
+              })()} devices with Retellect installed</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-gray-400 flex-shrink-0" />

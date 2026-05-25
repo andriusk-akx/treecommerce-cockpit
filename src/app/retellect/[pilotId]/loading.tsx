@@ -21,8 +21,33 @@ export default function RetellectPilotLoading() {
           0%, 100% { opacity: 0.55; }
           50% { opacity: 1; }
         }
+        @keyframes topbar-slide {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
         .skel { background: #e5e7eb; border-radius: 4px; animation: shimmer 1.5s ease-in-out infinite; }
       `}</style>
+      {/* Slim indeterminate progress bar at the very top of the viewport —
+          unambiguous "page is loading" signal even when the rest of the
+          skeleton sits below the fold. Static gradient slides across the
+          full width on a 1.4 s loop. */}
+      <div style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 3,
+        overflow: "hidden",
+        zIndex: 9999,
+        background: "#e5e7eb",
+      }}>
+        <div style={{
+          position: "absolute",
+          inset: 0,
+          background: "linear-gradient(90deg, transparent, #2563eb, transparent)",
+          animation: "topbar-slide 1.4s ease-in-out infinite",
+        }} />
+      </div>
 
       {/* Header band — mirrors the real header in retellect/[pilotId]/page.tsx */}
       <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "16px 24px" }}>
