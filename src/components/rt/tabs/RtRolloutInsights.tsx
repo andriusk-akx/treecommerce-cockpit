@@ -1204,14 +1204,36 @@ function computeRolloutInsightsFromAggregate(
     payload.perHost.map((p) => [p.hostId, p]),
   );
   const zabbixByName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
-  // Host-level deployment registry: a host is "ON" if Retellect items
-  // are configured in its Zabbix template, regardless of whether the
-  // helper actually fired during the window. This is the rollout
-  // question — "did this CPU class receive Retellect" — and matches
-  // the user's mental model. Bucket-level python.cpu activity is no
-  // longer used for the ON/OFF split (was being masked by the 0.5%
-  // cutoff that idle Retellect on Pavilnonys i3-6100 never crossed).
+  // Host-level deployment classification — union of three signals:
+  //
+  //   1. Zabbix template registry (`retellectDeployedHostIds`): hosts
+  //      that currently have python.cpu items configured. Tells us
+  //      "Retellect IS deployed on this host today".
+  //
+  //   2. Period-aware Zabbix trend signal (`retellectActiveInPeriodHostIds`):
+  //      hostIds whose python.cpu trend records had value_max > 0.5%
+  //      at any point during the period window. Server-side computed
+  //      with proper retention/coverage handling. Pavilnonys SC02 is
+  //      the canonical case — Retellect ran during the window but
+  //      isn't currently in the template registry, so without this
+  //      signal the matrix mis-classified it as OFF.
+  //
+  //   3. Aggregate-derived backup: any host whose rolloutPerHost entry
+  //      carries ON-classified tracked minutes. Catches the same kind
+  //      of historical evidence but from the aggregate fetcher's own
+  //      data, so the classification still works if signal (2) is
+  //      missing on a particular environment.
+  //
+  // Bucket-level python.cpu activity is NOT used for the per-bucket
+  // ON/OFF split (idle Retellect at ~0.4-0.95% never crosses the 0.5%
+  // cutoff); the historical signals lift the host into the deployed
+  // group, not the per-minute classification.
   const deployedSet = new Set<string>(zabbix.retellectDeployedHostIds ?? []);
+  for (const id of zabbix.retellectActiveInPeriodHostIds ?? []) deployedSet.add(id);
+  for (const entry of payload.perHost) {
+    const onTracked = entry.on.realTrackedMinutes + entry.on.syntheticTrackedMinutes;
+    if (onTracked > 0) deployedSet.add(entry.hostId);
+  }
 
   type GroupAcc = {
     model: string;

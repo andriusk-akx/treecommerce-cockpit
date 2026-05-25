@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { headers } from "next/headers";
+import { after } from "next/server";
 import { prisma } from "@/lib/db";
 import { notFound, redirect } from "next/navigation";
 import { RtPilotWorkspace } from "@/components/rt/RtPilotWorkspace";
@@ -157,6 +158,36 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
   // window so the user sees a populated layout from click 0.
   const pilotData: RtPilotData = buildPilotData(pilot);
   const zabbixDataPromise = loadZabbixDataPayload(pilotId, expectedHostKeys, periodDays, activeThresholdPp);
+
+  // Background prefetch for adjacent window sizes the user is most likely
+  // to switch into next. Fires AFTER the response is sent (Next.js
+  // `after()`) so it doesn't block the user's first paint — when they
+  // then click 30d the disk cache is already warm and the period switch
+  // resolves in milliseconds instead of the 30–60 s cold-fetch wait.
+  //
+  // Heuristic:
+  //   • 14d landing → prefetch 30d (most common upgrade).
+  //   • 30d landing → prefetch 90d (next deeper window).
+  //   • 90d already loaded → nothing larger to warm.
+  //
+  // Skip on warm requests so the warm-cache orchestrator doesn't
+  // recursively trigger prefetches of windows it's already scheduled to
+  // warm itself.
+  if (!isWarmRequest) {
+    const PREFETCH_NEXT: Record<number, number | undefined> = { 14: 30, 30: 90 };
+    const nextPeriod = PREFETCH_NEXT[periodDays];
+    if (nextPeriod) {
+      after(async () => {
+        try {
+          await loadZabbixDataPayload(pilotId, expectedHostKeys, nextPeriod, activeThresholdPp);
+        } catch {
+          /* Prefetch failure is non-fatal — next user-driven fetch will
+             retry naturally. We don't log either; the disk cache will
+             stay cold and the next visit eats the latency. */
+        }
+      });
+    }
+  }
 
   // Warm-cache path: await the heavy promise (so fetchSource writes to
   // disk cache) and return a minimal response. Skip Suspense streaming

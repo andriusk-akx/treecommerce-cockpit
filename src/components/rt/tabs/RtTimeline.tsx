@@ -419,11 +419,25 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         rtMap.set(proc.hostId, { cpuTotal: cpuValue, freshestMs: lastMs });
       }
     }
-    // Strict registry signal — hostIds with Retellect items configured in
-    // their Zabbix template, regardless of state. The page passes this as
-    // an array (so it survives the JSON cache layer); we re-hydrate to a
-    // Set here so per-row lookups are O(1).
+    // "Deployed" signal — union of three sources:
+    //   (a) registry: Retellect items currently configured in the host's
+    //       Zabbix template (`retellectDeployedHostIds`).
+    //   (b) period-aware trend signal: hostIds with python.cpu trend
+    //       value_max > 0.5% at any point in the period
+    //       (`retellectActiveInPeriodHostIds`). Server-fetched with
+    //       proper retention handling. Captures intermittent hosts that
+    //       ran Retellect during the window but stopped before the
+    //       template registry was refreshed — Pavilnonys SC02 case.
+    //   (c) aggregate backup: any host whose rolloutPerHost entry has
+    //       ON-classified tracked minutes. Catches the same historical
+    //       evidence via a different code path so the dot still lights
+    //       up even if (b) is empty on this environment.
     const deployedSet = new Set<string>(zabbix.retellectDeployedHostIds ?? []);
+    for (const id of zabbix.retellectActiveInPeriodHostIds ?? []) deployedSet.add(id);
+    for (const entry of zabbix.rolloutPerHost?.perHost ?? []) {
+      const onTracked = entry.on.realTrackedMinutes + entry.on.syntheticTrackedMinutes;
+      if (onTracked > 0) deployedSet.add(entry.hostId);
+    }
     // Per-day active counters from the Rollout Insights aggregate. Keyed
     // hostId → date → counters. Drives the heatmap cells when the user
     // toggles Count from = "Active only" — cells then use
@@ -959,13 +973,20 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         />
         <FilterSegmented<"tracked" | "active">
           label="Count from"
-          value={cpuCountFrom}
-          info="Whether the heatmap counts every minute above the threshold (matches the historic Timeline behaviour) or restricts to SCO-busy minutes for Retellect-only attribution."
+          value="tracked"
+          info="The heatmap always counts every tracked minute above the threshold (matches CPU Matrix in All-tracked mode). Active-only restriction is exposed in CPU Matrix; here it's disabled so the day cells stay reconcilable with Timeline drill-downs."
           options={[
             { v: "tracked", l: "All tracked" },
-            { v: "active", l: "Active only" },
+            {
+              v: "active",
+              l: "Active only",
+              title: "Active-only counting is restricted to the CPU Matrix view — Timeline cells always use the tracked-minute denominator so drill-downs reconcile.",
+              disabled: true,
+            },
           ]}
-          onChange={(v) => setFilter("cpuCountFrom", v)}
+          onChange={() => {
+            /* Active-only disabled here; CPU Matrix is the entry point for that view. */
+          }}
         />
         <FilterDivider />
         <FilterSelect
@@ -1127,15 +1148,21 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       <tr key={`${row.name}-${rowIdx}`} style={{ borderTop: `1px solid ${rowIdx === 0 ? C.border : "#f1f3f5"}`, background: rowBg }}>
         <td style={{
           padding: "3px 8px", fontSize: 11, fontWeight: sel ? 600 : 400, whiteSpace: "nowrap",
-          position: "sticky", left: 0, background: rowBg, zIndex: 10,
+          position: "sticky", left: 0, background: rowBg, zIndex: 11,
           color: sel ? C.pillActive : "#343a40",
-          maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis",
+          width: 180, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis",
+          borderRight: "1px solid #f1f3f5",
         }} title={row.storeName}>{row.storeName}</td>
+        {/* Host column — sticky alongside Store so the row identity stays
+            visible when the user scrolls the heatmap horizontally. left
+            offset matches the Store column's 180 px width above. */}
         <td style={{
           padding: "3px 6px", fontFamily: "'SF Mono','Cascadia Code',monospace", fontSize: 11,
           fontWeight: sel ? 600 : 400, whiteSpace: "nowrap",
+          position: "sticky", left: 180, background: rowBg, zIndex: 11,
           color: sel ? C.pillActive : "#343a40",
-          minWidth: 70, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis",
+          width: 100, minWidth: 70, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis",
+          borderRight: "1px solid #f1f3f5",
         }} title={rowTitle}>{row.name}</td>
         <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", minWidth: 130, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }} title={
           row.coresSource === "unknown"
@@ -1410,7 +1437,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 {/* New ordering per user feedback: Store → Host → CPU → Retellect.
                     Type column dropped — every host in this pilot is the same
                     type (SCO), the badge added noise without information. */}
-                <th onClick={() => toggleSort("store")} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 0, background: C.headerBg, zIndex: 10, cursor: "pointer", userSelect: "none" }}>
+                <th onClick={() => toggleSort("store")} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 0, background: C.headerBg, zIndex: 11, cursor: "pointer", userSelect: "none", width: 180, minWidth: 180, borderRight: "1px solid #e2e8f0" }}>
                   Store{sortArrow("store")}
                 </th>
                 {/*
@@ -1424,7 +1451,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   px = 960 px alone, narrow viewports (< ~1320 px after sidebar)
                   trigger the collapse on `width: 100%` tables.
                 */}
-                <th onClick={() => toggleSort("name")} style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none", minWidth: 70 }}>
+                <th onClick={() => toggleSort("name")} style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none", position: "sticky", left: 180, background: C.headerBg, zIndex: 11, width: 100, minWidth: 70, borderRight: "1px solid #e2e8f0" }}>
                   Host{sortArrow("name")}
                 </th>
                 <th style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", minWidth: 110 }}>CPU</th>
