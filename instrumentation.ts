@@ -53,8 +53,14 @@ export async function register() {
   const port = process.env.PORT ?? "3000";
   const origin = publicDomain ? `https://${publicDomain}` : `http://127.0.0.1:${port}`;
 
-  // 10 s delay so the HTTP server is accepting connections by the time
-  // we fire — register() runs before the listener is ready.
+  // 3 s delay so the HTTP server is accepting connections by the time
+  // we fire — register() runs before the listener is ready. Node's
+  // listen() typically resolves within 1-2 s of process start on
+  // Railway containers; 3 s gives a small buffer without leaving an
+  // unnecessarily wide window where users could hit a cold cache.
+  // (Was 10 s before 2026-05-25; tightening because the warm-cache
+  // request itself takes 30-60 s and the sooner we start, the sooner
+  // post-deploy visitors land on warm data.)
   setTimeout(() => {
     const url = `${origin}/api/internal/warm-cache?secret=${encodeURIComponent(secret)}&periods=14,30`;
     // Detach from the boot promise so a stuck warm doesn't hold up
