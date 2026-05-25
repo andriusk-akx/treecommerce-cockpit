@@ -1151,18 +1151,19 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           position: "sticky", left: 0, background: rowBg, zIndex: 11,
           color: sel ? C.pillActive : "#343a40",
           width: 180, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis",
-          borderRight: "1px solid #f1f3f5",
         }} title={row.storeName}>{row.storeName}</td>
         {/* Host column — sticky alongside Store so the row identity stays
             visible when the user scrolls the heatmap horizontally. left
-            offset matches the Store column's 180 px width above. */}
+            offset matches the Store column's 180 px width above. The
+            previous border-right on both columns introduced a visible
+            divider line that 'shone through' (user feedback 2026-05-25);
+            we now rely on the natural cell padding for separation. */}
         <td style={{
           padding: "3px 6px", fontFamily: "'SF Mono','Cascadia Code',monospace", fontSize: 11,
           fontWeight: sel ? 600 : 400, whiteSpace: "nowrap",
           position: "sticky", left: 180, background: rowBg, zIndex: 11,
           color: sel ? C.pillActive : "#343a40",
           width: 100, minWidth: 70, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis",
-          borderRight: "1px solid #f1f3f5",
         }} title={rowTitle}>{row.name}</td>
         <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", minWidth: 130, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }} title={
           row.coresSource === "unknown"
@@ -1437,7 +1438,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 {/* New ordering per user feedback: Store → Host → CPU → Retellect.
                     Type column dropped — every host in this pilot is the same
                     type (SCO), the badge added noise without information. */}
-                <th onClick={() => toggleSort("store")} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 0, background: C.headerBg, zIndex: 11, cursor: "pointer", userSelect: "none", width: 180, minWidth: 180, borderRight: "1px solid #e2e8f0" }}>
+                <th onClick={() => toggleSort("store")} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 0, background: C.headerBg, zIndex: 11, cursor: "pointer", userSelect: "none", width: 180, minWidth: 180 }}>
                   Store{sortArrow("store")}
                 </th>
                 {/*
@@ -1451,7 +1452,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   px = 960 px alone, narrow viewports (< ~1320 px after sidebar)
                   trigger the collapse on `width: 100%` tables.
                 */}
-                <th onClick={() => toggleSort("name")} style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none", position: "sticky", left: 180, background: C.headerBg, zIndex: 11, width: 100, minWidth: 70, borderRight: "1px solid #e2e8f0" }}>
+                <th onClick={() => toggleSort("name")} style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none", position: "sticky", left: 180, background: C.headerBg, zIndex: 11, width: 100, minWidth: 70 }}>
                   Host{sortArrow("name")}
                 </th>
                 <th style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", minWidth: 110 }}>CPU</th>
@@ -1586,7 +1587,18 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                       background: "#f1f5f9",
                       cursor: "pointer",
                     }} onClick={() => toggleGroup(groupName)}>
-                      <td colSpan={5} style={{
+                      {/* Label td covers ONLY the frozen Store+Host columns
+                          (widths 180 + 100 = 280 px). Previously this was
+                          a colSpan=5 sticky td whose 5-column-wide grey
+                          background bled over the CPU / RT INST / RT ACT
+                          columns of adjacent rows when scrolling
+                          horizontally — the user saw data cells "covered
+                          by the CPU model background" (2026-05-25). The
+                          remaining 3 left-side columns (CPU / RT INST /
+                          RT ACT) now render an empty placeholder td so
+                          the column geometry stays consistent with host
+                          rows below; day cells start at the same x. */}
+                      <td colSpan={2} style={{
                         padding: "6px 10px",
                         position: "sticky", left: 0, background: "#f1f5f9", zIndex: 10,
                       }}>
@@ -1597,6 +1609,10 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                           <span style={{ color: "#64748b", fontSize: 10 }}>· {matchedHosts} reporting</span>
                         </div>
                       </td>
+                      {/* Empty placeholder for CPU + RT INST + RT ACT — keeps
+                          the column grid aligned with host rows so the day
+                          cells beyond start at the same x. */}
+                      <td colSpan={3} style={{ background: "#f1f5f9" }} />
                       {dayAgg.map((val, i) => {
                         const hasValue = val !== null;
                         const dateStr = `${String(dates[i].getMonth() + 1).padStart(2, "0")}-${String(dates[i].getDate()).padStart(2, "0")}`;
