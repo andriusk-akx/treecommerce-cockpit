@@ -86,7 +86,13 @@ export function FilterSelect({
 /** Pill-style segmented control. Pass 2-N options; the active one
  *  carries the same blue tint we use everywhere for "selected". Use
  *  for binary toggles (Count from, Metric) and small enumerations
- *  (Period presets, Group by). */
+ *  (Period presets, Group by).
+ *
+ *  Disabled options: pass `disabled: true` on an option to render it
+ *  greyed out and non-clickable. Used by Rollout Insights to keep the
+ *  Timeline-style "Metric" segmented visible (so the row's visual
+ *  rhythm matches across tabs) while signalling that Peak % isn't a
+ *  selectable view in the matrix — Peak CPU has its own column there. */
 export function FilterSegmented<T extends string>({
   label,
   value,
@@ -97,7 +103,7 @@ export function FilterSegmented<T extends string>({
 }: {
   label: string;
   value: T;
-  options: { v: T; l: string; title?: string }[];
+  options: { v: T; l: string; title?: string; disabled?: boolean }[];
   onChange: (v: T) => void;
   /** Tooltip text — when provided, a small (i) help icon is rendered
    *  next to the label and the whole label group gets `cursor-help`. */
@@ -118,23 +124,36 @@ export function FilterSegmented<T extends string>({
         )}
       </span>
       <div className="inline-flex border border-gray-200 rounded overflow-hidden bg-white" role="radiogroup" aria-label={ariaLabel ?? label}>
-        {options.map((opt, i) => (
-          <button
-            key={opt.v}
-            type="button"
-            role="radio"
-            aria-checked={value === opt.v}
-            onClick={() => onChange(opt.v)}
-            title={opt.title}
-            className={[
-              "px-2 py-0.5 text-[11px] transition",
-              i > 0 ? "border-l border-gray-200" : "",
-              value === opt.v ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-500 hover:text-gray-700",
-            ].join(" ")}
-          >
-            {opt.l}
-          </button>
-        ))}
+        {options.map((opt, i) => {
+          const active = value === opt.v;
+          const isDisabled = !!opt.disabled;
+          return (
+            <button
+              key={opt.v}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-disabled={isDisabled || undefined}
+              disabled={isDisabled}
+              onClick={() => {
+                if (isDisabled) return;
+                onChange(opt.v);
+              }}
+              title={opt.title}
+              className={[
+                "px-2 py-0.5 text-[11px] transition",
+                i > 0 ? "border-l border-gray-200" : "",
+                isDisabled
+                  ? "text-gray-300 bg-gray-50 cursor-not-allowed"
+                  : active
+                    ? "bg-blue-50 text-blue-700 font-medium"
+                    : "text-gray-500 hover:text-gray-700",
+              ].join(" ")}
+            >
+              {opt.l}
+            </button>
+          );
+        })}
       </div>
     </label>
   );

@@ -25,7 +25,7 @@ import { isRetellectActiveToday } from "./rt-overview-helpers";
 import type { RolloutOnOffAggregate, RolloutPerHostEntry } from "@/lib/rollout-insights/types";
 import { emptyOnOffAggregate } from "@/lib/rollout-insights/types";
 import { mergeOnOff, weightedAvg } from "@/lib/rollout-insights/aggregate";
-import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterHint } from "../filters/RtFilterControls";
+import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterDivider } from "../filters/RtFilterControls";
 import { OnOffLabel } from "../filters/RtStateBadge";
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -294,20 +294,88 @@ export function RtRolloutInsights({
         </div>
       </div>
 
-      {/* ── Filters — period / (active threshold) / high-cpu / count from / store ── */}
+      {/* ── Filters — two-row layout mirrors CPU Timeline so the user's
+          eye doesn't have to re-learn the controls each tab switch.
+          Differences from Timeline are intentional:
+            • Metric: Peak % is DISABLED here — the matrix already shows
+              Avg peak Total CPU as its own column, so there's nothing
+              to switch to. Kept visible (greyed) so the row's visual
+              rhythm matches Timeline exactly.
+            • CPU dropdown, Group by, Retellect Installed/Active pills
+              are intentionally absent — Rollout aggregates across CPU
+              classes by design and isn't a per-host explorer.
+            • Active-threshold slider stays on row 2 next to Period —
+              Rollout-specific and only meaningful in Active mode. ── */}
       <FilterBar>
         <FilterRow>
           <FilterSelect
+            label="Threshold"
+            value={String(threshold)}
+            options={[20, 30, 40, 50, 60, 70, 80, 90].map((v) => ({ v: String(v), l: `${v}%` }))}
+            onChange={(v) => setFilter("threshold", Number(v))}
+          />
+          <FilterSegmented<"minAbove" | "peak">
+            label="Metric"
+            value="minAbove"
+            options={[
+              {
+                v: "minAbove",
+                l: "Minutes above threshold",
+                title: "How long Total CPU stayed above the threshold — the matrix's headline counter.",
+              },
+              {
+                v: "peak",
+                l: "Peak %",
+                title: "Peak CPU is shown by the matrix's own \"Avg peak Total CPU\" column, so this view doesn't toggle separately here.",
+                disabled: true,
+              },
+            ]}
+            onChange={() => {
+              /* no-op — Peak % is disabled in Rollout (matrix shows its own peak column) */
+            }}
+          />
+          {useAggregate && (
+            <FilterSegmented<"tracked" | "active">
+              label="Count from"
+              value={cpuCountFrom}
+              info="Whether the Min > X% column counts every tracked minute (matches CPU Timeline) or only busy minutes (Retellect attribution)."
+              options={[
+                { v: "tracked", l: "All tracked" },
+                { v: "active", l: "Active only" },
+              ]}
+              onChange={(v) => setFilter("cpuCountFrom", v)}
+            />
+          )}
+          <FilterDivider />
+          <FilterSelect
+            label="Store"
+            value={filters.store}
+            options={[
+              { v: "all", l: "All stores" },
+              ...pilot.stores.map((s) => ({ v: s.name, l: s.name })),
+            ]}
+            onChange={(v) => setFilter("store", v)}
+          />
+        </FilterRow>
+        <FilterRow>
+          <FilterSegmented<string>
             label="Period"
             value={filters.period}
             options={[
-              { v: "7d", l: "7 days" },
-              { v: "14d", l: "14 days" },
-              { v: "30d", l: "30 days" },
-              { v: "90d", l: "90 days" },
+              { v: "7d", l: "7d" },
+              { v: "14d", l: "14d" },
+              { v: "30d", l: "30d" },
+              { v: "90d", l: "90d" },
             ]}
             onChange={setPeriod}
           />
+          {useAggregate && cpuCountFrom === "active" && (
+            <ActiveThresholdSlider
+              value={sliderValue}
+              onChange={setSliderValue}
+              pending={sliderValue !== activeThresholdPpFromFilter}
+            />
+          )}
           {isRefreshing ? (
             <span
               className="inline-flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1"
@@ -327,50 +395,6 @@ export function RtRolloutInsights({
               Updating window…
             </span>
           ) : null}
-          {useAggregate && cpuCountFrom === "active" && (
-            <ActiveThresholdSlider
-              value={sliderValue}
-              onChange={setSliderValue}
-              pending={sliderValue !== activeThresholdPpFromFilter}
-            />
-          )}
-          <FilterSelect
-            label="High-CPU threshold"
-            value={String(threshold)}
-            options={[
-              { v: "20", l: "20%" },
-              { v: "30", l: "30%" },
-              { v: "40", l: "40%" },
-              { v: "50", l: "50%" },
-              { v: "60", l: "60%" },
-              { v: "70", l: "70%" },
-              { v: "80", l: "80%" },
-              { v: "90", l: "90%" },
-            ]}
-            onChange={(v) => setFilter("threshold", Number(v))}
-          />
-          {useAggregate && (
-            <FilterSegmented<"tracked" | "active">
-              label="Count from"
-              value={cpuCountFrom}
-              info="Whether the Min > X% column counts every tracked minute (matches CPU Timeline) or only busy minutes (Retellect attribution)."
-              options={[
-                { v: "tracked", l: "All tracked" },
-                { v: "active", l: "Active only" },
-              ]}
-              onChange={(v) => setFilter("cpuCountFrom", v)}
-            />
-          )}
-          <FilterSelect
-            label="Store"
-            value={filters.store}
-            options={[
-              { v: "all", l: "All stores" },
-              ...pilot.stores.map((s) => ({ v: s.name, l: s.name })),
-            ]}
-            onChange={(v) => setFilter("store", v)}
-          />
-          <FilterHint>Filters persist across tabs</FilterHint>
         </FilterRow>
       </FilterBar>
 
