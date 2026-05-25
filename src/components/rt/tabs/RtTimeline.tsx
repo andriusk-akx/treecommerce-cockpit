@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactElement } from "react";
-import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
 import type { PerDayActiveCounters } from "@/lib/rollout-insights/types";
@@ -200,6 +200,16 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   const router = useRouter();
   const pathname = usePathname();
   const urlSearchParams = useSearchParams();
+  // useTransition wraps router.push so React reports back when the server
+  // navigation is in flight. The 14 → 30 day jump triggers a Zabbix
+  // trend.get fetch for up to ~110 hosts × multiple items — typically
+  // 30–60 s on cold cache. Without an isRefreshing flag, the URL chip
+  // updated instantly but the heatmap kept rendering old cells until
+  // the server responded; users perceived this as "nothing happens for
+  // a minute". The flag drives the inline "Updating window…" pill in
+  // the filter bar and the heatmap opacity-fade below so the user can
+  // see that work is in progress. Same pattern as RtRolloutInsights.
+  const [isRefreshing, startPeriodTransition] = useTransition();
   // Sync URL → context. Two scenarios:
   //   - Fresh deep-link with ?period=60 → context catches up to URL.
   //   - SSR re-render after setPeriod's router.push → URL already matches
@@ -221,7 +231,9 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     setFilter("period", v);
     const params = new URLSearchParams(urlSearchParams.toString());
     params.set("period", v);
-    router.push(`${pathname}?${params.toString()}`);
+    startPeriodTransition(() => {
+      router.push(`${pathname}?${params.toString()}`);
+    });
   };
   const storeFilter = filters.store;
   const setStoreFilter = (v: string) => setFilter("store", v);
@@ -1021,6 +1033,26 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         {!isPresetPeriod && !showCustomPeriod && (
           <span className="text-[10px] text-gray-300">({periodDays}d)</span>
         )}
+        {isRefreshing ? (
+          <span
+            className="inline-flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1"
+            role="status"
+            aria-live="polite"
+            title="Fetching Zabbix trends for the new period — typically 30–60 s on a cold cache."
+          >
+            <svg
+              className="animate-spin w-3 h-3"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
+              <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+            </svg>
+            Updating window…
+          </span>
+        ) : null}
         <FilterDivider />
         <FilterSegmented<"host" | "cpu" | "store">
           label="Group by"
@@ -1856,7 +1888,12 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             </p>
           </div>
         )}
-        {heatmapTable}
+        <div
+          style={{ transition: "opacity 200ms", opacity: isRefreshing ? 0.5 : 1, pointerEvents: isRefreshing ? "none" : undefined }}
+          aria-busy={isRefreshing || undefined}
+        >
+          {heatmapTable}
+        </div>
         <div style={{ background: "#eff6ff", borderRadius: 6, padding: "10px 14px", marginTop: 14 }}>
           <p style={{ fontSize: 12, color: "#1e40af", margin: 0 }}>
             <strong>How to use:</strong> Click any cell to open day drill-down. Search to filter hosts. Click column headers to sort. Drag the divider to resize.
@@ -1936,7 +1973,12 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       {/* TOP PANE */}
       <div style={{ height: split.splitPx, minHeight: 120, overflow: "auto", flexShrink: 0 }}>
         {filterBar(true)}
-        {heatmapTable}
+        <div
+          style={{ transition: "opacity 200ms", opacity: isRefreshing ? 0.5 : 1, pointerEvents: isRefreshing ? "none" : undefined }}
+          aria-busy={isRefreshing || undefined}
+        >
+          {heatmapTable}
+        </div>
       </div>
 
       {/* DRAG DIVIDER */}
