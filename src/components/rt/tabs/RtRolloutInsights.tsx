@@ -280,19 +280,10 @@ export function RtRolloutInsights({
 
   return (
     <>
-      {/* ── Header ─────────────────────────────────────────────────── */}
-      <div className="mb-5 flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-800">Rollout Insights</h2>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Decision summary for {pilot.name} — last {periodDays} days
-            {useAggregate
-              ? `, active threshold +${activeThresholdPp} pp (above each host's night-time spss.cpu baseline)`
-              : `, threshold ${threshold}%`}
-            . One read tells you which CPU classes to roll out, hold, or optimize.
-          </p>
-        </div>
-      </div>
+      {/* Header block intentionally removed 2026-05-25 — the tab label in
+          the sidebar already says "Rollout Insights", and the period /
+          active-threshold / threshold details now read directly from the
+          filter bar below, so the duplicated subtitle was visual noise. */}
 
       {/* ── Filters — two-row layout mirrors CPU Timeline so the user's
           eye doesn't have to re-learn the controls each tab switch.
