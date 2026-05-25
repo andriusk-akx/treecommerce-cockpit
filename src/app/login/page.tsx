@@ -25,11 +25,11 @@ export default async function LoginPage({ searchParams }: Props) {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm bg-white border border-gray-200 rounded-lg shadow-sm p-6">
         <div className="text-center mb-6">
-          <div className="flex items-center justify-center gap-2 mb-1 text-gray-900">
+          {/* Wordmark replaces the previous LogoX glyph + adjacent
+              <h1>Store X</h1> markup — the wordmark already carries
+              the brand name. */}
+          <div className="flex items-center justify-center mb-1 text-gray-900">
             <LogoX size={28} />
-            <h1 className="text-xl font-bold tracking-tight">
-              Store <span className="text-[#3f4f1f]">X</span>
-            </h1>
           </div>
           <p className="text-xs text-gray-500">Sign in to continue</p>
         </div>
