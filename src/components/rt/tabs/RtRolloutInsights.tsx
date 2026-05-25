@@ -44,11 +44,19 @@ interface MatrixRow {
    *  window). Drives the "from N hosts" sub-label under the bar. */
   hostsOnObserved: number;
   hostsOffObserved: number;
-  /** Average per-host peak CPU across the observed hosts in the group.
-   *  - Legacy compute: max trend-bucket value across the FULL period.
-   *  - Aggregate compute: max totalCpu across that host's ACTIVE buckets
-   *    only (busy windows where spss.cpu was above baseline + threshold).
-   *  Averaging across hosts smooths single-host outliers either way. */
+  /** Weighted average Total CPU during ACTIVE minutes (busy windows
+   *  classified by `spss > baseline + activeThresholdPp`).
+   *  - Aggregate compute: sumTotalCpu / (realActive + synthActive) per
+   *    direction. Each active minute weighs equally, so hosts active
+   *    more often contribute proportionally — no single host's spike
+   *    can dominate, and the metric reads as "average CPU while busy".
+   *  - Legacy compute: max trend-bucket value across the full period
+   *    (kept for legacy fallback path; aggregate path is preferred).
+   *
+   *  Renamed from `peakOn/peakOff` 2026-05-25 after user feedback that
+   *  "Avg of per-host peaks" was non-intuitive and didn't behave like
+   *  a normal average. The matrix column label moved from "Avg peak
+   *  Total CPU" to "Avg Total CPU" in lockstep. */
   peakOn: number | null;
   peakOff: number | null;
   minAboveOn: number | null;
@@ -421,9 +429,9 @@ export function RtRolloutInsights({
                   <th className="text-left py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase">CPU class</th>
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Hosts</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">
-                    {useAggregate ? "Avg peak Total CPU" : "Avg peak CPU"}
+                    {useAggregate ? "Avg Total CPU" : "Avg peak CPU"}
                     <span className="ml-1 normal-case font-normal text-gray-400 lowercase">
-                      {useAggregate ? "during active min · ON vs OFF" : "per host · ON vs OFF"}
+                      {useAggregate ? "across active min · ON vs OFF" : "per host · ON vs OFF"}
                     </span>
                   </th>
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">
@@ -540,8 +548,9 @@ export function RtRolloutInsights({
               {" "}/ {matrix.reduce((s, r) => s + r.activeSynMinutes, 0).toLocaleString("en-US")} synthetic
               (hourly trend, 60 min/bucket). A minute counts as active when{" "}
               <code>spss.cpu &gt; baseline + {activeThresholdPp} pp</code>; baseline is the median spss.cpu
-              between 02:00 and 05:00 Europe/Vilnius. Avg peak Total CPU = mean of per-host peak{" "}
-              <code>system.cpu.util[,,avg1]</code> across active minutes. &ldquo;Min &gt; {threshold}%&rdquo;
+              between 02:00 and 05:00 Europe/Vilnius. Avg Total CPU = weighted average of{" "}
+              <code>system.cpu.util[,,avg1]</code> across every active minute in the class (each minute
+              weighs equally). &ldquo;Min &gt; {threshold}%&rdquo;
               counts from {cpuCountFrom === "active" ? "active (busy) minutes only" : "all tracked minutes (matches CPU Timeline)"} — toggle via the
               &ldquo;Count from&rdquo; control above.
             </p>
@@ -644,13 +653,13 @@ export function RtRolloutInsights({
                 </dd>
               </div>
               <div>
-                <dt className="font-semibold text-gray-800">Avg peak Total CPU</dt>
+                <dt className="font-semibold text-gray-800">Avg Total CPU</dt>
                 <dd className="mt-0.5 leading-relaxed">
-                  For each host with a usable baseline, take the maximum
-                  <code> system.cpu.util[,,avg1]</code> observed during that host&rsquo;s
-                  <em> active</em> minutes (busy windows). The column shows the mean of those
-                  per-host peaks — smooths single-host outliers while still being the worst
-                  moment under load, restricted to busy time so idle hours don&rsquo;t dilute it.
+                  Weighted average of <code>system.cpu.util[,,avg1]</code> across every active
+                  minute in the class, split by Retellect ON / OFF. Each active minute weighs
+                  equally — hosts that were active more often contribute proportionally, no
+                  single host&rsquo;s transient spike can dominate. Reads as &ldquo;average CPU
+                  level while the SCO was busy.&rdquo;
                 </dd>
               </div>
               <div>
@@ -680,7 +689,7 @@ export function RtRolloutInsights({
                 <dt className="font-semibold text-gray-800">Status</dt>
                 <dd className="mt-0.5 leading-relaxed">
                   Graded only when the class has at least one ON-classified host
-                  (real Retellect evidence). Bands on the Avg peak Total CPU:
+                  (real Retellect evidence). Bands on the Avg Total CPU:
                   <strong> safe</strong> &lt; 70%, <strong>validate further</strong> 70–84%,
                   <strong> optimize first</strong> 85–94%, <strong>do not roll out</strong> ≥ 95%.
                   When <em>hostsOn = 0</em> the row is <strong>No Retellect data</strong> regardless
@@ -1195,10 +1204,12 @@ function computeRolloutInsightsFromAggregate(
     hostsWithBaseline: number;
     hostsOn: Set<string>;
     hostsOff: Set<string>;
-    /** Per-host peak totalCpu observed in ON-classified active minutes.
-     *  Aggregated as "avg of per-host peaks", same convention as legacy. */
-    perHostPeakOn: number[];
-    perHostPeakOff: number[];
+    /** Hosts that contributed any totalCpu sample during their ACTIVE
+     *  windows (ON / OFF directions). Drives the "from N hosts" sub-
+     *  label and the coverage footer — independent of the value we
+     *  display (which is now a weighted avg, not the peak). */
+    hostsOnActiveSeen: Set<string>;
+    hostsOffActiveSeen: Set<string>;
     on: RolloutOnOffAggregate;
     off: RolloutOnOffAggregate;
   };
@@ -1216,8 +1227,8 @@ function computeRolloutInsightsFromAggregate(
         hostsWithBaseline: 0,
         hostsOn: new Set(),
         hostsOff: new Set(),
-        perHostPeakOn: [],
-        perHostPeakOff: [],
+        hostsOnActiveSeen: new Set(),
+        hostsOffActiveSeen: new Set(),
         on: emptyOnOffAggregate(),
         off: emptyOnOffAggregate(),
       };
@@ -1240,16 +1251,17 @@ function computeRolloutInsightsFromAggregate(
     const offTracked = entry.off.realTrackedMinutes + entry.off.syntheticTrackedMinutes;
     if (onTracked > 0) g.hostsOn.add(matchedHost.hostId);
     if (offTracked > 0) g.hostsOff.add(matchedHost.hostId);
-    // Per-host peaks stay gated by ACTIVE minutes — the column is
-    // "avg per-host peak during active min" and a peak from idle data
-    // would mean something different.
+    // Track which hosts have ANY usable totalCpu sample during their
+    // active minutes (ON / OFF) — drives the "from N hosts" sub-label.
+    // The displayed value is now a weighted avg across all active
+    // minutes in the class, so we no longer collect per-host peaks.
     const onActiveMin = entry.on.realActiveMinutes + entry.on.syntheticActiveMinutes;
     const offActiveMin = entry.off.realActiveMinutes + entry.off.syntheticActiveMinutes;
-    if (hasBaseline && onActiveMin > 0 && entry.on.peakTotalCpu !== null) {
-      g.perHostPeakOn.push(entry.on.peakTotalCpu);
+    if (hasBaseline && onActiveMin > 0 && entry.on.sumTotalCpu > 0) {
+      g.hostsOnActiveSeen.add(matchedHost.hostId);
     }
-    if (hasBaseline && offActiveMin > 0 && entry.off.peakTotalCpu !== null) {
-      g.perHostPeakOff.push(entry.off.peakTotalCpu);
+    if (hasBaseline && offActiveMin > 0 && entry.off.sumTotalCpu > 0) {
+      g.hostsOffActiveSeen.add(matchedHost.hostId);
     }
     // Merge unconditionally so all aggregates (tracked + active +
     // threshold counters) flow into the group regardless of baseline.
@@ -1257,16 +1269,14 @@ function computeRolloutInsightsFromAggregate(
     g.off = mergeOnOff(g.off, entry.off);
   }
 
-  // Pure: mean of a non-empty number array, null when empty. Same shape
-  // as the legacy `mean` helper so the matrix rows look identical to the
-  // legacy path for the headline column.
-  const mean = (xs: number[]) =>
-    xs.length === 0 ? null : xs.reduce((s, v) => s + v, 0) / xs.length;
-
   const matrix: MatrixRow[] = [];
   for (const g of groups.values()) {
-    const peakOn = mean(g.perHostPeakOn);
-    const peakOff = mean(g.perHostPeakOff);
+    // Weighted average totalCpu across ALL active minutes per direction.
+    // Every active minute contributes equally; hosts that were active
+    // more often pull more weight, which matches "average CPU while
+    // busy" intuition better than the previous avg-of-per-host-peaks.
+    const peakOn = weightedAvg(g.on, "sumTotalCpu");
+    const peakOff = weightedAvg(g.off, "sumTotalCpu");
     const avgRetellectOn = weightedAvg(g.on, "sumRetellectCpu");
     const avgRetellectOff = weightedAvg(g.off, "sumRetellectCpu");
     const activeRealMinutes = g.on.realActiveMinutes + g.off.realActiveMinutes;
@@ -1341,8 +1351,8 @@ function computeRolloutInsightsFromAggregate(
       hostCount: g.totalHosts,
       hostsOn: g.hostsOn.size,
       hostsOff: g.hostsOff.size,
-      hostsOnObserved: g.perHostPeakOn.length,
-      hostsOffObserved: g.perHostPeakOff.length,
+      hostsOnObserved: g.hostsOnActiveSeen.size,
+      hostsOffObserved: g.hostsOffActiveSeen.size,
       peakOn,
       peakOff,
       minAboveOn: null,
