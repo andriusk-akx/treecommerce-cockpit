@@ -24,6 +24,10 @@ const PUBLIC_PREFIXES = [
   "/api/auth/logout",
   // Build identity — used by ops/monitoring; safe to expose.
   "/api/version",
+  // Cache pre-warm orchestrator. The route itself validates `?secret=`
+  // against `WARM_CACHE_SECRET`, so it's safe to expose at the middleware
+  // layer — the secret is the actual auth boundary, not a session cookie.
+  "/api/internal/warm-cache",
   "/_next",
   "/favicon.ico",
 ];
@@ -35,6 +39,15 @@ function isPublic(pathname: string): boolean {
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (isPublic(pathname)) return NextResponse.next();
+  // Cache-warm bypass — when the warm orchestrator fans out to
+  // /retellect/{id}?period=… it forwards the secret as a request header.
+  // Middleware lets the request through so the page can detect the same
+  // header and skip auth on its end. WARM_CACHE_SECRET stays the auth
+  // boundary; an attacker without it falls through to the cookie check.
+  const warmHeader = req.headers.get("x-warm-cache-secret");
+  if (warmHeader && warmHeader === process.env.WARM_CACHE_SECRET) {
+    return NextResponse.next();
+  }
   const cookie = req.cookies.get(SESSION_COOKIE_NAME);
   if (!cookie) {
     const loginUrl = new URL("/login", req.url);
