@@ -1165,7 +1165,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           color: sel ? C.pillActive : "#343a40",
           width: 100, minWidth: 70, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis",
         }} title={rowTitle}>{row.name}</td>
-        <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", minWidth: 130, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }} title={
+        {/* CPU column — sticky alongside Store/Host so the hardware
+            identity stays visible during horizontal scroll. Fixed
+            width 130 (was minWidth 130 / maxWidth 160) so the sticky
+            left offsets of RT INST / RT ACT line up deterministically. */}
+        <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", width: 130, minWidth: 130, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", position: "sticky", left: 280, background: rowBg, zIndex: 11 }} title={
           row.coresSource === "unknown"
             ? `${row.cpuModel} — CPU cores unknown. system.cpu.num not published and no Device.cpuCores override. Per-counter values are NOT normalised; stacked drill-down may be misleading. Run scripts/backfill-device-cpu-cores.mjs or set the value via Settings → Devices.`
             : `${row.cpuModel} · ${row.cores} cores (${row.coresSource === "zabbix" ? "live" : "cached"})`
@@ -1206,7 +1210,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           here but is currently idle / not running.
         */}
         <td
-          style={{ padding: "3px 6px", textAlign: "center", minWidth: 50 }}
+          style={{ padding: "3px 6px", textAlign: "center", width: 50, minWidth: 50, maxWidth: 50, position: "sticky", left: 410, background: rowBg, zIndex: 11 }}
           title={
             row.rtDeployed
               ? "RT installed — Retellect items configured in this host's Zabbix template"
@@ -1221,7 +1225,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           }} />
         </td>
         <td
-          style={{ padding: "3px 6px", textAlign: "center", minWidth: 56 }}
+          style={{ padding: "3px 6px", textAlign: "center", width: 56, minWidth: 56, maxWidth: 56, position: "sticky", left: 460, background: rowBg, zIndex: 11 }}
           title={
             row.rtActiveToday
               ? "RT active today — meaningful Retellect (python) CPU activity within the last 24 h"
@@ -1455,7 +1459,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 <th onClick={() => toggleSort("name")} style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none", position: "sticky", left: 180, background: C.headerBg, zIndex: 11, width: 100, minWidth: 70 }}>
                   Host{sortArrow("name")}
                 </th>
-                <th style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", minWidth: 110 }}>CPU</th>
+                <th style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 280, background: C.headerBg, zIndex: 11, width: 130, minWidth: 130 }}>CPU</th>
                 {/*
                   Retellect column was a single dot mixing two questions:
                   "is it installed?" and "is it active right now?". Split
@@ -1472,14 +1476,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 */}
                 <th
                   onClick={() => toggleSort("rt")}
-                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 50 }}
+                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", position: "sticky", left: 410, background: C.headerBg, zIndex: 11, width: 50, minWidth: 50 }}
                   title="RT installed — Retellect items are configured in this host's Zabbix template (Retellect was deployed on this checkout at some point)."
                 >
                   RT&nbsp;Inst
                 </th>
                 <th
                   onClick={() => toggleSort("rt")}
-                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", minWidth: 56 }}
+                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", position: "sticky", left: 460, background: C.headerBg, zIndex: 11, width: 56, minWidth: 56 }}
                   title="RT active — Retellect produced meaningful python.cpu activity within the last 24 h."
                 >
                   RT&nbsp;Act{sortArrow("rt")}
@@ -1587,18 +1591,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                       background: "#f1f5f9",
                       cursor: "pointer",
                     }} onClick={() => toggleGroup(groupName)}>
-                      {/* Label td covers ONLY the frozen Store+Host columns
-                          (widths 180 + 100 = 280 px). Previously this was
-                          a colSpan=5 sticky td whose 5-column-wide grey
-                          background bled over the CPU / RT INST / RT ACT
-                          columns of adjacent rows when scrolling
-                          horizontally — the user saw data cells "covered
-                          by the CPU model background" (2026-05-25). The
-                          remaining 3 left-side columns (CPU / RT INST /
-                          RT ACT) now render an empty placeholder td so
-                          the column geometry stays consistent with host
-                          rows below; day cells start at the same x. */}
-                      <td colSpan={2} style={{
+                      {/* Group label covers all 5 frozen columns
+                          (Store + Host + CPU + RT INST + RT ACT,
+                          combined width 516 px). Safe to span them
+                          because every one of those 5 columns is now
+                          sticky-left as well, so the grey background
+                          travels with them as the user scrolls
+                          horizontally — no bleeding onto day cells. */}
+                      <td colSpan={5} style={{
                         padding: "6px 10px",
                         position: "sticky", left: 0, background: "#f1f5f9", zIndex: 10,
                       }}>
@@ -1609,10 +1609,6 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                           <span style={{ color: "#64748b", fontSize: 10 }}>· {matchedHosts} reporting</span>
                         </div>
                       </td>
-                      {/* Empty placeholder for CPU + RT INST + RT ACT — keeps
-                          the column grid aligned with host rows so the day
-                          cells beyond start at the same x. */}
-                      <td colSpan={3} style={{ background: "#f1f5f9" }} />
                       {dayAgg.map((val, i) => {
                         const hasValue = val !== null;
                         const dateStr = `${String(dates[i].getMonth() + 1).padStart(2, "0")}-${String(dates[i].getDate()).padStart(2, "0")}`;
