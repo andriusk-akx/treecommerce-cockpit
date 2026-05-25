@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
 import { notFound, redirect } from "next/navigation";
 import { RtPilotWorkspace } from "@/components/rt/RtPilotWorkspace";
@@ -71,12 +72,34 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
   const periodDays = parsePeriodDays(periodParam);
   const activeThresholdPp = parseActiveThresholdPp(atParam);
 
-  const user = await getCurrentUser();
-  if (!user) redirect(`/login?next=/retellect/${pilotId}`);
-  // 404 (not 403) for pilots the user can't see — avoids confirming the
-  // pilot exists. Same rationale as the username-enumeration defence on login.
-  if (!canAccessPilot(user, pilotId)) return notFound();
-  const allowedTabs = allowedTabsFor(user, pilotId);
+  // Cache-warming bypass.
+  //
+  // The /api/internal/warm-cache route fires server-side fetches against
+  // this URL with header `x-warm-cache-secret` set to
+  // `process.env.WARM_CACHE_SECRET`. The point is to populate the disk
+  // cache for the heavy 30d/90d Zabbix paths BEFORE a real user hits the
+  // page after a cold redeploy. Auth is bypassed here because there's no
+  // user session attached to the warming request, and the response body
+  // is thrown away — the page is rendered only for the side-effect of
+  // running `loadZabbixDataPayload` and writing to `.cache/`.
+  //
+  // Security: only the same Node process holds the secret, so the bypass
+  // is unreachable from outside the deployment. Pilot data still has to
+  // exist (notFound otherwise) — the warm call cannot synthesise pilots.
+  const reqHeaders = await headers();
+  const warmSecret = reqHeaders.get("x-warm-cache-secret");
+  const isWarmRequest = !!warmSecret && warmSecret === process.env.WARM_CACHE_SECRET;
+
+  // For real requests, resolve the user once up front so we don't have to
+  // call getCurrentUser twice (auth check + allowedTabs lookup). Warm
+  // requests skip this entirely.
+  const user = isWarmRequest ? null : await getCurrentUser();
+  if (!isWarmRequest) {
+    if (!user) redirect(`/login?next=/retellect/${pilotId}`);
+    // 404 (not 403) for pilots the user can't see — avoids confirming the
+    // pilot exists. Same rationale as the username-enumeration defence on login.
+    if (!canAccessPilot(user, pilotId)) return notFound();
+  }
 
   const pilot = await prisma.pilot.findUnique({
     where: { id: pilotId },
@@ -92,6 +115,10 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
   });
 
   if (!pilot || pilot.productType !== "RETELLECT") return notFound();
+
+  // allowedTabs depends on the user, which is null on warm requests —
+  // warming doesn't render the workspace so the tabs list is moot.
+  const allowedTabs = isWarmRequest || !user ? new Set<string>() : allowedTabsFor(user, pilotId);
 
   // Fetch all 5 independent Zabbix payloads in parallel.
   // The client caches getHosts() in-process + dedupes in-flight, so these
@@ -130,6 +157,15 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
   // window so the user sees a populated layout from click 0.
   const pilotData: RtPilotData = buildPilotData(pilot);
   const zabbixDataPromise = loadZabbixDataPayload(pilotId, expectedHostKeys, periodDays, activeThresholdPp);
+
+  // Warm-cache path: await the heavy promise (so fetchSource writes to
+  // disk cache) and return a minimal response. Skip Suspense streaming
+  // and JSX rendering of the workspace — neither matters when the body
+  // is thrown away by the caller.
+  if (isWarmRequest) {
+    await zabbixDataPromise;
+    return <span data-warmed-pilot={pilotId} data-period-days={periodDays} />;
+  }
 
   return (
     <Suspense fallback={<ZabbixLoadingFallback pilot={pilotData} />}>
