@@ -1,11 +1,12 @@
 /**
- * Store X brand wordmark.
+ * storex brand wordmark.
  *
  * Was an X-shape glyph (two crossed strokes) until 2026-05-25 — Andrius
- * supplied the new wordmark version where "Store" is in the primary
- * text colour and "X" sits in the brand olive. The wordmark carries
- * the brand name itself, so adjacent <h1>Store X</h1> markup in the
- * layout / login page is now removed (the logo IS the title).
+ * supplied the wordmark version, refined later the same day to the
+ * lowercase "storex" treatment (lighter weight, wider letter-spacing,
+ * x in brand olive). The wordmark carries the brand name itself, so
+ * adjacent <h1>Store X</h1> markup in the layout / login page is now
+ * removed (the logo IS the title).
  *
  * Sizing:
  *   `size` is the rendered HEIGHT in pixels. Width is auto-derived to
@@ -66,25 +67,25 @@ export function LogoX({ size = 24, mono = false, accent = false, className, labe
     >
       <text
         x="0"
-        y="80"
+        y="82"
         fontFamily="var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-        fontSize="92"
-        fontWeight={400}
-        letterSpacing="-1.5"
+        fontSize="96"
+        fontWeight={300}
+        letterSpacing="2"
         fill="currentColor"
       >
-        Store
+        store
       </text>
       <text
-        x="240"
-        y="80"
+        x="244"
+        y="82"
         fontFamily="var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-        fontSize="92"
-        fontWeight={300}
-        letterSpacing="-1.5"
+        fontSize="96"
+        fontWeight={400}
+        letterSpacing="2"
         fill={accentColour}
       >
-        X
+        x
       </text>
     </svg>
   );
