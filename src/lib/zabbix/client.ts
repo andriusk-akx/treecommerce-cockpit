@@ -472,29 +472,53 @@ export class ZabbixClient {
 
     const [trends, historyRecords] = await Promise.all([trendPromise, historyPromise]);
     // Apply trend aggregates first (coarse), then layer 1-min samples on top.
+    //
+    // Weighting: a trend row represents ONE HOUR of data — 60 minute-
+    // equivalents — and exposes its hour-average (`value_avg`). A history
+    // row represents ONE MINUTE. Mixing them as (sum += value; count += 1)
+    // biases the daily mean toward whichever source has more rows. Account
+    // for the weight by treating each trend row as 60 samples carrying the
+    // hour-average.
     for (const t of trends) {
       const hostId = itemHostMap.get(t.itemid);
       if (!hostId) continue;
       const clockSec = parseInt(t.clock);
       const date = localDate(clockSec);
-      const vmax = parseFloat(t.value_max) || 0;
-      const vavg = parseFloat(t.value_avg) || 0;
-      const vmin = parseFloat(t.value_min) || 0;
+      const vmax = parseFloat(t.value_max);
+      const vavg = parseFloat(t.value_avg);
+      const vmin = parseFloat(t.value_min);
+      // Skip the trend row if any of the three values aren't finite —
+      // Zabbix occasionally returns "" / null on items in unsupported
+      // state. Mixing 0 into max/min/sum on a partial row biased the
+      // daily aggregate downward (was `parseFloat() || 0`).
+      if (!Number.isFinite(vmax) || !Number.isFinite(vavg) || !Number.isFinite(vmin)) continue;
       const key = `${hostId}|${date}`;
       let b = dailyMap.get(key);
-      if (!b) { b = newBucket(vmax); b.sum = vavg; b.min = vmin; dailyMap.set(key, b); }
-      else {
+      if (!b) {
+        b = newBucket(vmax);
+        // Override the count=1 from newBucket — this trend row weighs 60.
+        b.sum = vavg * 60;
+        b.count = 60;
+        b.min = vmin;
+        dailyMap.set(key, b);
+      } else {
         b.max = Math.max(b.max, vmax);
         b.min = Math.min(b.min, vmin);
-        b.sum += vavg;
-        b.count += 1;
+        b.sum += vavg * 60;
+        b.count += 60;
       }
     }
     for (const r of historyRecords) {
       const hostId = itemHostMap.get(r.itemid);
       if (!hostId) continue;
       const date = localDate(parseInt(r.clock));
-      merge(hostId, date, parseFloat(r.value) || 0, true);
+      const value = parseFloat(r.value);
+      // Skip the history row when value is non-numeric (same rationale as
+      // the trend loop above). `parseFloat() || 0` silently injected 0
+      // into the average, biasing it downward for items that occasionally
+      // report empty.
+      if (!Number.isFinite(value)) continue;
+      merge(hostId, date, value, true);
     }
 
     const result: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[] = [];
@@ -564,8 +588,19 @@ export class ZabbixClient {
         key,
         procName,
         category,
-        cpuValue: parseFloat(String(it.lastvalue ?? "")) || 0,
-        lastClock: parseInt(String(it.lastclock ?? "")) || 0,
+        // `parseFloat() || 0` collapsed real 0% samples and NaNs into the
+        // same bucket — UI couldn't tell "process reported 0% load" from
+        // "agent returned junk". Use isFinite + explicit fallback so a
+        // broken sample becomes a 0 fallback that the freshness check
+        // can still distinguish from a real datapoint via lastClock.
+        cpuValue: (() => {
+          const v = parseFloat(String(it.lastvalue ?? ""));
+          return Number.isFinite(v) ? v : 0;
+        })(),
+        lastClock: (() => {
+          const c = parseInt(String(it.lastclock ?? ""));
+          return Number.isFinite(c) ? c : 0;
+        })(),
         units: String(it.units || "%"),
       });
     }
@@ -830,7 +865,14 @@ export class ZabbixClient {
       host.items.push(item);
 
       const key = item.key_ as string;
-      const val = parseFloat(item.lastvalue);
+      const valRaw = parseFloat(item.lastvalue);
+      // Skip the item if its `lastvalue` isn't a finite number. Without
+      // this guard NaN propagated through host.cpu.userPct +
+      // host.cpu.systemPct downstream, leaving `utilization = NaN` that
+      // the UI silently rendered as 0 (via `value || 0`) — masking the
+      // missing-sample case.
+      if (!Number.isFinite(valRaw)) continue;
+      const val = valRaw;
 
       // CPU — track user/system separately, compute total
       if (key.includes("system.cpu.util") || key.includes("system.cpu.load")) {
