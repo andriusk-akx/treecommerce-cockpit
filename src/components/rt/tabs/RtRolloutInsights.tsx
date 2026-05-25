@@ -643,10 +643,11 @@ export function RtRolloutInsights({
               <div>
                 <dt className="font-semibold text-gray-800">Hosts</dt>
                 <dd className="mt-0.5 leading-relaxed">
-                  Total devices in the CPU class, plus the per-bucket split. ON / OFF reflect
-                  whether the host contributed at least one ON-classified minute and at least
-                  one OFF-classified minute respectively — the same host can appear in both
-                  if Retellect ran for part of the window. The amber{" "}
+                  Total devices in the CPU class, split by{" "}
+                  <em>Retellect deployment</em>. ON = hosts whose Zabbix template has Retellect
+                  items configured (the rollout registry signal — covers deployed-but-idle hosts).
+                  OFF = hosts without Retellect items. A host belongs to exactly one bucket;
+                  the count is the rollout state, not a usage measurement. The amber{" "}
                   <em>&ldquo;X/Y with data&rdquo;</em> sub-line appears when some devices have
                   no usable baseline (missing <code>spss.cpu</code> items, broken Zabbix agent,
                   or fewer than 30 overnight samples) and were dropped from the aggregate.
@@ -936,22 +937,28 @@ function AboveThresholdCell({
           : pct > 0
             ? "text-gray-600"
             : "text-emerald-700";
-  // Visible value:
-  //   • "—" when there is no denominator data at all
-  //   • "<0.1%" when minutes > 0 but the percent rounds below 0.1 — keeps
-  //     the user from concluding "no data" when in fact a handful of
-  //     minutes crossed the threshold; the tooltip still carries the
-  //     absolute count
-  //   • Otherwise a rounded percent
+  // Visible value — tiered precision so the Count from toggle's effect
+  // on tiny percentages is actually readable (previously every sub-0.1%
+  // value collapsed to "<0.1%" and the toggle looked broken). Rules:
+  //   • pct === null            → "—"
+  //   • pct >= 10               → integer ("15%")
+  //   • pct >= 1                → one decimal ("3.4%")
+  //   • pct >= 0.1              → two decimals ("0.34%")
+  //   • minutes > 0 && pct > 0  → three decimals ("0.012%") — sub-0.1
+  //                               percent values still need to be
+  //                               distinguishable from zero
+  //   • minutes === 0           → "0%"
   const formatted = pct === null
     ? "—"
-    : minutes > 0 && pct < 0.1
-      ? "<0.1%"
-      : pct < 0.05
-        ? "0%"
-        : pct >= 10
-          ? `${Math.round(pct)}%`
-          : `${pct.toFixed(1)}%`;
+    : pct >= 10
+      ? `${Math.round(pct)}%`
+      : pct >= 1
+        ? `${pct.toFixed(1)}%`
+        : pct >= 0.1
+          ? `${pct.toFixed(2)}%`
+          : minutes > 0 && pct > 0
+            ? `${pct.toFixed(3)}%`
+            : "0%";
   const labelUpper = label === "on" ? "ON" : "OFF";
   return (
     <div
@@ -1197,19 +1204,32 @@ function computeRolloutInsightsFromAggregate(
     payload.perHost.map((p) => [p.hostId, p]),
   );
   const zabbixByName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
+  // Host-level deployment registry: a host is "ON" if Retellect items
+  // are configured in its Zabbix template, regardless of whether the
+  // helper actually fired during the window. This is the rollout
+  // question — "did this CPU class receive Retellect" — and matches
+  // the user's mental model. Bucket-level python.cpu activity is no
+  // longer used for the ON/OFF split (was being masked by the 0.5%
+  // cutoff that idle Retellect on Pavilnonys i3-6100 never crossed).
+  const deployedSet = new Set<string>(zabbix.retellectDeployedHostIds ?? []);
 
   type GroupAcc = {
     model: string;
     totalHosts: number;
     hostsWithBaseline: number;
+    /** Hosts with Retellect deployed in their Zabbix template (= ON). */
     hostsOn: Set<string>;
+    /** Hosts without Retellect items configured (= OFF). */
     hostsOff: Set<string>;
     /** Hosts that contributed any totalCpu sample during their ACTIVE
-     *  windows (ON / OFF directions). Drives the "from N hosts" sub-
-     *  label and the coverage footer — independent of the value we
-     *  display (which is now a weighted avg, not the peak). */
+     *  windows — drives the "from N hosts" sub-label and coverage
+     *  footer. Split by deployment classification, same as hostsOn/Off. */
     hostsOnActiveSeen: Set<string>;
     hostsOffActiveSeen: Set<string>;
+    /** Combined active-minute aggregate for deployed hosts (= ON).
+     *  We sum each host's on + off bucket aggregates because the bucket
+     *  split is no longer meaningful — we want ALL active minutes from
+     *  every deployed host in the class. */
     on: RolloutOnOffAggregate;
     off: RolloutOnOffAggregate;
   };
@@ -1240,33 +1260,28 @@ function computeRolloutInsightsFromAggregate(
     if (!entry) continue; // host had no usable items at all
     const hasBaseline = entry.baselineSpssCpu !== null;
     if (hasBaseline) g.hostsWithBaseline++;
-    // hostsOn / hostsOff classify by ANY Retellect ON/OFF activity in
-    // the window — i.e. tracked minutes, not active minutes. A host
-    // where Retellect ran for a week but never coincided with an
-    // spss-busy minute should still appear as "ON" in the matrix
-    // (Pavilnonys SCO2 was the canonical complaint). Gating by active
-    // minutes was hiding such hosts and producing misleading
-    // "No Retellect data" status on classes with real installs.
-    const onTracked = entry.on.realTrackedMinutes + entry.on.syntheticTrackedMinutes;
-    const offTracked = entry.off.realTrackedMinutes + entry.off.syntheticTrackedMinutes;
-    if (onTracked > 0) g.hostsOn.add(matchedHost.hostId);
-    if (offTracked > 0) g.hostsOff.add(matchedHost.hostId);
-    // Track which hosts have ANY usable totalCpu sample during their
-    // active minutes (ON / OFF) — drives the "from N hosts" sub-label.
-    // The displayed value is now a weighted avg across all active
-    // minutes in the class, so we no longer collect per-host peaks.
-    const onActiveMin = entry.on.realActiveMinutes + entry.on.syntheticActiveMinutes;
-    const offActiveMin = entry.off.realActiveMinutes + entry.off.syntheticActiveMinutes;
-    if (hasBaseline && onActiveMin > 0 && entry.on.sumTotalCpu > 0) {
-      g.hostsOnActiveSeen.add(matchedHost.hostId);
+    // Deployment-based classification — registry beats telemetry.
+    const isDeployed = deployedSet.has(matchedHost.hostId);
+    // Combined per-host aggregate — all minutes (regardless of whether
+    // python.cpu happened to fire above 0.5% in that bucket). Pure sum
+    // so weightedAvg over the merged group gives "avg CPU across all
+    // active minutes of deployed (or non-deployed) hosts in this class".
+    const combined = mergeOnOff(entry.on, entry.off);
+    if (isDeployed) {
+      g.hostsOn.add(matchedHost.hostId);
+      g.on = mergeOnOff(g.on, combined);
+      const activeMin = combined.realActiveMinutes + combined.syntheticActiveMinutes;
+      if (hasBaseline && activeMin > 0 && combined.sumTotalCpu > 0) {
+        g.hostsOnActiveSeen.add(matchedHost.hostId);
+      }
+    } else {
+      g.hostsOff.add(matchedHost.hostId);
+      g.off = mergeOnOff(g.off, combined);
+      const activeMin = combined.realActiveMinutes + combined.syntheticActiveMinutes;
+      if (hasBaseline && activeMin > 0 && combined.sumTotalCpu > 0) {
+        g.hostsOffActiveSeen.add(matchedHost.hostId);
+      }
     }
-    if (hasBaseline && offActiveMin > 0 && entry.off.sumTotalCpu > 0) {
-      g.hostsOffActiveSeen.add(matchedHost.hostId);
-    }
-    // Merge unconditionally so all aggregates (tracked + active +
-    // threshold counters) flow into the group regardless of baseline.
-    g.on = mergeOnOff(g.on, entry.on);
-    g.off = mergeOnOff(g.off, entry.off);
   }
 
   const matrix: MatrixRow[] = [];
