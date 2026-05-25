@@ -93,7 +93,7 @@ export default async function RootLayout({
         <footer className="border-t border-gray-200 px-6 py-3 text-center text-[10px] text-gray-400">
           <span className="inline-flex items-center gap-1.5 align-middle">
             <LogoX size={12} mono />
-            <span>Checkout Efficiency platform</span>
+            <span>Checkout Efficiency Consultant&rsquo;s toolbox</span>
           </span>
           <span className="mx-2 text-gray-300">·</span>
           {/* Version string is concatenated server-side so it ends up as a
