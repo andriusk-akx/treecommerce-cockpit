@@ -1,36 +1,17 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-
-// Overview is the landing tab — keep it in the initial bundle so the
-// first paint after auth has nothing else to fetch / parse.
 import { RtOverview } from "./tabs/RtOverview";
-
-// Lazy-load every other tab so the initial JS bundle (Overview landing)
-// doesn't have to parse + hydrate all of them upfront. Timeline (heatmap
-// with thousands of cells) and CPU Matrix (decision matrix + per-host
-// aggregate computation) were the heaviest synchronous imports — each
-// pulls in big helper trees and computed memoisation. Code-splitting
-// them shaves a substantial chunk off the main bundle, so the workspace
-// shell hydrates faster on first visit.
-//
-// `ssr` stays default (true) so server-side rendering keeps working;
-// Next.js just emits separate chunks that load on first navigation to
-// each tab. `loading: () => null` keeps the swap instant because the
-// content slot below is already styled neutral — the chunk fetch is
-// sub-second on a normal connection so a flash of loader UI would be
-// more distracting than helpful.
-const RtInventory = dynamic(() => import("./tabs/RtInventory").then((m) => ({ default: m.RtInventory })), { loading: () => null });
-const RtTimeline = dynamic(() => import("./tabs/RtTimeline").then((m) => ({ default: m.RtTimeline })), { loading: () => null });
-const RtCpuComparison = dynamic(() => import("./tabs/RtCpuComparison").then((m) => ({ default: m.RtCpuComparison })), { loading: () => null });
-const RtReference = dynamic(() => import("./tabs/RtReference").then((m) => ({ default: m.RtReference })), { loading: () => null });
-const RtCapacityRisk = dynamic(() => import("./tabs/RtCapacityRisk").then((m) => ({ default: m.RtCapacityRisk })), { loading: () => null });
-const RtRolloutInsights = dynamic(() => import("./tabs/RtRolloutInsights").then((m) => ({ default: m.RtRolloutInsights })), { loading: () => null });
-const RtHypotheses = dynamic(() => import("./tabs/RtHypotheses").then((m) => ({ default: m.RtHypotheses })), { loading: () => null });
-const RtDataHealth = dynamic(() => import("./tabs/RtDataHealth").then((m) => ({ default: m.RtDataHealth })), { loading: () => null });
+import { RtInventory } from "./tabs/RtInventory";
+import { RtTimeline } from "./tabs/RtTimeline";
+import { RtCpuComparison } from "./tabs/RtCpuComparison";
+import { RtReference } from "./tabs/RtReference";
+import { RtCapacityRisk } from "./tabs/RtCapacityRisk";
+import { RtRolloutInsights } from "./tabs/RtRolloutInsights";
+import { RtHypotheses } from "./tabs/RtHypotheses";
+import { RtDataHealth } from "./tabs/RtDataHealth";
 // `RtFiltersBar` (chip bar with active-filter chips and "Clear all") is
 // implemented in RtFiltersContext but intentionally not mounted here yet —
 // the surface felt too noisy for the current dashboard. Filters still persist
