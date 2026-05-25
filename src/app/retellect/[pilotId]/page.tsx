@@ -313,13 +313,20 @@ function buildPilotData(pilot: PrismaPilotRow): RtPilotData {
 //             round-trips with no UX benefit)
 //   300 s   — process-item registry, deployed-hostId set (these change
 //             only when SP admin redeploys the template — minutes-scale)
-//   300 s   — 14-day CPU history (trend.get bucket is hourly, so reading
-//             the same 14-day window twice within 5 minutes returns the
-//             same numbers)
+//   30 min — CPU history (trend.get buckets are HOURLY — they don't change
+//             minute-by-minute. Cold-fetching the 30d / 90d window for
+//             ~110 hosts costs 30-60s; a 30-min cache keeps the user
+//             landing on warm data through normal browsing while still
+//             refreshing within a single business hour. The newest day's
+//             freshest hour will only lag by up to 30 min, well within
+//             the heatmap's day-level resolution. Was 5 min until
+//             2026-05-25; the bump came after probe-confirmed Pavilnionys
+//             30d data WAS available, but cold-start latency was the UX
+//             pain point users actually felt.)
 const FRESH_MS = {
   live: 60_000,
   registry: 300_000,
-  history: 300_000,
+  history: 1_800_000,
 };
 
 async function loadZabbixDataPayload(

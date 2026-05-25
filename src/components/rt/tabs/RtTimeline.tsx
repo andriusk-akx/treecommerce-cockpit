@@ -1275,10 +1275,22 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             if (minAbove >= 1000) return `${(minAbove / 1000).toFixed(1)}k`;
             return String(minAbove);
           })();
+          // Cell tooltip — when a cell is empty ("—"), surface WHY so the
+          // user can tell apart "no monitoring" from "outside retention".
+          // The age check uses the same date math as the rest of the row
+          // (dates[i] is a JS Date constructed at SSR boundary). >29d falls
+          // outside Zabbix trend.get retention on this deployment; 14-29d
+          // is in trend window only (no raw 1-min samples); <14d should
+          // normally have data, so a null peak usually means agent gap.
+          const ageDaysApprox = Math.floor((Date.now() - dates[i].getTime()) / 86_400_000);
           const cellTitle = !row.hasMatch
             ? "No Zabbix host match"
             : peak === null
-              ? "No history for this day"
+              ? ageDaysApprox > 29
+                ? `${dateStr} — outside Zabbix trend retention (~29 days). No data is available for this date.`
+                : ageDaysApprox > 14
+                  ? `${dateStr} — beyond raw history retention (~14 days). Trend.get should have an hourly bucket but didn't return one for this host — likely a Zabbix-side gap or cache that hasn't refreshed yet. Reload to retry.`
+                  : `${dateStr} — no CPU samples received this day. Likely a Zabbix agent gap (host down, agent restarted, or item briefly unsupported).`
               : trend
                 ? metric === "peak"
                   ? `${row.name} · ${dateStr}\nDay max:  ${trend.max}%\nDay avg:  ${trend.avg}%\nDay min:  ${trend.min}%\nMin ≥ ${threshold}%: ${minAbove}\nClick to open drill-down (per-minute breakdown)`
