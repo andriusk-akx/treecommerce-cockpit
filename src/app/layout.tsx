@@ -54,14 +54,11 @@ export default async function RootLayout({
           <header className="bg-white border-b border-gray-200 px-6 py-3">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <a href="/" className="flex items-center gap-3 text-gray-900 hover:opacity-80 transition-opacity" aria-label="Store X home">
-                  {/* Wordmark carries the brand name; the small subtitle
-                      stays as product context (was '<h1>Store X</h1> +
-                      <p>Pilot management system</p>' before 2026-05-25). */}
+                <a href="/" className="flex items-center text-gray-900 hover:opacity-80 transition-opacity" aria-label="Store X home">
+                  {/* Wordmark stands alone in the header — the previous
+                      'Pilot management system' subtitle was redundant
+                      noise next to the brand mark (removed 2026-05-25). */}
                   <LogoX size={22} />
-                  <p className="text-[10px] text-gray-400 leading-none pl-2 ml-1 border-l border-gray-200">
-                    Pilot management system
-                  </p>
                 </a>
                 {activePilots.length > 0 && (
                   <div className="flex items-center gap-1.5 ml-4 pl-4 border-l border-gray-200">
