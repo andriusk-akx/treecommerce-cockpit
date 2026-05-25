@@ -168,12 +168,19 @@ export function RtFiltersProvider({ pilotId, initialPeriod, initialActiveThresho
       const raw = window.localStorage.getItem(storageKey);
       if (!raw) return seed;
       const parsed = JSON.parse(raw) as Partial<DashboardFilters>;
+      // 2026-05-25: drop `period` from the localStorage snapshot before
+      // merging. Period is intentionally not session-persistent — a fresh
+      // load defaults back to 14 d (or whatever the URL says) so the
+      // dashboard always opens on the lightweight window. Without this
+      // step, a user who once picked 30d on a slow day would silently
+      // keep paying the heavier fetch every time they returned.
+      const { period: _droppedPeriod, ...parsedWithoutPeriod } = parsed;
       // Shallow-merge with defaults so missing keys fall back gracefully when
       // the schema gains a field between sessions. URL `period` (if present)
-      // overrides localStorage to match server-side data fetch.
+      // overrides the default 14 d to match server-side data fetch.
       const merged = {
         ...defaultFilters,
-        ...parsed,
+        ...parsedWithoutPeriod,
         ...(initialPeriod ? { period: initialPeriod } : {}),
         ...(initialActiveThresholdPp !== undefined ? { activeThresholdPp: initialActiveThresholdPp } : {}),
       };
@@ -212,7 +219,11 @@ export function RtFiltersProvider({ pilotId, initialPeriod, initialActiveThresho
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      window.localStorage.setItem(storageKey, JSON.stringify(filters));
+      // Strip `period` before persisting — see load-path comment for the
+      // rationale (period should not carry across reloads; defaults to
+      // URL or 14 d each fresh visit).
+      const { period: _droppedPeriod, ...persisted } = filters;
+      window.localStorage.setItem(storageKey, JSON.stringify(persisted));
     } catch {
       // Quota / privacy mode — silently ignore.
     }

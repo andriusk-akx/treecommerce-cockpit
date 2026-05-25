@@ -1089,8 +1089,8 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           Clicking the active one deselects (returns to "show all"). */}
         <div className="inline-flex items-center gap-1">
           {([
-            { id: "installed" as const, label: "Retellect Installed", dot: "bg-sky-500", activeCls: "border-blue-200 bg-blue-50 text-blue-800", tip: "Show only hosts where Retellect items are configured in the Zabbix template (deployment registry — includes deployed-but-idle hosts). Matches the RT INST column dot." },
-            { id: "today" as const, label: "Retellect Active", dot: "bg-emerald-500", activeCls: "border-emerald-200 bg-emerald-50 text-emerald-800", tip: "Show only hosts with meaningful Retellect (python.cpu) activity in the last 24 h. Matches the RT ACT column dot." },
+            { id: "installed" as const, label: "Retellect Installed", dot: "bg-sky-500", activeCls: "border-blue-200 bg-blue-50 text-blue-800", tip: "Show only hosts that had Retellect installed at some point during the selected period. Includes hosts where the helper is currently idle, hosts whose Zabbix items have since been removed, and hosts that produced any python.cpu activity above 0.5% inside the window. Matches the RT INST column dot — the broader of the two Retellect signals." },
+            { id: "today" as const, label: "Retellect Active", dot: "bg-emerald-500", activeCls: "border-emerald-200 bg-emerald-50 text-emerald-800", tip: "Show only hosts where Retellect produced meaningful python.cpu activity within the last 24 hours (live signal — distinct from 'installed at some point'). Matches the RT ACT column dot; strict subset of Retellect Installed." },
           ]).map((p) => {
             const active = retellectInstalled === p.id;
             return (

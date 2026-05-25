@@ -1,5 +1,15 @@
 <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <text x="50%" y="50%" text-anchor="middle" dominant-baseline="central"
+  <!-- Storefront silhouette: zig-zag awning along the top edge feeds into a
+       rectangular building body. Olive (#3f4f1f) matches the brand "x" tint.
+       Path: bottom-left -> up-down zigzag across the top -> down right
+       edge -> bottom edge -> close. Four peaks fit comfortably at 16 px. -->
+  <path d="M2 9 L7 4 L11 9 L16 4 L20 9 L25 4 L29 9 L30 9 L30 30 L2 30 Z"
+        fill="#3f4f1f"/>
+  <!-- White 'x' letter centred in the body. Font-size tuned so the
+       glyph reads at 16 px favicon scale without crowding the awning. -->
+  <text x="16" y="23"
+        text-anchor="middle"
         font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
-        font-size="28" font-weight="400" fill="#3f4f1f">x</text>
+        font-size="18" font-weight="500"
+        fill="#ffffff">x</text>
 </svg>
