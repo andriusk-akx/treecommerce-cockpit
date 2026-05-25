@@ -21,7 +21,7 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Store X",
+  title: "storex",
   description: "Consultant-controlled pilot operations cockpit",
 };
 
@@ -54,7 +54,7 @@ export default async function RootLayout({
           <header className="bg-white border-b border-gray-200 px-6 py-3">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <a href="/" className="flex items-center text-gray-900 hover:opacity-80 transition-opacity" aria-label="Store X home">
+                <a href="/" className="flex items-center text-gray-900 hover:opacity-80 transition-opacity" aria-label="storex home">
                   {/* Wordmark stands alone in the header — the previous
                       'Pilot management system' subtitle was redundant
                       noise next to the brand mark (removed 2026-05-25). */}
@@ -93,7 +93,7 @@ export default async function RootLayout({
         <footer className="border-t border-gray-200 px-6 py-3 text-center text-[10px] text-gray-400">
           <span className="inline-flex items-center gap-1.5 align-middle">
             <LogoX size={12} mono />
-            <span>Store X &mdash; Consultant&rsquo;s pilot management tool</span>
+            <span>storex &mdash; Consultant&rsquo;s pilot management tool</span>
           </span>
           <span className="mx-2 text-gray-300">·</span>
           {/* Version string is concatenated server-side so it ends up as a

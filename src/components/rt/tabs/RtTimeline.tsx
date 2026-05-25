@@ -1033,26 +1033,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         {!isPresetPeriod && !showCustomPeriod && (
           <span className="text-[10px] text-gray-300">({periodDays}d)</span>
         )}
-        {isRefreshing ? (
-          <span
-            className="inline-flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1"
-            role="status"
-            aria-live="polite"
-            title="Fetching Zabbix trends for the new period — typically 30–60 s on a cold cache."
-          >
-            <svg
-              className="animate-spin w-3 h-3"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
-              <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-            </svg>
-            Updating window…
-          </span>
-        ) : null}
+        {/* The "Updating window…" indicator used to live here in the filter
+            bar. Moved 2026-05-25 to a centered overlay on the heatmap
+            itself — the spinner is more legible when it sits where the
+            user's attention already is (the data being updated), instead
+            of fighting the filter chips for screen real estate. */}
         <FilterDivider />
         <FilterSegmented<"host" | "cpu" | "store">
           label="Group by"
@@ -1901,10 +1886,61 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           </div>
         )}
         <div
-          style={{ transition: "opacity 200ms", opacity: isRefreshing ? 0.5 : 1, pointerEvents: isRefreshing ? "none" : undefined }}
+          style={{
+            position: "relative",
+            transition: "opacity 200ms",
+            opacity: isRefreshing ? 0.5 : 1,
+            pointerEvents: isRefreshing ? "none" : undefined,
+          }}
           aria-busy={isRefreshing || undefined}
         >
           {heatmapTable}
+          {isRefreshing ? (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                position: "absolute",
+                top: 60,
+                left: "50%",
+                transform: "translateX(-50%)",
+                opacity: 2, // counter the parent's 0.5 fade
+                pointerEvents: "none",
+                zIndex: 10,
+              }}
+            >
+              <span
+                title="Fetching Zabbix trends for the new period — typically 30–60 s on a cold cache."
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 12,
+                  color: "#1d4ed8",
+                  background: "#eff6ff",
+                  border: "1px solid #bfdbfe",
+                  borderRadius: 999,
+                  padding: "6px 14px",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+                  fontWeight: 500,
+                }}
+              >
+                <svg
+                  className="animate-spin"
+                  width={14}
+                  height={14}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
+                  <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                </svg>
+                Updating window…
+              </span>
+            </div>
+          ) : null}
         </div>
         <div style={{ background: "#eff6ff", borderRadius: 6, padding: "10px 14px", marginTop: 14 }}>
           <p style={{ fontSize: 12, color: "#1e40af", margin: 0 }}>
@@ -1986,10 +2022,61 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       <div style={{ height: split.splitPx, minHeight: 120, overflow: "auto", flexShrink: 0 }}>
         {filterBar(true)}
         <div
-          style={{ transition: "opacity 200ms", opacity: isRefreshing ? 0.5 : 1, pointerEvents: isRefreshing ? "none" : undefined }}
+          style={{
+            position: "relative",
+            transition: "opacity 200ms",
+            opacity: isRefreshing ? 0.5 : 1,
+            pointerEvents: isRefreshing ? "none" : undefined,
+          }}
           aria-busy={isRefreshing || undefined}
         >
           {heatmapTable}
+          {isRefreshing ? (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                position: "absolute",
+                top: 60,
+                left: "50%",
+                transform: "translateX(-50%)",
+                opacity: 2, // counter the parent's 0.5 fade
+                pointerEvents: "none",
+                zIndex: 10,
+              }}
+            >
+              <span
+                title="Fetching Zabbix trends for the new period — typically 30–60 s on a cold cache."
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 12,
+                  color: "#1d4ed8",
+                  background: "#eff6ff",
+                  border: "1px solid #bfdbfe",
+                  borderRadius: 999,
+                  padding: "6px 14px",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+                  fontWeight: 500,
+                }}
+              >
+                <svg
+                  className="animate-spin"
+                  width={14}
+                  height={14}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
+                  <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                </svg>
+                Updating window…
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
 
