@@ -53,7 +53,7 @@ export default async function RootLayout({
         {user ? (
           <header className="bg-white border-b border-gray-200 px-6 py-3">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
                 <a href="/" className="flex items-center text-gray-900 hover:opacity-80 transition-opacity" aria-label="storex home">
                   {/* Wordmark stands alone in the header — the previous
                       'Pilot management system' subtitle was redundant
@@ -61,7 +61,7 @@ export default async function RootLayout({
                   <LogoX size={22} />
                 </a>
                 {activePilots.length > 0 && (
-                  <div className="flex items-center gap-1.5 ml-4 pl-4 border-l border-gray-200">
+                  <div className="flex items-center gap-1.5 ml-2 pl-3 border-l border-gray-200">
                     {activePilots.map((p) => (
                       <a
                         key={p.id}
