@@ -197,7 +197,11 @@ export function RtRolloutInsights({
   }, [urlSearchParams]);
   const setPeriod = (v: string) => {
     setFilter("period", v);
-    const params = new URLSearchParams(urlSearchParams.toString());
+    // Snapshot live URL params at click time, not the stale
+    // urlSearchParams captured at component setup — same race fix as
+    // the active-threshold slider above and Timeline's setPeriod.
+    const live = typeof window !== "undefined" ? window.location.search : `?${urlSearchParams.toString()}`;
+    const params = new URLSearchParams(live);
     params.set("period", v);
     startTransition(() => {
       router.push(`${pathname}?${params.toString()}`);
@@ -229,7 +233,12 @@ export function RtRolloutInsights({
     if (sliderValue === activeThresholdPpFromFilter) return;
     const t = setTimeout(() => {
       setFilter("activeThresholdPp", sliderValue);
-      const params = new URLSearchParams(urlSearchParams.toString());
+      // Read window.location.search at fire time, not the urlSearchParams
+      // snapshot captured when the effect was set up. Without this, a
+      // 300 ms-debounced slider commit can overwrite the URL with stale
+      // params if any OTHER URL param (period, tab, …) changed mid-drag.
+      const live = typeof window !== "undefined" ? window.location.search : "";
+      const params = new URLSearchParams(live);
       params.set("at", String(sliderValue));
       startTransition(() => {
         router.push(`${pathname}?${params.toString()}`);

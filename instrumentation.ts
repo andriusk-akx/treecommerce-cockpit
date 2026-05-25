@@ -67,13 +67,11 @@ export async function register() {
     // anything else; errors are intentionally swallowed.
     void fetch(url, { method: "GET" }).then(
       (res) => {
-        // eslint-disable-next-line no-console
         console.log(`[warm-cache] boot warm fired, status=${res.status}`);
       },
       (err) => {
-        // eslint-disable-next-line no-console
         console.warn("[warm-cache] boot warm failed:", err?.message ?? err);
       },
     );
-  }, 10_000);
+  }, 3_000);
 }

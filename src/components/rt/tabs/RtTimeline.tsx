@@ -229,7 +229,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     // refetch is in flight; the destination's loading.tsx + Suspense fallback
     // already cover the transition window.
     setFilter("period", v);
-    const params = new URLSearchParams(urlSearchParams.toString());
+    // Snapshot live URL params at click time (not whatever urlSearchParams
+    // captured at component setup) so a rapid double-click won't replay
+    // the older URL with stale `?at=` / `?tab=` etc.
+    const live = typeof window !== "undefined" ? window.location.search : `?${urlSearchParams.toString()}`;
+    const params = new URLSearchParams(live);
     params.set("period", v);
     startPeriodTransition(() => {
       router.push(`${pathname}?${params.toString()}`);
@@ -1442,7 +1446,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 {/* New ordering per user feedback: Store → Host → CPU → Retellect.
                     Type column dropped — every host in this pilot is the same
                     type (SCO), the badge added noise without information. */}
-                <th onClick={() => toggleSort("store")} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 0, background: C.headerBg, zIndex: 11, cursor: "pointer", userSelect: "none", width: 180, minWidth: 180 }}>
+                <th onClick={() => toggleSort("store")} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 0, background: C.headerBg, zIndex: 12, cursor: "pointer", userSelect: "none", width: 180, minWidth: 180 }}>
                   Store{sortArrow("store")}
                 </th>
                 {/*
@@ -1456,10 +1460,10 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   px = 960 px alone, narrow viewports (< ~1320 px after sidebar)
                   trigger the collapse on `width: 100%` tables.
                 */}
-                <th onClick={() => toggleSort("name")} style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none", position: "sticky", left: 180, background: C.headerBg, zIndex: 11, width: 100, minWidth: 70 }}>
+                <th onClick={() => toggleSort("name")} style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", userSelect: "none", position: "sticky", left: 180, background: C.headerBg, zIndex: 12, width: 100, minWidth: 70 }}>
                   Host{sortArrow("name")}
                 </th>
-                <th style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 280, background: C.headerBg, zIndex: 11, width: 130, minWidth: 130 }}>CPU</th>
+                <th style={{ textAlign: "left", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 280, background: C.headerBg, zIndex: 12, width: 130, minWidth: 130 }}>CPU</th>
                 {/*
                   Retellect column was a single dot mixing two questions:
                   "is it installed?" and "is it active right now?". Split
@@ -1476,14 +1480,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 */}
                 <th
                   onClick={() => toggleSort("rt")}
-                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", position: "sticky", left: 410, background: C.headerBg, zIndex: 11, width: 50, minWidth: 50 }}
+                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", position: "sticky", left: 410, background: C.headerBg, zIndex: 12, width: 50, minWidth: 50 }}
                   title="RT installed — Retellect items are configured in this host's Zabbix template (Retellect was deployed on this checkout at some point)."
                 >
                   RT&nbsp;Inst
                 </th>
                 <th
                   onClick={() => toggleSort("rt")}
-                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", position: "sticky", left: 460, background: C.headerBg, zIndex: 11, width: 56, minWidth: 56 }}
+                  style={{ textAlign: "center", padding: "4px 6px", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: C.headerText, fontWeight: 600, cursor: "pointer", userSelect: "none", position: "sticky", left: 460, background: C.headerBg, zIndex: 12, width: 56, minWidth: 56 }}
                   title="RT active — Retellect produced meaningful python.cpu activity within the last 24 h."
                 >
                   RT&nbsp;Act{sortArrow("rt")}
