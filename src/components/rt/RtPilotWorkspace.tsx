@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { RtOverview } from "./tabs/RtOverview";
@@ -232,33 +232,14 @@ const statusStyles: Record<string, string> = {
 
 export function RtPilotWorkspace({
   pilot,
-  zabbix: initialZabbix,
-  heavyZabbixPromise,
+  zabbix,
   initialTab,
   initialPeriod,
   initialActiveThresholdPp,
   allowedTabs,
 }: {
   pilot: RtPilotData;
-  /**
-   * Initial zabbix payload — populated with the LIGHT fetchers
-   * (resources, cpuDetail, procCpu, deployedHostIds, …). The Server
-   * Component awaits just these so the workspace shell + Overview tab
-   * can paint within 1–3 s on cold cache instead of waiting 30–60 s for
-   * the heavy heatmap / aggregate fetchers below.
-   */
   zabbix: ZabbixData;
-  /**
-   * Stream the slow heatmap-window-dependent fetchers (cpuTrends,
-   * retellectActiveInPeriodHostIds, rolloutPerHost) in via a promise
-   * the server hands off without awaiting. When it resolves we merge
-   * those fields into local zabbix state; tabs that need them (Timeline,
-   * CPU Matrix, Data Health) re-render with real data once they land.
-   *
-   * Optional so storybook / tests can mount the workspace synchronously
-   * with a fully populated zabbix prop.
-   */
-  heavyZabbixPromise?: Promise<Partial<ZabbixData>>;
   initialTab: string;
   /**
    * Raw `?period=` URL value (e.g. "14d", "30d", "60") forwarded to
@@ -279,42 +260,6 @@ export function RtPilotWorkspace({
   /** Permission keys the current user is allowed to see in this pilot. */
   allowedTabs: string[];
 }) {
-  // Local zabbix state — starts with the light payload from the server
-  // and gets patched with heavy fields (cpuTrends, rolloutPerHost,
-  // retellectActiveInPeriodHostIds) once the heavyZabbixPromise resolves.
-  // Tabs that depend on heavy data (Timeline, CPU Matrix, Data Health)
-  // render empty / "loading" state until the patch lands; Overview is
-  // fully functional from the first paint.
-  const [zabbix, setZabbix] = useState<ZabbixData>(initialZabbix);
-  // Resync to the light prop when the server reruns (period change,
-  // active-threshold edit, etc.). Without this, switching periods would
-  // re-render the server component but the workspace would keep stale
-  // local state. Cheap shallow replace — heavy fields land via the
-  // useEffect below.
-  useEffect(() => {
-    setZabbix(initialZabbix);
-  }, [initialZabbix]);
-  // Patch in heavy fields when the deferred promise resolves. Wrapped
-  // in a `cancelled` flag so a fast period change doesn't race an
-  // older heavy payload back into state after the server already
-  // queued a fresh one.
-  useEffect(() => {
-    if (!heavyZabbixPromise) return;
-    let cancelled = false;
-    heavyZabbixPromise.then((heavy) => {
-      if (cancelled) return;
-      setZabbix((prev) => ({ ...prev, ...heavy }));
-    }).catch(() => {
-      /* Heavy fetch failure is non-fatal — the tabs depending on it
-         already render fallbacks for empty data; surfacing an error
-         here would just duplicate the Zabbix banner the page renders
-         from the per-source meta fields. */
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [heavyZabbixPromise]);
-
   // Filter the tab list to what the user can see. Admin gets the full list
   // (page passes ALL_TABS). Non-admin sees only their granted tabs.
   // If the user landed on a forbidden tab via URL, fall back to the first

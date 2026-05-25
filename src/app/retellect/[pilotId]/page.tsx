@@ -157,30 +157,7 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
   // sibling `loading.tsx` covering the Phase 1 (auth + DB pilot fetch)
   // window so the user sees a populated layout from click 0.
   const pilotData: RtPilotData = buildPilotData(pilot);
-  // Two-phase data load (2026-05-25 — split for ~2x faster first paint):
-  //   LIGHT  → ~1–3 s cold: live CPU/RAM, process CPU, deployment
-  //            registry, agent health. Drives Overview + RT INST/ACT
-  //            dots. The page's Suspense awaits this so the workspace
-  //            shell + Overview tab paint as soon as the lightweight
-  //            telemetry lands.
-  //   HEAVY  → 30–60 s cold: 14/30/90 d cpu history, period-aware
-  //            Retellect activity, rollout aggregate. Drives Timeline,
-  //            CPU Matrix, Data Health. The promise is handed to the
-  //            workspace UN-awaited; the workspace patches the
-  //            resolved fields into local zabbix state via useEffect
-  //            once they land. Tabs depending on those fields render
-  //            their empty-state placeholders during the gap.
-  // Both promises fire NOW in parallel — total wall is still
-  // max(light, heavy), but the user perceives the first paint when
-  // light resolves instead of waiting for heavy.
-  const lightZabbixPromise = loadLightZabbixData(pilotId, expectedHostKeys);
-  const heavyZabbixPromise = loadHeavyZabbixData(pilotId, expectedHostKeys, periodDays, activeThresholdPp);
-  // Warm-cache + adjacent-period prefetch helpers still need the
-  // combined payload for disk-cache population — they call the
-  // existing wrapper which itself awaits both.
-  const zabbixDataPromise = Promise.all([lightZabbixPromise, heavyZabbixPromise]).then(
-    ([light, heavy]) => ({ ...light, ...heavy }) as ZabbixData,
-  );
+  const zabbixDataPromise = loadZabbixDataPayload(pilotId, expectedHostKeys, periodDays, activeThresholdPp);
 
   // Background prefetch for adjacent window sizes the user is most likely
   // to switch into next. Fires AFTER the response is sent (Next.js
@@ -225,8 +202,7 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
     <Suspense fallback={<ZabbixLoadingFallback pilot={pilotData} />}>
       <RtPilotPageContent
         pilot={pilotData}
-        lightZabbixPromise={lightZabbixPromise}
-        heavyZabbixPromise={heavyZabbixPromise}
+        zabbixDataPromise={zabbixDataPromise}
         initialTab={tab || "overview"}
         initialPeriod={periodParam}
         initialActiveThresholdPp={activeThresholdPp}
@@ -236,26 +212,17 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
   );
 }
 
-// ─── Phase 2 child: awaits the LIGHT zabbix promise, mounts workspace ──
+// ─── Phase 2 child: awaits the heavy zabbix promise, mounts workspace ──
 async function RtPilotPageContent({
   pilot,
-  lightZabbixPromise,
-  heavyZabbixPromise,
+  zabbixDataPromise,
   initialTab,
   initialPeriod,
   initialActiveThresholdPp,
   allowedTabs,
 }: {
   pilot: RtPilotData;
-  /** Light slice — awaited here so the workspace shell + Overview tab
-   *  paint within seconds. Cold path ~1–3 s. */
-  lightZabbixPromise: Promise<Partial<ZabbixData>>;
-  /** Heavy slice (cpuTrends, rolloutPerHost, retellectActiveInPeriod) —
-   *  NOT awaited server-side. Passed through to the client workspace,
-   *  which patches the resolved fields into local zabbix state via
-   *  useEffect once they land. Tabs depending on them render their
-   *  empty-state placeholders during the gap. Cold path 30–60 s. */
-  heavyZabbixPromise: Promise<Partial<ZabbixData>>;
+  zabbixDataPromise: Promise<ZabbixData>;
   initialTab: string;
   /**
    * Raw `?period=` URL value (e.g. "14d", "30d", "60") or undefined when the
@@ -276,12 +243,11 @@ async function RtPilotPageContent({
   initialActiveThresholdPp: number;
   allowedTabs: string[];
 }) {
-  const light = await lightZabbixPromise;
+  const zabbix = await zabbixDataPromise;
   return (
     <RtPilotWorkspace
       pilot={pilot}
-      zabbix={light as ZabbixData}
-      heavyZabbixPromise={heavyZabbixPromise}
+      zabbix={zabbix}
       initialTab={initialTab}
       initialPeriod={initialPeriod}
       initialActiveThresholdPp={initialActiveThresholdPp}
@@ -430,29 +396,39 @@ const FRESH_MS = {
   history: 1_800_000,
 };
 
-/**
- * LIGHT slice of the Zabbix payload — everything the Overview tab + the
- * RT INST / RT ACT signal dots need to render. Sub-3-second cold path
- * because none of these fetchers query trend.get over the user-selected
- * period; they read live values + the deployment registry.
- *
- * Split from the original monolithic `loadZabbixDataPayload` 2026-05-25
- * so the page can paint the workspace shell + Overview within seconds
- * instead of waiting 30–60 s for the slow CPU history / rollout
- * aggregate fetchers below. Heavy data streams in via the
- * heavyZabbixPromise prop the workspace listens to with useEffect.
- */
-async function loadLightZabbixData(
+async function loadZabbixDataPayload(
   pilotId: string,
   expectedHostKeys: Set<string>,
-): Promise<Partial<ZabbixData>> {
+  /**
+   * Number of days the CPU heatmap should cover. Threaded from the URL
+   * (?period=30) so changing the period via the timeline selector triggers
+   * a server-side refetch with the new window — without this, the period
+   * lived only in client state and the wider date axis rendered against
+   * a 14-day data payload (older cells dropped to "—").
+   *
+   * Bounded 1..365. Only the cpu-history fetcher reads it; the other 6
+   * fetchers are per-poll-cycle data that doesn't depend on the window.
+   */
+  periodDays: number = 14,
+  /**
+   * Percentage points above each host's spss.cpu baseline used by
+   * Rollout Insights to classify a bucket as active. Only the
+   * rollout-per-host fetcher reads it. Underlying raw bucket data is
+   * cached threshold-independently, so slider changes re-aggregate the
+   * cached data instead of re-querying Zabbix.
+   */
+  activeThresholdPp: number = 2.0,
+): Promise<ZabbixData> {
   const [
     zabbixResult,
     zabbixCpuDetailResult,
     zabbixProcResult,
     zabbixProcCpuResult,
+    zabbixHistoryResult,
     zabbixAgentHealthResult,
     zabbixDeployedHostIds,
+    zabbixActiveInPeriodHostIds,
+    zabbixRolloutPerHostResult,
   ] = await Promise.all([
     fetchSource(`zabbix-rt-resources-${pilotId}`, {
       source: "zabbix",
@@ -546,6 +522,44 @@ async function loadLightZabbixData(
         }));
       },
     }),
+    // Cache key includes periodDays — changing the heatmap period must NOT
+    // return the previous period's cached payload. Without this, switching
+    // 14d -> 30d would either show stale 14d data (cache hit) or trigger
+    // an "all empty" cell stretch when the cached entry was clipped.
+    fetchSource(`zabbix-rt-cpu-history-${pilotId}-${periodDays}d`, {
+      source: "zabbix",
+      label: "Zabbix CPU History",
+      env: "prod",
+      freshFor: FRESH_MS.history,
+      fetcher: async () => {
+        const client = getZabbixClient();
+        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
+        // Restrict to hosts that match DB devices, by sourceHostKey == hostName.
+        const matchedHostIds = new Set<string>();
+        for (const h of allHosts) {
+          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
+        }
+        if (matchedHostIds.size === 0) return [];
+        // Narrow item.get for system.cpu.util only — small payload (~108 items
+        // for Rimi vs 333 for the broader system.cpu search). This lets the
+        // history fetch run in parallel with Phase 1 instead of waiting for
+        // it.
+        const items = (await client.getItems(Array.from(matchedHostIds), "system.cpu.util")) as Array<{
+          itemid: string; hostid: string; key_: string;
+        }>;
+        const cpuUtilItems = items.filter(
+          (i) => i.key_ === "system.cpu.util[,,avg1]" || i.key_ === "system.cpu.util"
+        );
+        if (cpuUtilItems.length === 0) return [];
+        const itemIds = cpuUtilItems.map((i) => i.itemid);
+        const itemHostMap = new Map(cpuUtilItems.map((i) => [i.itemid, i.hostid]));
+        // periodDays drives both the SQL/Zabbix window AND the dailyMap
+        // dimensions. <=14 d windows still return sample-accurate counters
+        // (minutesAbove); older days fall back to trend.get hourly aggregates
+        // so the Peak % heatmap mode renders honestly across the whole span.
+        return await client.getCpuHistoryDaily(itemIds, itemHostMap, periodDays);
+      },
+    }),
     fetchSource(`zabbix-rt-agent-health-${pilotId}`, {
       source: "zabbix",
       label: "Zabbix Agent Health",
@@ -590,15 +604,82 @@ async function loadLightZabbixData(
         return Array.from(deployed);
       },
     }),
+    // Activity-in-period signal: hosts where python.cpu trend records show
+    // value_max > 0.5% at any point in the last `periodDays` days. This is
+    // the leadership-grade "did Retellect actually run here during the
+    // window" signal — Rollout Insights uses it for the ON/OFF split so
+    // intermittent hosts (canonical case: Pavilnonys SCO2, ran for a week
+    // then went idle) end up on the correct side of the comparison. Cache
+    // key includes periodDays so the 14d/30d/90d selector returns honest
+    // numbers per window — see ZabbixClient.getRetellectActiveInPeriodHostIds.
+    fetchSource(`zabbix-rt-active-in-period-hostids-${pilotId}-${periodDays}d`, {
+      source: "zabbix",
+      label: "Zabbix Retellect Activity Map (period)",
+      env: "prod",
+      freshFor: FRESH_MS.registry,
+      fetcher: async (): Promise<string[]> => {
+        const client = getZabbixClient();
+        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
+        const matchedHostIds = new Set<string>();
+        for (const h of allHosts) {
+          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
+        }
+        if (matchedHostIds.size === 0) return [];
+        const active = await client.getRetellectActiveInPeriodHostIds(
+          Array.from(matchedHostIds),
+          periodDays,
+        );
+        return Array.from(active);
+      },
+    }),
+    // Phase 1 Rollout Insights aggregate: per-host minute-level analytics
+    // with per-host adaptive baseline (median spss.cpu in 02-05h Vilnius
+    // window). Used by the Decision Matrix to compute "avg CPU during
+    // active minutes, split by Retellect ON/OFF" — see
+    // src/lib/rollout-insights/. Cache key includes BOTH periodDays and
+    // activeThresholdPp so changing either re-aggregates (raw Zabbix
+    // payload is cached threshold-independently inside the fetcher).
+    fetchSource(`zabbix-rt-rollout-perhost-${pilotId}-${periodDays}d-at${activeThresholdPp}`, {
+      source: "zabbix",
+      label: "Rollout Insights aggregate (per host)",
+      env: "prod",
+      freshFor: FRESH_MS.history,
+      fetcher: async (): Promise<RolloutPerHostPayload> => {
+        const client = getZabbixClient();
+        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
+        const matchedHostIds = new Set<string>();
+        for (const h of allHosts) {
+          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
+        }
+        if (matchedHostIds.size === 0) {
+          return {
+            activeThresholdPp,
+            periodDays,
+            generatedAt: new Date().toISOString(),
+            perHost: [],
+          };
+        }
+        return await fetchRolloutPerHost(
+          client,
+          Array.from(matchedHostIds),
+          periodDays,
+          activeThresholdPp,
+        );
+      },
+    }),
   ]);
 
   const zabbixHosts = zabbixResult.data || [];
   const cpuDetailItems = zabbixCpuDetailResult.data || [];
   const procItems = zabbixProcResult.data || [];
   const procCpuItems = zabbixProcCpuResult.data || [];
+  const cpuHistory = zabbixHistoryResult.data || [];
   const agentHealth = zabbixAgentHealthResult.data || [];
   const deployedHostIds = zabbixDeployedHostIds.data || [];
+  const activeInPeriodHostIds = zabbixActiveInPeriodHostIds.data || [];
+  const rolloutPerHost: RolloutPerHostPayload | null = zabbixRolloutPerHostResult.data || null;
 
+  // Build Zabbix live data payload
   return {
     status: zabbixResult.status,
     fetchMs: zabbixResult.fetchMs,
@@ -660,6 +741,12 @@ async function loadLightZabbixData(
       fetchMs: zabbixProcCpuResult.fetchMs,
       error: zabbixProcCpuResult.error,
     },
+    cpuTrends: cpuHistory,
+    cpuTrendsMeta: {
+      status: zabbixHistoryResult.status,
+      fetchMs: zabbixHistoryResult.fetchMs,
+      error: zabbixHistoryResult.error,
+    },
     agentHealth: agentHealth as Array<{
       hostId: string;
       totalEnabled: number;
@@ -667,142 +754,14 @@ async function loadLightZabbixData(
       unsupported: number;
       sampleErrors: string[];
     }>,
+    // Strict-registry "Retellect deployed" set — hostIds with python items
+    // configured in the Zabbix template, regardless of whether those items
+    // are currently collecting samples. The Timeline's Deploy column reads
+    // this so deployed-but-broken hosts (perfcounter not readable, agent
+    // misconfigured) still show as deployed instead of looking identical
+    // to never-deployed hosts.
     retellectDeployedHostIds: deployedHostIds as string[],
-  };
-}
-
-/**
- * HEAVY slice — the three Zabbix queries that span the user-selected
- * period (cpu history, period-aware Retellect activity, rollout
- * aggregate). Cold path is 30–60 s on 30 d / 90 d windows because
- * trend.get + history.get scale with the host count × period.
- *
- * The page does NOT await this server-side; the promise is handed to
- * the workspace client component which patches the resolved fields
- * into local zabbix state via useEffect once they land. Tabs needing
- * these fields (Timeline, CPU Matrix, Data Health) render their
- * empty-state placeholders during the gap.
- */
-async function loadHeavyZabbixData(
-  pilotId: string,
-  expectedHostKeys: Set<string>,
-  periodDays: number,
-  activeThresholdPp: number,
-): Promise<Partial<ZabbixData>> {
-  const [
-    zabbixHistoryResult,
-    zabbixActiveInPeriodHostIds,
-    zabbixRolloutPerHostResult,
-  ] = await Promise.all([
-    // Cache key includes periodDays — changing the heatmap period must NOT
-    // return the previous period's cached payload. Without this, switching
-    // 14d -> 30d would either show stale 14d data (cache hit) or trigger
-    // an "all empty" cell stretch when the cached entry was clipped.
-    fetchSource(`zabbix-rt-cpu-history-${pilotId}-${periodDays}d`, {
-      source: "zabbix",
-      label: "Zabbix CPU History",
-      env: "prod",
-      freshFor: FRESH_MS.history,
-      fetcher: async () => {
-        const client = getZabbixClient();
-        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
-        const matchedHostIds = new Set<string>();
-        for (const h of allHosts) {
-          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
-        }
-        if (matchedHostIds.size === 0) return [];
-        const items = (await client.getItems(Array.from(matchedHostIds), "system.cpu.util")) as Array<{
-          itemid: string; hostid: string; key_: string;
-        }>;
-        const cpuUtilItems = items.filter(
-          (i) => i.key_ === "system.cpu.util[,,avg1]" || i.key_ === "system.cpu.util"
-        );
-        if (cpuUtilItems.length === 0) return [];
-        const itemIds = cpuUtilItems.map((i) => i.itemid);
-        const itemHostMap = new Map(cpuUtilItems.map((i) => [i.itemid, i.hostid]));
-        return await client.getCpuHistoryDaily(itemIds, itemHostMap, periodDays);
-      },
-    }),
-    fetchSource(`zabbix-rt-active-in-period-hostids-${pilotId}-${periodDays}d`, {
-      source: "zabbix",
-      label: "Zabbix Retellect Activity Map (period)",
-      env: "prod",
-      freshFor: FRESH_MS.registry,
-      fetcher: async (): Promise<string[]> => {
-        const client = getZabbixClient();
-        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
-        const matchedHostIds = new Set<string>();
-        for (const h of allHosts) {
-          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
-        }
-        if (matchedHostIds.size === 0) return [];
-        const active = await client.getRetellectActiveInPeriodHostIds(
-          Array.from(matchedHostIds),
-          periodDays,
-        );
-        return Array.from(active);
-      },
-    }),
-    fetchSource(`zabbix-rt-rollout-perhost-${pilotId}-${periodDays}d-at${activeThresholdPp}`, {
-      source: "zabbix",
-      label: "Rollout Insights aggregate (per host)",
-      env: "prod",
-      freshFor: FRESH_MS.history,
-      fetcher: async (): Promise<RolloutPerHostPayload> => {
-        const client = getZabbixClient();
-        const allHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
-        const matchedHostIds = new Set<string>();
-        for (const h of allHosts) {
-          if (expectedHostKeys.has(h.name)) matchedHostIds.add(h.hostid);
-        }
-        if (matchedHostIds.size === 0) {
-          return {
-            activeThresholdPp,
-            periodDays,
-            generatedAt: new Date().toISOString(),
-            perHost: [],
-          };
-        }
-        return await fetchRolloutPerHost(
-          client,
-          Array.from(matchedHostIds),
-          periodDays,
-          activeThresholdPp,
-        );
-      },
-    }),
-  ]);
-
-  const cpuHistory = zabbixHistoryResult.data || [];
-  const activeInPeriodHostIds = zabbixActiveInPeriodHostIds.data || [];
-  const rolloutPerHost: RolloutPerHostPayload | null = zabbixRolloutPerHostResult.data || null;
-
-  return {
-    cpuTrends: cpuHistory,
-    cpuTrendsMeta: {
-      status: zabbixHistoryResult.status,
-      fetchMs: zabbixHistoryResult.fetchMs,
-      error: zabbixHistoryResult.error,
-    },
     retellectActiveInPeriodHostIds: activeInPeriodHostIds as string[],
     rolloutPerHost,
   };
-}
-
-/**
- * Combined wrapper — calls light + heavy in parallel and merges. Used by
- * the warm-cache orchestrator + adjacent-period prefetch where we need
- * BOTH halves of the payload populated in the disk cache.
- */
-async function loadZabbixDataPayload(
-  pilotId: string,
-  expectedHostKeys: Set<string>,
-  periodDays: number = 14,
-  activeThresholdPp: number = 2.0,
-): Promise<ZabbixData> {
-  const [light, heavy] = await Promise.all([
-    loadLightZabbixData(pilotId, expectedHostKeys),
-    loadHeavyZabbixData(pilotId, expectedHostKeys, periodDays, activeThresholdPp),
-  ]);
-  return { ...light, ...heavy } as ZabbixData;
 }
