@@ -211,7 +211,7 @@ export interface ZabbixData {
 // UserPilotAccess.allowedTabs. Keep in sync with src/lib/auth/permissions.ts.
 const tabs = [
   { id: "overview",    label: "Overview",                  permKey: "overview" },
-  { id: "rollout",     label: "Rollout Insights",          permKey: "rollout" },
+  { id: "rollout",     label: "CPU Matrix",                permKey: "rollout" },
   { id: "timeline",    label: "CPU Timeline",              permKey: "timeline" },
   { id: "inventory",   label: "Host Inventory",            permKey: "inventory" },
   { id: "health",      label: "Data Health",               permKey: "datahealth" },

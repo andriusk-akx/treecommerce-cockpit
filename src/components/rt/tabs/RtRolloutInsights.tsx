@@ -389,7 +389,7 @@ export function RtRolloutInsights({
         </FilterRow>
       </FilterBar>
 
-      {/* ── A. CPU Rollout Decision Matrix ─────────────────────────── */}
+      {/* ── A. Decision Matrix (CPU Matrix tab's headline section) ─── */}
       {/* Single in-flight dimmer wraps the matrix + drivers + actions so
           the whole period-dependent surface fades together while the
           Server Component refetch lands. opacity-60 keeps the previous
@@ -403,7 +403,7 @@ export function RtRolloutInsights({
       <section className="mb-8">
         <div className="flex items-baseline justify-between mb-2">
           <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-            CPU Rollout Decision Matrix
+            Decision Matrix
           </h3>
           <span className="text-[11px] text-gray-400">
             sorted by risk · ON = Retellect enabled
@@ -821,6 +821,39 @@ function ActiveThresholdSlider({
   onChange: (v: number) => void;
   pending: boolean;
 }) {
+  // Editable text input — the slider drifted to a typeable number input
+  // 2026-05-25 after user feedback that 0.5 pp increments via drag felt
+  // imprecise and the visible value badge was effectively read-only. The
+  // displayed string is decoupled from the committed value so the user
+  // can type "2.", "2.5", clear and re-type, etc., without the parent
+  // snapping the input back on every keystroke. We clamp to [0, 10] and
+  // round to 0.5 only when the field commits (blur / Enter).
+  const [draft, setDraft] = useState<string>(value.toFixed(1));
+  useEffect(() => {
+    // External value changes (URL deep-link, slider on another tab) sync
+    // back into the draft only when the user isn't actively editing —
+    // detected by checking whether the parsed draft already matches.
+    const parsed = parseFloat(draft);
+    if (!Number.isFinite(parsed) || Math.abs(parsed - value) > 0.0001) {
+      setDraft(value.toFixed(1));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const commit = () => {
+    const raw = parseFloat(draft);
+    if (!Number.isFinite(raw)) {
+      setDraft(value.toFixed(1));
+      return;
+    }
+    const clamped = Math.max(0, Math.min(10, raw));
+    // Snap to 0.5 pp — the same resolution the old slider exposed and the
+    // size of a meaningful step on Rimi hosts. Typing "2.37" lands at 2.5.
+    const snapped = Math.round(clamped * 2) / 2;
+    setDraft(snapped.toFixed(1));
+    if (snapped !== value) onChange(snapped);
+  };
+
   return (
     <label className="flex items-center gap-2" title={ACTIVE_THRESHOLD_TOOLTIP}>
       <span className="text-gray-500 font-medium inline-flex items-center gap-1">
@@ -832,22 +865,29 @@ function ActiveThresholdSlider({
           i
         </span>
       </span>
-      <input
-        type="range"
-        min={0}
-        max={10}
-        step={0.5}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-32 accent-blue-600"
-        aria-label="Active threshold in percentage points above baseline"
-        title={ACTIVE_THRESHOLD_TOOLTIP}
-      />
-      <span
-        className={`tabular-nums text-xs font-medium ${pending ? "text-amber-600" : "text-gray-700"}`}
-        title={pending ? "Releasing soon — debounce 300 ms" : ACTIVE_THRESHOLD_TOOLTIP}
-      >
-        +{value.toFixed(1)} pp
+      <span className="inline-flex items-center gap-1">
+        <span className="text-gray-400 text-[11px]">+</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          max={10}
+          step={0.5}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+              (e.currentTarget as HTMLInputElement).blur();
+            }
+          }}
+          className={`w-14 text-xs px-1.5 py-1 border rounded text-center bg-white tabular-nums focus:outline-none focus:border-blue-400 ${pending ? "border-amber-300 text-amber-700" : "border-gray-200 text-gray-700"}`}
+          aria-label="Active threshold in percentage points above baseline"
+          title={pending ? "Releasing soon — debounce 300 ms" : ACTIVE_THRESHOLD_TOOLTIP}
+        />
+        <span className="text-gray-400 text-[11px]">pp</span>
       </span>
     </label>
   );
