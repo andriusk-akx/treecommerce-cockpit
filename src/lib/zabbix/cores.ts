@@ -87,11 +87,23 @@ export interface ZabbixCoresItem {
 }
 
 interface ResolveOpts {
-  /** Zabbix host id (the same id Device.sourceHostKey-matched record
-   *  is keyed on — we look up Device by sourceHostKey OR id depending
-   *  on what the caller has handy). Pass the actual Zabbix hostId so
-   *  errors can be diagnosed against Zabbix's UI. */
+  /** Zabbix numeric host id (e.g. "12345"). Used for logs/diagnostics so
+   *  the operator can cross-reference Zabbix's UI. NOT used for the
+   *  Device lookup — that goes through `hostName` (or `deviceId`),
+   *  because `Device.sourceHostKey` stores the Zabbix display name, not
+   *  the numeric id (see seed_testlab_host.ts comments on the convention).
+   *
+   *  Historic note: the lookup used to use `hostId` as the sourceHostKey
+   *  search key, which silently never matched in prod — the resolver
+   *  always reported `coresKnown=false` on every host that wasn't passed
+   *  via `deviceId`, leaving perf_counter values un-normalised. */
   hostId: string;
+  /** Zabbix host display name (the `name` field returned by host.get,
+   *  e.g. "Strongpoint testlab SCO"). This is what `Device.sourceHostKey`
+   *  is matched against. Optional — callers that already have a
+   *  `deviceId` can skip it. Without it AND without a deviceId the
+   *  resolver can't find the cached/manual override row. */
+  hostName?: string;
   /** The system.cpu.num item from `item.get`, if any. Pass `undefined`
    *  when the host doesn't publish it at all (a different failure mode
    *  from "publishes but ZBX_NOTSUPPORTED"). */
@@ -102,7 +114,7 @@ interface ResolveOpts {
   ttlMs?: number;
   /** Optional explicit Device id when the caller already has it (saves
    *  a sourceHostKey lookup). When omitted we look up by sourceHostKey
-   *  matching the Zabbix hostId. */
+   *  matching `hostName`. */
   deviceId?: string;
 }
 
@@ -131,7 +143,11 @@ export async function resolveCoresForHost(
 
   // We need the Device row regardless — both to read the cache (step 2)
   // and to write through (after step 1). One SELECT keeps it cheap.
-  const device = await loadDevice(opts.prisma, opts.deviceId, opts.hostId);
+  // Lookup priority: deviceId (caller already has the PK) > hostName
+  // (matches Device.sourceHostKey by convention). We deliberately do NOT
+  // fall back to hostId for the sourceHostKey match — that bug used to
+  // hide manual overrides forever in prod.
+  const device = await loadDevice(opts.prisma, opts.deviceId, opts.hostName);
 
   // ── Step 0 (highest priority): manual override on the Device row.
   //   Operators set `cpuCoresSource = "manual"` when Zabbix is known to
@@ -311,17 +327,22 @@ const KNOWN_CPU_MODELS: readonly { match: string; cores: number }[] = [
 ];
 
 /** Loads the Device row by id (if known) or by sourceHostKey matching
- *  the Zabbix hostId. Returns just the columns this module needs so we
- *  don't pull large blobs unnecessarily.
+ *  the Zabbix host *name* (display name). Returns just the columns this
+ *  module needs so we don't pull large blobs unnecessarily.
  *
- *  The hostId-based lookup uses `findFirst` because sourceHostKey is
- *  not unique in the schema (in theory two pilots could share a key,
- *  though in practice it identifies the Zabbix host uniquely). The
- *  caller can pass deviceId to bypass this. */
+ *  Important convention: `Device.sourceHostKey` stores the Zabbix host
+ *  display name (e.g. "Strongpoint testlab SCO"), NOT the numeric hostid.
+ *  Pre-2026-05-26 the lookup passed the numeric hostid here and never
+ *  matched in prod, which silently hid every Device.cpuCores override
+ *  (manual or backfill) — perf_counter values stayed un-normalised and
+ *  the drill-down stacked over 100 %.
+ *
+ *  Returns null when neither path resolves a row. Caller must handle
+ *  that (coresKnown=false on resolveCoresForHost). */
 async function loadDevice(
   prisma: PrismaClient,
   deviceId: string | undefined,
-  hostId: string,
+  hostName: string | undefined,
 ): Promise<{
   id: string;
   cpuCores: number | null;
@@ -339,8 +360,9 @@ async function loadDevice(
   if (deviceId) {
     return prisma.device.findUnique({ where: { id: deviceId }, select });
   }
+  if (!hostName) return null;
   return prisma.device.findFirst({
-    where: { sourceHostKey: hostId },
+    where: { sourceHostKey: hostName },
     select,
   });
 }

@@ -119,6 +119,11 @@ const C = {
 interface Props {
   /** Currently drilled host id (from RtTimeline drill state). null when no drill. */
   hostId: string | null;
+  /** Zabbix display name (`host.get` `name`). Forwarded as the `hostName`
+   *  query param so the route's `resolveCoresForHost` can find the Device
+   *  row via `Device.sourceHostKey`. Without it the drill normalises
+   *  perf_counter values against cores=1, stacking past 100 %. */
+  sourceHostKey?: string | null;
   /** Drilled host display name — shown in card header when present. */
   displayName: string | null;
   /** Threshold from RtFiltersContext — drives Min≥threshold metric + chart guide line. */
@@ -142,7 +147,7 @@ const MAX_DAYS = 365;
 
 // ─── Component ──────────────────────────────────────────────────────
 
-export function RtProcessTrend({ hostId, displayName, threshold, periodDays, defaultExpanded = false }: Props) {
+export function RtProcessTrend({ hostId, sourceHostKey, displayName, threshold, periodDays, defaultExpanded = false }: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [category, setCategory] = useState<CategoryId>("scoApp");
   const [metric, setMetric] = useState<MetricId>("avg");
@@ -175,8 +180,14 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
     let aborted = false;
     setLoading(true);
     setError(null);
+    // hostName (when known) lets the route resolve Device.cpuCores via
+    // sourceHostKey — without it the per-host cores normalisation falls
+    // back to coresKnown=false and perf_counter values stay raw.
+    const hostNameParam = sourceHostKey
+      ? `&hostName=${encodeURIComponent(sourceHostKey)}`
+      : "";
     fetch(
-      `/api/rt/process-trend?hostId=${encodeURIComponent(hostId)}&days=${effectiveDays}&category=${category}&threshold=${threshold}`,
+      `/api/rt/process-trend?hostId=${encodeURIComponent(hostId)}${hostNameParam}&days=${effectiveDays}&category=${category}&threshold=${threshold}`,
     )
       .then((r) => r.json() as Promise<ApiResponse>)
       .then((d) => {
@@ -198,7 +209,7 @@ export function RtProcessTrend({ hostId, displayName, threshold, periodDays, def
       })
       .finally(() => { if (!aborted) setLoading(false); });
     return () => { aborted = true; };
-  }, [expanded, hostId, category, threshold, effectiveDays]);
+  }, [expanded, hostId, sourceHostKey, category, threshold, effectiveDays]);
 
   const chosenColor = CATEGORIES.find((c) => c.id === category)!.color;
   const metricLabel = METRICS.find((m) => m.id === metric)!.label;

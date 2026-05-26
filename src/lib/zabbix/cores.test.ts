@@ -153,6 +153,7 @@ describe("resolveCoresForHost", () => {
     ]);
     const r = await resolveCoresForHost({
       hostId: "hostA",
+      hostName: "hostA",
       zabbixItem: { lastvalue: "4", state: "0" },
       prisma,
     });
@@ -180,6 +181,7 @@ describe("resolveCoresForHost", () => {
     ]);
     const r = await resolveCoresForHost({
       hostId: "hostA",
+      hostName: "hostA",
       zabbixItem: { lastvalue: "1", state: "0" }, // Zabbix says 1 — wrong
       prisma,
     });
@@ -199,6 +201,7 @@ describe("resolveCoresForHost", () => {
     ]);
     const r = await resolveCoresForHost({
       hostId: "hostA",
+      hostName: "hostA",
       zabbixItem: { lastvalue: "4", state: "1" },  // ZBX_NOTSUPPORTED
       prisma,
     });
@@ -218,6 +221,7 @@ describe("resolveCoresForHost", () => {
     ]);
     const r = await resolveCoresForHost({
       hostId: "hostA",
+      hostName: "hostA",
       zabbixItem: undefined,  // host doesn't publish system.cpu.num at all
       prisma,
     });
@@ -239,6 +243,7 @@ describe("resolveCoresForHost", () => {
     ]);
     const r = await resolveCoresForHost({
       hostId: "hostA",
+      hostName: "hostA",
       zabbixItem: undefined,
       prisma,
     });
@@ -251,6 +256,7 @@ describe("resolveCoresForHost", () => {
     const { prisma } = makePrisma([]);  // empty DB
     const r = await resolveCoresForHost({
       hostId: "stranger",
+      hostName: "stranger",
       zabbixItem: undefined,
       prisma,
     });
@@ -272,6 +278,7 @@ describe("resolveCoresForHost", () => {
     ]);
     const r = await resolveCoresForHost({
       hostId: "hostA",
+      hostName: "hostA",
       zabbixItem: { lastvalue: "4", state: "0" },
       prisma,
     });

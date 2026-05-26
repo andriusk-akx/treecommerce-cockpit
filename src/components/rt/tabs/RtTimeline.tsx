@@ -772,7 +772,12 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     // (e.g. "SCO2" in 8 stores), so we never resolve by name here.
     setDrillLoading(true);
     const isoDate = `${drill.dateObj.getFullYear()}-${String(drill.dateObj.getMonth() + 1).padStart(2, "0")}-${String(drill.dateObj.getDate()).padStart(2, "0")}`;
-    fetch(`/api/rt/process-history?hostId=${drill.hostId}&date=${isoDate}&granularity=${granularity}`)
+    // hostName goes alongside hostId so the route can resolve Device.cpuCores
+    // (Device.sourceHostKey stores the Zabbix display name, not the numeric
+    // id). Without hostName the cores resolver would never find the Device
+    // row and would silently fall through to coresKnown=false, leaving
+    // perf_counter values un-normalised in the drill-down stack.
+    fetch(`/api/rt/process-history?hostId=${drill.hostId}&hostName=${encodeURIComponent(drill.sourceHostKey)}&date=${isoDate}&granularity=${granularity}`)
       .then((r) => r.json())
       .then((d) => {
         setDrillIntervals(Array.isArray(d.slots) ? d.slots : null);
@@ -2549,6 +2554,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         triggers a /api/rt/process-trend fetch. Spec: project_rt_process_trend.md. */}
     <RtProcessTrend
       hostId={drill.hostId}
+      sourceHostKey={drill.sourceHostKey}
       displayName={drill.displayName}
       threshold={threshold}
       periodDays={periodDays}

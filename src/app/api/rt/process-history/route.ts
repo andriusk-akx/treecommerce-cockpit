@@ -146,6 +146,11 @@ function emptyBucket(): HourlyBucket {
 
 export async function GET(req: NextRequest) {
   const hostId = req.nextUrl.searchParams.get("hostId");
+  // Zabbix display name passed alongside hostId so `resolveCoresForHost`
+  // can find the Device row (sourceHostKey stores the display name, not
+  // the numeric id). Optional for backward compat — older clients that
+  // forgot to pass it just get the coresKnown=false fallback.
+  const hostName = req.nextUrl.searchParams.get("hostName") ?? undefined;
   // Robust numeric query-param parsing — `parseInt("abc") === NaN` and the
   // older `Math.max(1, Math.min(60, NaN))` propagated NaN straight through to
   // `time_from`/granularity bucket keys, so any garbage `?days=foo` /
@@ -236,6 +241,7 @@ export async function GET(req: NextRequest) {
   // on a host with peak CPU 85%). See AKpilot-CPU-Normalization-Spec.md.
   const coresResolved = await resolveCoresForHost({
     hostId,
+    hostName,
     zabbixItem: numCpuItem,
     prisma,
   });

@@ -80,6 +80,11 @@ const MAX_DAYS = 365;
 
 export async function GET(req: NextRequest) {
   const hostId = req.nextUrl.searchParams.get("hostId");
+  // Zabbix display name — passed through so resolveCoresForHost can find
+  // the Device row (sourceHostKey stores the display name). Optional for
+  // backward compat; older clients that omit it get coresKnown=false
+  // whenever live Zabbix system.cpu.num is missing.
+  const hostName = req.nextUrl.searchParams.get("hostName") ?? undefined;
   const daysParam = parseInt(req.nextUrl.searchParams.get("days") || "14", 10);
   const days = Number.isFinite(daysParam) ? Math.max(1, Math.min(MAX_DAYS, daysParam)) : 14;
   const categoryParam = req.nextUrl.searchParams.get("category") || "scoApp";
@@ -101,9 +106,11 @@ export async function GET(req: NextRequest) {
   // threshold) doesn't re-hit Zabbix when the user toggles the card open/closed
   // or comparators in the same minute. 120 s mirrors getCpuHistoryDaily — the
   // freshest day still updates within the heatmap's existing refresh cadence.
+  // hostName is intentionally NOT in the cache key — it's a lookup hint, not
+  // part of the response shape; the response is determined by hostId.
   const cacheKey = `rt:procTrend:${hostId}:${days}:${category}:${threshold}`;
   return NextResponse.json(
-    await cached(cacheKey, () => buildTrendResponse(hostId, days, category, threshold), 120_000),
+    await cached(cacheKey, () => buildTrendResponse(hostId, hostName, days, category, threshold), 120_000),
   );
 }
 
@@ -134,6 +141,7 @@ interface TrendResponse {
 
 async function buildTrendResponse(
   hostId: string,
+  hostName: string | undefined,
   days: number,
   category: CategoryEx,
   threshold: number,
@@ -168,6 +176,7 @@ async function buildTrendResponse(
   const numCpuItem = allItems.find((it) => it.key_ === "system.cpu.num");
   const coresResolved = await resolveCoresForHost({
     hostId,
+    hostName,
     zabbixItem: numCpuItem,
     prisma,
   });
