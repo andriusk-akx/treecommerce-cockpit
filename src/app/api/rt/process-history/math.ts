@@ -397,9 +397,37 @@ export function averageSlotV2(
   const hostCpu = hostCpuValues.length
     ? Math.round((hostCpuValues.reduce((acc, v) => acc + v, 0) / hostCpuValues.length) * 10) / 10
     : null;
-  const sumNamed =
+
+  // OS Core represents kernel/system CPU time AT THE HOST LEVEL — but the
+  // per-process perf_counter `% Processor Time` already includes the kernel
+  // time each process spent on its own syscalls. So sp.sss running 31% of
+  // host already contains some kernel work, AND that same kernel work shows
+  // up again in OS Core (system.cpu.util[,system]). Result: sumNamed
+  // consistently overshoots host CPU by 3-5pp on busy slots even after the
+  // /cores fix landed, because we double-count process kernel time.
+  //
+  // The operator-facing fix: treat OS Core as the kernel-time RESIDUAL — the
+  // portion of host kernel CPU NOT already accounted for by tracked
+  // processes' perf_counter values. We clamp osCore so the named sum never
+  // exceeds host CPU. Process-level values stay authoritative; OS Core
+  // shrinks to fit the gap, like a residual bucket.
+  //
+  // Why clamp OS Core specifically and not, say, SCO App? Because process-
+  // level counters are FIRST-CLASS attribution (they tell you WHICH process
+  // burned CPU), while OS Core is a catch-all "everything kernel" bucket.
+  // If the math has to give somewhere to balance, the catch-all is the
+  // honest place to absorb the discrepancy.
+  //
+  // Guard: only clamp UPWARDS — never increase OS Core to make it match
+  // host CPU. If sumNamed < hostCpu we still get a positive `other`.
+  const sumNonOsCore =
     avg.retellect + avg.scoApp + avg.db + avg.system +
-    avg.besclient + avg.elastic + avg.osCore;
+    avg.besclient + avg.elastic;
+  let clampedOsCore = avg.osCore;
+  if (hostCpu !== null && coresKnown && sumNonOsCore + clampedOsCore > hostCpu) {
+    clampedOsCore = Math.max(0, Math.round((hostCpu - sumNonOsCore) * 100) / 100);
+  }
+  const sumNamed = sumNonOsCore + clampedOsCore;
 
   let other = 0;
   let free = 0;
@@ -419,6 +447,11 @@ export function averageSlotV2(
     // visual stack stays within 100% — the warning banner above tells the
     // operator the values were not properly normalised.
     free = Math.max(0, Math.round((100 - sumNamed - other) * 100) / 100);
+    // `overshootPp` is recomputed against the clamped OS Core so the
+    // dataQuality classifier reflects what the user actually sees. The
+    // residual overshoot post-clamp comes from sumNonOsCore > hostCpu —
+    // a real normalisation bug if it happens (would mean tracked
+    // processes alone already exceed host).
     overshootPp = Math.round((sumNamed - hostCpu) * 100) / 100;
     if (!coresKnown) {
       // We didn't normalise per_counter values — assume the worst.
@@ -441,7 +474,7 @@ export function averageSlotV2(
       system: avg.system,
       besclient: avg.besclient,
       elastic: avg.elastic,
-      osCore: avg.osCore,
+      osCore: clampedOsCore,
     },
     hostCpu,
     other,
