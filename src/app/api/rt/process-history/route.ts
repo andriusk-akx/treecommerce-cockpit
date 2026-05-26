@@ -611,16 +611,35 @@ export async function GET(req: NextRequest) {
         filled[k] = seen && i - seen.atSlot <= FILL_MAX_SLOTS ? seen.value : 0;
       }
     }
-    const { besclient: bes, elastic: ela, osCore: os } = filled;
-    // Recompute Other / Free / dataQuality using the post-fill category
-    // values. Forward-fill can lift besclient/elastic/osCore from 0 to a
-    // recently-seen value; without re-running the math, slotV2.other and
-    // slotV2.free still reflect the pre-fill snapshot, breaking the
+    let { besclient: bes, elastic: ela, osCore: os } = filled;
+    // ── Post-fill OS Core re-clamp.
+    //
+    // averageSlotV2 clamps OS Core per slot so Σnamed ≤ hostCpu. But the
+    // forward-fill above can pump OS Core back UP using a value carried
+    // over from a recent slot where hostCpu was higher (e.g. previous
+    // minute hostCpu=60 → osCore clamped to 25; this minute hostCpu=37 →
+    // no osCore sample → fill imports 25 from prior). When that happens
+    // the slot's final Σnamed once again overshoots hostCpu by exactly
+    // the carry-over.
+    //
+    // Re-clamp os against THIS slot's recomputedHostCpu and the freshly
+    // forward-filled non-osCore sum. The other sparse keys (besclient,
+    // elastic) are kept as-is — they're small relative to hostCpu and
+    // are first-class attributions like the dense process counters.
+    const recomputedHostCpu = slotV2.hostCpu;
+    if (recomputedHostCpu !== null && coresKnown) {
+      const sumOtherThanOsCore = r + sa + dbv + sys + bes + ela;
+      const allowedOs = Math.max(0, Math.round((recomputedHostCpu - sumOtherThanOsCore) * 100) / 100);
+      if (os > allowedOs) os = allowedOs;
+    }
+    // Recompute Other / Free / dataQuality using the post-fill, post-clamp
+    // category values. Forward-fill can lift besclient/elastic/osCore from
+    // 0 to a recently-seen value; without re-running the math, slotV2.other
+    // and slotV2.free still reflect the pre-fill snapshot, breaking the
     // Σ+Other+Free=100 invariant by exactly the fill delta. We keep the
     // dataQuality classification from slotV2 if it was already worse
     // ("warn"/"fail"); the fill itself can't push a slot from ok to fail.
     const filledSum = r + sa + dbv + sys + bes + ela + os;
-    const recomputedHostCpu = slotV2.hostCpu;
     let recomputedOther = slotV2.other;
     let recomputedFree = slotV2.free;
     let recomputedOvershoot = slotV2.overshootPp;
