@@ -228,10 +228,24 @@ export async function GET(req: NextRequest) {
     ? allItems.find((it) => /^perf_counter\["?\\Process\(System\)\\% Processor Time/.test(it.key_))
     : null;
   const sysKernelItem = sysKernelHostItem ?? sysKernelProcItem;
-  // The Process(System) variant reports per-core %, so we need to / cores
-  // when normalising its samples; the host-scope variant is already in
-  // host units. A single flag captures the difference at fetch time.
-  const sysKernelNeedsCoresDiv = !!sysKernelProcItem;
+  // Both kernel-time sources turn out to need /cores division on this
+  // fleet:
+  //   • `perf_counter[\Process(System)\…]` is documented "% of one core"
+  //     and always needed /cores — that branch was already correct.
+  //   • `system.cpu.util[,system,avg1]` was originally assumed to be
+  //     host-scope ("already normalised") based on Zabbix's Linux
+  //     behaviour. Empirically on Windows SP-managed agents (verified on
+  //     StrongPoint Testlab SCO0150 2026-05-26 — Andrius), this item
+  //     returns per-core values that scale 0..(100·cores). Drill-down
+  //     stacks showed OS Core ≈ 37–48 % when host CPU was 33–35 % on a
+  //     4-core box — divide-by-cores brings OS Core to ~9–12 % which
+  //     fits inside host CPU and matches the User+Kernel ≤ host invariant.
+  //
+  // Keeping the two-source branching (host-scope item preferred) because
+  // the perf_counter form is the older fallback and we still want to
+  // pick the "clean" item when both exist — the cores division just
+  // applies unconditionally now.
+  const sysKernelNeedsCoresDiv = !!sysKernelItem;
   const numCpuItem = allItems.find((it) => it.key_ === "system.cpu.num");
   // Resolve cpu_num via the layered helper (live Zabbix -> cached Device.cpuCores
   // -> inferred from CPU model -> coresKnown=false). The old code silently
