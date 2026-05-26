@@ -59,6 +59,23 @@ function vilniusFields(ms: number): { yyyy: string; mm: string; dd: string; hh: 
   return { yyyy: get("year"), mm: get("month"), dd: get("day"), hh, mi: get("minute") };
 }
 
+/**
+ * Strict YYYY-MM-DD validator. The route used to gate the `date` param with
+ * `/^\d{4}-\d{2}-\d{2}$/`, which accepted obviously broken inputs like
+ * `9999-99-99` or `2026-13-32`. Those slipped through to `new Date(...)`,
+ * which silently returned `Invalid Date`, propagated NaN through the
+ * timeFrom / timeTill calculation, and ended up sending `time_from: "NaN"`
+ * to Zabbix — the user just saw an empty drill-down with no hint that
+ * their input was junk. This validator does a full month/day/leap-year
+ * check via the round-trip identity `Date.toISOString().startsWith(input)`.
+ */
+function isValidYyyyMmDd(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return false;
+  return d.toISOString().slice(0, 10) === s;
+}
+
 /** Vilnius local midnight on `yyyy-mm-dd` as a Unix-seconds instant. Honest
  *  about DST: uses Intl to discover the UTC offset Vilnius has at the
  *  beginning of that calendar day, then subtracts to get the true UTC
@@ -129,8 +146,22 @@ function emptyBucket(): HourlyBucket {
 
 export async function GET(req: NextRequest) {
   const hostId = req.nextUrl.searchParams.get("hostId");
-  const days = parseInt(req.nextUrl.searchParams.get("days") || "1", 10);
-  const granularityMin = Math.max(1, Math.min(60, parseInt(req.nextUrl.searchParams.get("granularity") || "60", 10)));
+  // Robust numeric query-param parsing — `parseInt("abc") === NaN` and the
+  // older `Math.max(1, Math.min(60, NaN))` propagated NaN straight through to
+  // `time_from`/granularity bucket keys, so any garbage `?days=foo` /
+  // `?granularity=foo` produced an opaque Zabbix RPC error or empty drill-
+  // down without telling the caller the input was the problem. We now coerce
+  // explicitly and 400 on out-of-range so the failure is loud and local.
+  const parseBoundedInt = (raw: string | null, fallback: number, min: number, max: number): number => {
+    if (raw === null) return fallback;
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n)) return fallback;
+    if (n < min) return min;
+    if (n > max) return max;
+    return n;
+  };
+  const days = parseBoundedInt(req.nextUrl.searchParams.get("days"), 1, 1, 365);
+  const granularityMin = parseBoundedInt(req.nextUrl.searchParams.get("granularity"), 60, 1, 60);
   if (!hostId) return NextResponse.json({ error: "hostId required" }, { status: 400 });
 
   const client = getZabbixClient();
@@ -228,7 +259,7 @@ export async function GET(req: NextRequest) {
   const dateStr = req.nextUrl.searchParams.get("date"); // YYYY-MM-DD
   let timeFrom: number;
   let timeTill: number;
-  if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+  if (dateStr && isValidYyyyMmDd(dateStr)) {
     // Parse as Vilnius-local midnight, independent of server timezone.
     // Railway containers run in UTC; using `new Date(...T00:00:00)` would
     // capture UTC midnight there and skip the user's actual early morning.
@@ -440,7 +471,7 @@ export async function GET(req: NextRequest) {
     sysCpuMax: number | null;
   }> = [];
   let baseDay: string;
-  if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+  if (dateStr && isValidYyyyMmDd(dateStr)) {
     baseDay = dateStr;
   } else {
     // Anchor baseDay to the Vilnius calendar day, not server-local, so the
