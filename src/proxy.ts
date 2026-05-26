@@ -28,6 +28,10 @@ const PUBLIC_PREFIXES = [
   // against `WARM_CACHE_SECRET`, so it's safe to expose at the middleware
   // layer — the secret is the actual auth boundary, not a session cookie.
   "/api/internal/warm-cache",
+  // Testlab cpuCores prod patch — same WARM_CACHE_SECRET gate inside the
+  // route, same rationale as warm-cache: the secret IS the auth boundary,
+  // session cookies don't apply because operators hit this from curl.
+  "/api/internal/seed-testlab-cores",
   "/_next",
   "/favicon.ico",
 ];
