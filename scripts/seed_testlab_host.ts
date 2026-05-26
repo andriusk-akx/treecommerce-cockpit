@@ -67,10 +67,26 @@ async function main() {
       deviceType: "SCO",
       retellectEnabled: false,
       status: "active",
+      // Andrius confirmed 2026-05-26: the testlab SCO is a 4-core box.
+      // Seeding `cpuCores: 4` with `cpuCoresSource: "manual"` gives
+      // `resolveCoresForHost` (src/lib/zabbix/cores.ts) a trustworthy
+      // step-2 fallback for the days when Zabbix `system.cpu.num` is
+      // missing or ZBX_NOTSUPPORTED — without it the drill-down would
+      // silently fall to step 4 (coresKnown=false, value=1), and the
+      // per-process stack would overshoot 100% because perf_counter
+      // values are "% of one core" and we'd skip the /cores divide.
+      //
+      // `cpuCoresProbedAt` is left null on purpose: a live Zabbix probe
+      // is still allowed to write through and refresh the source to
+      // "zabbix" once a real reading shows up, but until then we have
+      // an honest manual baseline.
+      cpuCores: 4,
+      cpuCoresSource: "manual",
       notes:
         "Experimental host. 2026-05-12: SP admin enabled per-process monitoring " +
         "(BESClient / Elastic / system.cpu.util[,system]) here — the dashboard " +
-        "uses it to validate the detailed 'Other' breakdown before fleet rollout.",
+        "uses it to validate the detailed 'Other' breakdown before fleet rollout. " +
+        "Hardware: 4-core SCO (Andrius 2026-05-26).",
     },
   });
 
