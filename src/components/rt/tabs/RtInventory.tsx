@@ -70,13 +70,10 @@ interface HostRow {
   agentTotalEnabled: number;
 }
 
-const riskColors: Record<string, string> = {
-  critical: "text-red-600 font-semibold",
-  high: "text-amber-600 font-medium",
-  medium: "text-amber-500",
-  low: "text-emerald-600",
-  unknown: "text-gray-400",
-};
+// (Removed `riskColors` map 2026-05-25 — the inventory table renders risk
+// chips via inline className expressions on each row rather than looking
+// up this map. Keeping a parallel palette would mean two places to update
+// when the risk-tone styling changes.)
 
 function getRisk(cpuTotal: number): RiskLevel {
   if (cpuTotal >= 90) return "critical";
@@ -122,7 +119,11 @@ export function RtInventory({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zab
   const allHosts = useMemo(() => {
     const rows: HostRow[] = [];
     const zabbixByName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
-    const zabbixByHostId = new Map(zabbix.hosts.map((h) => [h.hostId, h]));
+    // (Removed the parallel `zabbixByHostId` map 2026-05-25 — the inventory
+    // row builder only ever resolves Zabbix matches via the host *name*
+    // path. The id-keyed map was a copy-paste from the Timeline reducer
+    // that nothing in this hook ever consumed; building it on every render
+    // allocated a fresh Map proportional to fleet size for zero readers.)
 
     // CPU detail map
     const cpuDetail = new Map<string, { user: number; system: number; total: number; numCpus: number; lastClock: string | null }>();

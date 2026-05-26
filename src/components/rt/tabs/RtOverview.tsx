@@ -525,7 +525,11 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           <div className="space-y-3">
             {cpuByClass.map((c) => {
               const barColor = c.risk === "critical" ? "bg-red-500" : c.risk === "warn" ? "bg-amber-500" : c.risk === "ok" ? "bg-emerald-500" : "bg-gray-300";
-              const textColor = c.risk === "critical" ? "text-red-600" : c.risk === "warn" ? "text-amber-600" : c.risk === "ok" ? "text-emerald-600" : "text-gray-400";
+              // (Removed `textColor` derivative — it was assigned from `c.risk`
+              // but never read by the JSX below. The avg/peak labels do their
+              // own per-value colour gating inline, so the row-level variant
+              // was dead. Keeping the calc would just lie to readers about
+              // what the layer cares about.)
               return (
                 <div key={c.name}>
                   <div className="flex justify-between text-sm mb-1">

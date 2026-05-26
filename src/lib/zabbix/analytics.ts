@@ -77,8 +77,11 @@ export async function getAnalytics(daysBack: number = 30, clientStoreName: strin
     ])
   );
 
-  const periodMs = safeDaysBack * 24 * 3600 * 1000;
-  const periodStart = nowMs - periodMs;
+  // (Removed `periodMs` / `periodStart` 2026-05-25 — these were left over
+  // from an earlier code path that bounded event lookups in JS. The events
+  // come pre-filtered from `getEventsForPeriod(safeDaysBack)`, so the local
+  // bounds were never read. Dead variables would mislead someone reading
+  // this routine into thinking we still do client-side time filtering.)
 
   // Build host name map from triggers
   const hostNameMap = new Map<string, string>();

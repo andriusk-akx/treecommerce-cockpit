@@ -803,6 +803,15 @@ function DeltaCard({
   // instead of the ΔPp arrow which would always be confusing here.
   const isSelfReference = category === "retellect";
 
+  // Label the metric being delta'd so users who flip between avg/peak/min≥thr
+  // can see at a glance which slice the headline reflects — previously this
+  // card silently labelled every variant "Δ with Retellect", which left the
+  // reader guessing whether the number was an average shift or a peak shift.
+  const metricSuffix =
+    metric === "peak" ? " peak"
+    : metric === "minAbove" ? " min≥thr"
+    : " avg";
+
   if (summary.deltaPp === null || isSelfReference) {
     return (
       <div
@@ -813,7 +822,7 @@ function DeltaCard({
           padding: "10px 12px",
         }}
       >
-        <div style={{ fontSize: 11, color: C.textSec, marginBottom: 2 }}>Δ with Retellect</div>
+        <div style={{ fontSize: 11, color: C.textSec, marginBottom: 2 }}>Δ{metricSuffix} with Retellect</div>
         <div style={{ fontSize: 14, color: C.textSec, fontStyle: "italic" }}>
           {isSelfReference
             ? "n/a (own metric)"
@@ -838,7 +847,7 @@ function DeltaCard({
         padding: "10px 12px",
       }}
     >
-      <div style={{ fontSize: 11, color: tone.text, marginBottom: 2 }}>Δ with Retellect</div>
+      <div style={{ fontSize: 11, color: tone.text, marginBottom: 2 }}>Δ{metricSuffix} with Retellect</div>
       <div style={{ fontSize: 18, fontWeight: 600, color: tone.text, fontFamily: "'SF Mono','Cascadia Code',monospace" }}>
         {sign}{formatVal(summary.deltaPp, yIsTime, true)}{" "}
         <span style={{ fontSize: 11, fontWeight: 400 }}>{yIsTime ? "min" : "pp"}</span>

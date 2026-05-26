@@ -1,6 +1,11 @@
 import { getZabbixClient } from "./client";
 import { getClientForHost } from "./analytics";
-import { getHostAvailability } from "./availability";
+// (Removed `getHostAvailability` import 2026-05-25 — pre-PERF-004 refactor
+// this module called the helper to decorate insights with host uptime, but
+// the current flow accepts pre-fetched availability via parameters. The
+// stale import was a maintenance smell: someone editing this file would
+// reasonably think availability is computed here and either duplicate
+// work or chase a phantom call site.)
 import { cached } from "./cache";
 
 export interface Insight {

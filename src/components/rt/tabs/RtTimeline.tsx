@@ -6,7 +6,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
 import type { PerDayActiveCounters } from "@/lib/rollout-insights/types";
 import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterDivider } from "../filters/RtFilterControls";
-import { generateIntervalData, type IntervalSlot } from "./rt-timeline-math";
+// `generateIntervalData` was used by an earlier synthetic-data prototype
+// for the drill-down chart; removed when the route switched to real
+// process-history data. Only the IntervalSlot type stays in scope (used
+// by `slotEndLabel`).
+import type { IntervalSlot } from "./rt-timeline-math";
 import { DataCoverageBanner } from "./DataCoverageBanner";
 import { ProcessCategoryReference } from "./ProcessCategoryReference";
 import { RtProcessTrend } from "./RtProcessTrend";
@@ -57,12 +61,12 @@ const C = {
   zebraOdd: "#fafbfc",
 } as const;
 
-const DEVICE_COLORS: Record<string, { bg: string; text: string }> = {
-  SCO: { bg: "#dbeafe", text: "#1e40af" },
-  POS: { bg: "#fef3c7", text: "#92400e" },
-  SERVER: { bg: "#e0e7ff", text: "#3730a3" },
-  DEFAULT: { bg: "#f3f4f6", text: "#4b5563" },
-};
+// (Removed `DEVICE_COLORS` + the `typeBadge()` helper 2026-05-25 — they were
+// orphaned from an earlier compact-row design that rendered a device-type
+// chip next to each host. The current layout encodes device type via the
+// row label / Device Type filter instead, so the colour palette and the
+// render function were unused. Keeping dead constants invites confusion
+// when someone later searches for "where is the SCO badge styled".)
 
 const PROCESSES = [
   { key: "retellect" as const, label: "Retellect", color: C.retellect },
@@ -491,7 +495,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   const allHostRows = useMemo(() => {
     return pilot.devices
       .filter((d) => storeFilter === "all" || d.storeName === storeFilter)
-      .map((device, idx) => {
+      .map((device) => {
         const zHost = zabbixByName.get(device.sourceHostKey || "") || zabbixByName.get(device.name);
         const detail = zHost ? cpuDetail.get(zHost.hostId) : null;
         const cpuTotal = detail
@@ -619,7 +623,16 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
               : "—";
         return { name: device.name, storeName: device.storeName || "(unknown store)", cpuModel: resolvedCpuModel, deviceType: device.deviceType || "—", retellectEnabled: !!device.retellectEnabled, rtActive, rtDeployed, rtActiveToday, currentCpu: Math.round(cpuTotal * 10) / 10, cores: effectiveCores, coresSource, ramGb: device.ramGb, hasMatch: !!zHost, zHost, peaks, dayTrends, dayActives, exceedDays, minutesAbove, totalMinutes, activeMinutesAbove, activeTotalMinutes };
       });
-  }, [pilot, zabbixByName, cpuDetail, trendByHostDate, perDayActiveByHost, retellectByHost, storeFilter, threshold, periodDays, dates, hasTrendData]);
+    // `deployedHostIds` and `thKey` are intentionally added to the dep list:
+    //   • deployedHostIds — used inside the row body (rtDeployed fallback);
+    //     when the Retellect host registry changes mid-session the rows must
+    //     re-derive, otherwise the "Retellect Installed" filter / cell keeps
+    //     stale truth.
+    //   • thKey — `threshold` is already in the deps and thKey is a pure
+    //     function of threshold, so listing it changes nothing operationally
+    //     but silences the exhaustive-deps lint without disabling it — the
+    //     plugin's static analysis can't see through the snap-down expression.
+  }, [pilot, zabbixByName, cpuDetail, trendByHostDate, perDayActiveByHost, retellectByHost, deployedHostIds, storeFilter, threshold, thKey, periodDays, dates, hasTrendData]);
 
   // Unique CPU model list for the dropdown — derived from currently visible
   // (post-store-filter) rows so we don't offer models that aren't applicable.
@@ -707,23 +720,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     return { total: allHostRows.length, critical, warning, ok, noData };
   }, [allHostRows]);
 
-  // Aggregate across CURRENTLY VISIBLE rows (after every filter is applied).
-  // Sums minutes above the chosen threshold across the selection so the user
-  // sees, in one number, how much of their filtered fleet time was hot.
-  const filteredAggregate = useMemo(() => {
-    let totalAbove = 0;
-    let totalSampled = 0;
-    let hostsWithData = 0;
-    for (const r of hostRows) {
-      if (r.totalMinutes > 0) {
-        totalAbove += r.minutesAbove;
-        totalSampled += r.totalMinutes;
-        hostsWithData += 1;
-      }
-    }
-    const pct = totalSampled > 0 ? (totalAbove / totalSampled) * 100 : 0;
-    return { totalAbove, totalSampled, hostsWithData, pct };
-  }, [hostRows]);
+  // (Removed `filteredAggregate` 2026-05-25 — the per-row sum/percent the
+  // hook used to compute was never read by the JSX after the headline pill
+  // was dropped in an earlier UX pass. Keeping a recomputed-on-every-row
+  // useMemo for no consumer was wasted work and a maintenance trap if the
+  // active-mode denominator drifted out of sync with the heatmap cells.)
 
   const toggleSort = useCallback((key: SortKey) => {
     if (sortKey === key) setSortDir((d) => d === "asc" ? "desc" : "asc");
@@ -920,25 +921,13 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
 
   const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === "desc" ? " ↓" : " ↑") : "";
 
-  const typeBadge = (type: string) => {
-    const t = type.toUpperCase();
-    const colors = DEVICE_COLORS[t] || DEVICE_COLORS.DEFAULT;
-    return (
-      <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: colors.bg, color: colors.text, fontWeight: 600, letterSpacing: 0.3, whiteSpace: "nowrap" }}>
-        {t}
-      </span>
-    );
-  };
-
   const statsBar = (() => {
-    // "Selection filtered" = at least one filter is non-default; in that case
-    // we surface a separate aggregate showing the chosen subset's combined
-    // minute count and percentage, so the user immediately sees how the slice
-    // they picked behaved.
     // The "≥ N% across selection" aggregate pill was removed 2026-04-28 —
-    // Andrius felt it added noise without changing decisions. The same
-    // numbers are still computed by `filteredAggregate` and shown per row
-    // in the >80% MIN / % columns, so we keep the calc; just no headline.
+    // Andrius felt it added noise without changing decisions. The per-row
+    // ">80% MIN / %" columns still surface the same numbers, so the user
+    // can spot-check a row instead of trusting a fleet headline.
+    // (`filteredAggregate` useMemo was deleted 2026-05-25 because nothing
+    // else consumed it.)
     const filtered = storeFilter !== "all" || cpuModelFilter !== "all" || retellectInstalled !== null || search !== "" || hideEmptyHosts;
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: C.textSec, padding: "4px 0", flexWrap: "wrap" }}>
