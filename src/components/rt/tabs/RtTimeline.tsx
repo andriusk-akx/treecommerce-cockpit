@@ -2204,6 +2204,17 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 : drillCoresInfo?.coresSource === "manual" ? "manual override"
                 : drillCoresInfo?.coresSource === "inferred_from_model" ? "inferred from CPU model"
                 : "unknown source";
+              // Short inline source tag — surfaced in the header so screenshots
+              // and shared links convey not just *how many* cores were used to
+              // normalise the stack, but *where that number came from*. We
+              // discovered that "4 cores" alone was ambiguous: live Zabbix
+              // returning the wrong value vs. the manual override sticking
+              // both render identically without this hint.
+              const sourceTag =
+                drillCoresInfo?.coresSource === "zabbix" ? "zbx"
+                : drillCoresInfo?.coresSource === "manual" ? "manual"
+                : drillCoresInfo?.coresSource === "inferred_from_model" ? "infer"
+                : "?";
               return (
                 <span
                   style={{ fontSize: 11, color: coresKnown ? "#adb5bd" : "#b91c1c", fontWeight: coresKnown ? 400 : 600 }}
@@ -2213,7 +2224,9 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                       : "CPU cores unknown for this host. Per-counter values are NOT normalised; stacked bar may be misleading."
                   }
                 >
-                  {coresKnown ? `${usedCores} cores` : `?c⚠`} · {drillResources.totalRamGb} GB · {drillResources.deviceType}
+                  {coresKnown
+                    ? <>{usedCores} cores <span style={{ color: drillCoresInfo?.coresSource === "manual" ? "#7c3aed" : "#94a3b8", fontSize: 10 }}>({sourceTag})</span></>
+                    : `?c⚠`} · {drillResources.totalRamGb} GB · {drillResources.deviceType}
                 </span>
               );
             })()}
