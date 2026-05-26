@@ -605,15 +605,38 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         // TODO(RT-CPUMODEL phase 2): backfill Device.cpuModel and the fallback
         // becomes a no-op for the Rimi fleet.
         // Resolve cores with the same priority order resolveCoresForHost uses
-        // on the server: live Zabbix detail > Device.cpuCores (backfilled).
-        // When neither answers we set effectiveCores = 0 and surface a "?c"
-        // warning badge in the cpu model cell. The route's perf_counter
-        // normalisation will independently flag this via dataQuality.
+        // on the server, plus a manual-override branch:
+        //
+        //   manual (DB.cpuCoresSource='manual')  — operator typed this in.
+        //                                          Wins over live Zabbix
+        //                                          (the whole point of going
+        //                                          manual is that Zabbix
+        //                                          reports the wrong number).
+        //   live  Zabbix detail (system.cpu.num) — preferred when fresh.
+        //   cached Device.cpuCores              — fallback (was 'zabbix'
+        //                                          last time we probed).
+        //   unknown                              — surface "?c" warning.
+        //
+        // Without the manual branch, the StrongPoint Testlab SCO showed the
+        // wrong cores count even though we stamped cpuCores=4 in the DB
+        // migration — Zabbix system.cpu.num was returning a different value
+        // and Timeline rendered that over our manual ground truth.
         const liveCores = detail?.numCpus || 0;
         const cachedCores = device.cpuCores ?? 0;
-        const effectiveCores = liveCores > 0 ? liveCores : cachedCores;
-        const coresSource: "zabbix" | "cache" | "unknown" =
-          liveCores > 0 ? "zabbix" : cachedCores > 0 ? "cache" : "unknown";
+        const isManualOverride = device.cpuCoresSource === "manual" && cachedCores > 0;
+        const effectiveCores = isManualOverride
+          ? cachedCores
+          : liveCores > 0
+            ? liveCores
+            : cachedCores;
+        const coresSource: "zabbix" | "cache" | "manual" | "unknown" =
+          isManualOverride
+            ? "manual"
+            : liveCores > 0
+              ? "zabbix"
+              : cachedCores > 0
+                ? "cache"
+                : "unknown";
         const cpuModelFromRegistry = resolveCpuModel(device.cpuModel, zHost?.inventory?.cpuModel ?? null);
         const resolvedCpuModel =
           cpuModelFromRegistry !== "—"
@@ -1165,7 +1188,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         <td style={{ padding: "3px 6px", fontSize: 10, color: C.textSec, whiteSpace: "nowrap", width: 130, minWidth: 130, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", position: "sticky", left: 280, background: rowBg, zIndex: 11 }} title={
           row.coresSource === "unknown"
             ? `${row.cpuModel} — CPU cores unknown. system.cpu.num not published and no Device.cpuCores override. Per-counter values are NOT normalised; stacked drill-down may be misleading. Run scripts/backfill-device-cpu-cores.mjs or set the value via Settings → Devices.`
-            : `${row.cpuModel} · ${row.cores} cores (${row.coresSource === "zabbix" ? "live" : "cached"})`
+            : `${row.cpuModel} · ${row.cores} cores (${
+                row.coresSource === "zabbix" ? "live"
+                : row.coresSource === "manual" ? "manual override"
+                : "cached"
+              })`
         }>
           {row.cpuModel}
           {/* CPU core count badge. The abbreviation "4c" was opaque to anyone
@@ -1178,8 +1205,19 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
               badge itself surfaces the same info without delay. */}
           {row.cores > 0 ? (
             <span
-              style={{ marginLeft: 4, color: row.coresSource === "cache" ? "#7e7e7e" : "#0c8feb", fontWeight: 500 }}
-              title={`${row.cores} CPU cores (${row.coresSource === "zabbix" ? "from live Zabbix system.cpu.num" : "from cached Device.cpuCores backfill"})`}
+              style={{
+                marginLeft: 4,
+                color:
+                  row.coresSource === "cache" ? "#7e7e7e"
+                  : row.coresSource === "manual" ? "#7c3aed" // distinct violet so manual overrides are visible at a glance
+                  : "#0c8feb",
+                fontWeight: 500,
+              }}
+              title={`${row.cores} CPU cores (${
+                row.coresSource === "zabbix" ? "from live Zabbix system.cpu.num"
+                : row.coresSource === "manual" ? "manual override — beats live Zabbix because operator set this explicitly"
+                : "from cached Device.cpuCores backfill"
+              })`}
             >
               · {row.cores} cores
             </span>

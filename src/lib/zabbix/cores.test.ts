@@ -139,11 +139,15 @@ function makePrisma(devices: MockDevice[]) {
 }
 
 describe("resolveCoresForHost", () => {
-  it("priority 1: live Zabbix lastvalue wins over everything", async () => {
+  it("priority 1: live Zabbix lastvalue wins over a zabbix-sourced cache", async () => {
+    // Cache was originally populated by a prior Zabbix probe (source='zabbix')
+    // and is now stale (probedAt epoch) with a different value. A fresh probe
+    // should overwrite. Manual overrides are tested separately below — those
+    // are NOT overwritten by Zabbix regardless of staleness.
     const { prisma, updates } = makePrisma([
       {
         id: "d1", sourceHostKey: "hostA",
-        cpuCores: 8, cpuCoresSource: "manual", cpuCoresProbedAt: new Date(0),
+        cpuCores: 8, cpuCoresSource: "zabbix", cpuCoresProbedAt: new Date(0),
         cpuModel: "Intel i3-6100",
       },
     ]);
@@ -159,6 +163,30 @@ describe("resolveCoresForHost", () => {
     expect(updates).toHaveLength(1);
     expect(updates[0].data.cpuCores).toBe(4);
     expect(updates[0].data.cpuCoresSource).toBe("zabbix");
+  });
+
+  it("priority 0: manual override beats live Zabbix even when they disagree", async () => {
+    // The whole point of cpuCoresSource='manual' is that an operator decided
+    // Zabbix is wrong about this host. Without sticky manual, the next Zabbix
+    // read would silently overwrite the override (and stamp source='zabbix')
+    // every minute — exactly the bug the StrongPoint Testlab SCO hit, where
+    // the testlab system.cpu.num returns 1 but the box is actually 4-core.
+    const { prisma, updates } = makePrisma([
+      {
+        id: "d1", sourceHostKey: "hostA",
+        cpuCores: 4, cpuCoresSource: "manual", cpuCoresProbedAt: null,
+        cpuModel: null,
+      },
+    ]);
+    const r = await resolveCoresForHost({
+      hostId: "hostA",
+      zabbixItem: { lastvalue: "1", state: "0" }, // Zabbix says 1 — wrong
+      prisma,
+    });
+    expect(r.value).toBe(4);
+    expect(r.source).toBe("manual");
+    expect(r.coresKnown).toBe(true);
+    expect(updates).toHaveLength(0); // never overwrite manual
   });
 
   it("priority 2: falls back to cached Device.cpuCores when Zabbix unsupported", async () => {
@@ -229,10 +257,11 @@ describe("resolveCoresForHost", () => {
     expect(r.coresKnown).toBe(false);
   });
 
-  it("manual override is preserved — Zabbix match doesn't trigger a write", async () => {
-    // Operator set cpuCores=4 manually (cpuCoresSource='manual'). Zabbix
-    // currently returns the same value 4. We should NOT overwrite the
-    // manual flag with 'zabbix' unless the values disagree.
+  it("manual override is preserved even when Zabbix matches", async () => {
+    // Operator set cpuCores=4 manually. Zabbix also returns 4. We must NOT
+    // upgrade the source from 'manual' → 'zabbix' on a matching read: that
+    // would silently demote the override and leave the host vulnerable to
+    // a future Zabbix glitch overwriting the value.
     const now = new Date();
     const { prisma, updates } = makePrisma([
       {
@@ -247,10 +276,7 @@ describe("resolveCoresForHost", () => {
       prisma,
     });
     expect(r.value).toBe(4);
-    // The current implementation writes through on every successful Zabbix
-    // read whose value matches the cache, but only when the probe is stale
-    // (>TTL). Here probe is fresh (now) so no write happens.
-    expect(r.source).toBe("zabbix");
+    expect(r.source).toBe("manual");
     expect(updates).toHaveLength(0);
   });
 });

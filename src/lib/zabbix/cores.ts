@@ -133,8 +133,31 @@ export async function resolveCoresForHost(
   // and to write through (after step 1). One SELECT keeps it cheap.
   const device = await loadDevice(opts.prisma, opts.deviceId, opts.hostId);
 
+  // ── Step 0 (highest priority): manual override on the Device row.
+  //   Operators set `cpuCoresSource = "manual"` when Zabbix is known to
+  //   misreport `system.cpu.num` for this host. The whole point of the
+  //   manual flag is to STICK — without this branch the next successful
+  //   Zabbix probe would overwrite the manual value (the write-through
+  //   below stamps source="zabbix"), undoing the operator's correction
+  //   silently on the next drill-down. So when source=="manual" with a
+  //   plausible value, we short-circuit here: return the cached value,
+  //   no write-through, no Zabbix fallback. The only way to clear a
+  //   manual override is to edit the Device row directly (Settings UI
+  //   or migration).
+  if (device?.cpuCoresSource === "manual" && device.cpuCores && device.cpuCores >= 1) {
+    return {
+      value: device.cpuCores,
+      source: "manual",
+      coresKnown: true,
+      cacheWritten: false,
+    };
+  }
+
   if (zabbixCores !== null) {
     // Write through if the cached value is missing, stale, or differs.
+    // Manual overrides were already handled above, so any device we reach
+    // here has source ∈ {null, "zabbix", "inferred_from_model"} — all of
+    // which are safe to overwrite with a fresh live reading.
     const shouldRefresh =
       !device ||
       device.cpuCores !== zabbixCores ||
