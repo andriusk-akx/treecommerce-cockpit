@@ -366,6 +366,7 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
             rows={data.hostRows}
             threshold={data.meta.threshold}
             periodLengthDays={data.meta.periodLengthDays}
+            meta={data.meta}
           />
           <div style={{ marginTop: 10, fontSize: 10, color: "#94a3b8", textAlign: "right" }}>
             Generated {new Date(data.meta.generatedAt).toLocaleString("lt-LT")} ·

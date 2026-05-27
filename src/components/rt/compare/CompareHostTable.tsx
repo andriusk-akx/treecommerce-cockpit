@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { CompareHostRow } from "./types";
+import type { CompareHostRow, CompareMeta } from "./types";
+import { exportHostsCsv } from "./CompareExports";
 
 /**
  * Sortable host delta table with inline sparklines and drill-down expansion.
@@ -40,10 +41,12 @@ export function CompareHostTable({
   rows,
   threshold,
   periodLengthDays,
+  meta,
 }: {
   rows: CompareHostRow[];
   threshold: number;
   periodLengthDays: number;
+  meta: CompareMeta;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("deltaPct");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -82,11 +85,23 @@ export function CompareHostTable({
       borderRadius: 8,
       padding: 16,
     }}>
-      <div style={{ display: "flex", alignItems: "baseline", marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "baseline", marginBottom: 8, gap: 8 }}>
         <strong style={{ fontSize: 13, color: PALETTE.text }}>Per-host comparison</strong>
         <span style={{ marginLeft: "auto", fontSize: 11, color: PALETTE.textSec }}>
           {rows.length} hosts · sorted by {sortKey} {sortDir === "asc" ? "↑" : "↓"}
         </span>
+        <button
+          type="button"
+          onClick={() => exportHostsCsv(meta, rows)}
+          style={{
+            padding: "4px 10px", fontSize: 11, fontWeight: 500,
+            background: "#fff", color: PALETTE.text,
+            border: `1px solid ${PALETTE.border}`, borderRadius: 4,
+            cursor: "pointer",
+          }}
+        >
+          ⬇ Export CSV
+        </button>
       </div>
 
       <div style={{ overflowX: "auto" }}>

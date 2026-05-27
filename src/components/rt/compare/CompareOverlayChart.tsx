@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { CompareMeta, CompareOverlay, OverlayPoint } from "./types";
+import { exportOverlayPng } from "./CompareExports";
 
 /**
  * Overlay timeline chart for the Compare-periods sub-view.
@@ -43,6 +44,19 @@ interface Props {
 
 export function CompareOverlayChart({ overlay, meta }: Props) {
   const id = useId();
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const onExport = async () => {
+    if (!svgRef.current) return;
+    setExporting(true);
+    try {
+      await exportOverlayPng(svgRef.current, meta);
+    } catch (e) {
+      console.error("[CompareOverlayChart] PNG export failed:", e);
+    } finally {
+      setExporting(false);
+    }
+  };
   const innerW = VB_W - PAD_LEFT - PAD_RIGHT;
   const innerH = VB_H - PAD_TOP - PAD_BOTTOM;
 
@@ -89,9 +103,10 @@ export function CompareOverlayChart({ overlay, meta }: Props) {
       padding: 16,
       marginBottom: 16,
     }}>
-      <ChartHeader meta={meta} alignment={overlay.alignment} slotMinutes={overlay.slotMinutes} />
+      <ChartHeader meta={meta} alignment={overlay.alignment} slotMinutes={overlay.slotMinutes} onExport={onExport} exporting={exporting} />
       <div style={{ position: "relative" }}>
         <svg
+          ref={svgRef}
           viewBox={`0 0 ${VB_W} ${VB_H}`}
           preserveAspectRatio="none"
           style={{ width: "100%", height: 320, display: "block", userSelect: "none" }}
@@ -298,9 +313,10 @@ function buildPaths(
 }
 
 function ChartHeader({
-  meta, alignment, slotMinutes,
+  meta, alignment, slotMinutes, onExport, exporting,
 }: {
   meta: CompareMeta; alignment: CompareOverlay["alignment"]; slotMinutes: number;
+  onExport: () => void; exporting: boolean;
 }) {
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 16, marginBottom: 8, flexWrap: "wrap" }}>
@@ -312,6 +328,19 @@ function ChartHeader({
       <span style={{ marginLeft: "auto", fontSize: 10, color: "#94a3b8" }}>
         {alignment === "time-of-day" ? "Aligned by time-of-day" : "Aligned by absolute offset"} · {slotMinutes}-min slots
       </span>
+      <button
+        type="button"
+        onClick={onExport}
+        disabled={exporting}
+        style={{
+          padding: "4px 10px", fontSize: 11, fontWeight: 500,
+          background: "#fff", color: PALETTE.text,
+          border: `1px solid ${PALETTE.border}`, borderRadius: 4,
+          cursor: exporting ? "wait" : "pointer",
+        }}
+      >
+        {exporting ? "Exporting…" : "⬇ Export PNG"}
+      </button>
     </div>
   );
 }
