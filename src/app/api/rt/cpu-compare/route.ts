@@ -139,8 +139,14 @@ function isoToVilniusUnix(iso: string, hour: number): number {
       return Math.floor(candidate / 1000);
     }
   }
-  // Fallback: treat as UTC if the locale walk fails.
-  return Math.floor(guessUtc / 1000);
+  // Should be unreachable for Europe/Vilnius midnight: both winter (UTC+2)
+  // and summer (UTC+3) offsets are tried above. If we land here, the host's
+  // Intl data is corrupted or the date is inside a DST gap (e.g. 03:00 on
+  // spring-forward day). Throw loudly instead of silently returning a UTC
+  // offset that would be 2-3h wrong.
+  throw new Error(
+    `isoToVilniusUnix: could not resolve ${iso} ${String(hour).padStart(2, "0")}:00 to Vilnius local time — possible DST gap or Intl misconfiguration`,
+  );
 }
 
 function validate(req: NextRequest): { ok: true; q: ParsedQuery } | { ok: false; resp: NextResponse } {

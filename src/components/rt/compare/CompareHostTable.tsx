@@ -245,31 +245,40 @@ function HostRow({
 }
 
 function Sparkline({ a, b, periodLengthDays }: { a: number[]; b: number[]; periodLengthDays: number }) {
-  const W = 120;
+  const days = Math.max(periodLengthDays, 1);
+  // For very long periods (42-day max) the bars would be sub-pixel narrow at
+  // the default 120 px width. Scale the chart width proportionally so each
+  // A/B bar pair is at least ~3 px wide.
+  const MIN_PAIR_PX = 3;
+  const W = Math.max(120, days * MIN_PAIR_PX * 2 + 4);
   const H = 32;
   const PAD = 1;
+  // max is guaranteed ≥ 1 by Math.max(1, ...), so the previous `max === 0`
+  // branch was dead; height math below assumes positive max.
   const max = Math.max(1, ...a, ...b);
   // Pad both sparklines to periodLengthDays length so missing days render as 0.
   const padTo = (arr: number[]) => {
-    if (arr.length >= periodLengthDays) return arr.slice(0, periodLengthDays);
+    if (arr.length >= days) return arr.slice(0, days);
     const out = arr.slice();
-    while (out.length < periodLengthDays) out.push(0);
+    while (out.length < days) out.push(0);
     return out;
   };
   const aPad = padTo(a);
   const bPad = padTo(b);
-  const barW = (W - PAD * 2) / Math.max(periodLengthDays, 1) / 2 - 1;
+  // Two bars per day (A then B) with a 1-unit gap between them.
+  const slotW = (W - PAD * 2) / days;
+  const barW = Math.max(1, slotW / 2 - 0.5);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ display: "block" }}>
       {aPad.map((v, i) => {
-        const x = PAD + (i * (W - PAD * 2)) / Math.max(periodLengthDays, 1);
-        const h = max === 0 ? 0 : ((v / max) * (H - 2));
+        const x = PAD + i * slotW;
+        const h = (v / max) * (H - 2);
         const y = H - 1 - h;
         return <rect key={`a-${i}`} x={x} y={y} width={barW} height={h} fill={PALETTE.aBlue} rx={1} />;
       })}
       {bPad.map((v, i) => {
-        const x = PAD + (i * (W - PAD * 2)) / Math.max(periodLengthDays, 1) + barW + 1;
-        const h = max === 0 ? 0 : ((v / max) * (H - 2));
+        const x = PAD + i * slotW + barW + 0.5;
+        const h = (v / max) * (H - 2);
         const y = H - 1 - h;
         return <rect key={`b-${i}`} x={x} y={y} width={barW} height={h} fill={PALETTE.bOrange} rx={1} />;
       })}
@@ -291,7 +300,10 @@ function Drilldown({
       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: PALETTE.text }}>
         Per-day minutes above {threshold}% — {row.hostName}
       </div>
-      <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
+      {/* Horizontal scroll for long periods — 42-day max would otherwise
+          squeeze each column to ~15-20px, making the numbers unreadable. */}
+      <div style={{ overflowX: "auto" }}>
+      <table style={{ fontSize: 11, borderCollapse: "collapse", minWidth: "100%" }}>
         <thead>
           <tr>
             <th style={{ textAlign: "left", padding: "4px 8px", color: PALETTE.textSec, fontWeight: 600 }}>Day</th>
@@ -332,6 +344,7 @@ function Drilldown({
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

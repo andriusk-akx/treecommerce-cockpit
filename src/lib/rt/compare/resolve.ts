@@ -53,6 +53,16 @@ export async function resolvePilotHosts(
   for (const d of devices) {
     const key = d.sourceHostKey || d.name;
     if (!key) continue;
+    if (keyToDevice.has(key)) {
+      // Two pilot devices share the same sourceHostKey/name. Earlier device
+      // wins (keep the first match); log loudly so the data-entry mistake
+      // surfaces. The later device's metrics would be silently attributed
+      // to the earlier device otherwise.
+      console.warn(
+        `[cpu-compare resolve] duplicate host key "${key}": devices ${keyToDevice.get(key)?.id} and ${d.id} — keeping first, ignoring second`,
+      );
+      continue;
+    }
     expectedHostKeys.add(key);
     keyToDevice.set(key, d);
   }

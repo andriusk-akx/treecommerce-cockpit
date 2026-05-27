@@ -25,7 +25,9 @@ function downloadBlob(blob: Blob, filename: string): void {
 function csvCell(v: string | number | null): string {
   if (v === null || v === undefined) return "";
   const s = String(v);
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  // Quote when value contains any of: quote, comma, newline (LF or CR — CR
+  // shows up in Windows-pasted labels and would otherwise break the row).
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
 
@@ -89,11 +91,18 @@ export async function exportOverlayPng(svg: SVGSVGElement, meta: CompareMeta): P
   const rect = svg.getBoundingClientRect();
   const widthPx = Math.max(rect.width, 800);
   const heightPx = Math.max(rect.height, 320);
-  // Clone so we can mutate width/height without affecting the rendered chart.
+  // Clone so we can mutate without affecting the rendered chart.
   const clone = svg.cloneNode(true) as SVGSVGElement;
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   clone.setAttribute("width", String(widthPx));
   clone.setAttribute("height", String(heightPx));
+  // STRIP <foreignObject> nodes from the clone — they cause the rasterised
+  // canvas to be marked "tainted" by Chrome/Safari, which then refuses
+  // toBlob() with SecurityError. The chart's hover tooltip uses
+  // foreignObject; without this strip, an export-after-hover would throw.
+  // The exported PNG therefore omits hover state on purpose — viewers
+  // never see the tooltip in the static image.
+  clone.querySelectorAll("foreignObject").forEach((n) => n.remove());
   const xml = serializer.serializeToString(clone);
   // Wrap in a data URL via blob so browsers handle UTF-8 correctly.
   const svgBlob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });

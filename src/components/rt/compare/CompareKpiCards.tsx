@@ -66,7 +66,9 @@ function KpiCard({ label, a, b, deltaAbs, deltaPct, unit }: KpiSpec) {
   const cls = classifyDelta(deltaAbs, unit);
   const color = cls === "improve" ? PALETTE.improve : cls === "regress" ? PALETTE.regress : PALETTE.neutral;
   const valueSuffix = unit === "%" || unit === "pp" ? "%" : "";
-  const deltaSuffix = unit === "min" ? " min" : unit === "pp" ? " pp" : " pp";
+  // Δ always in pp for %/pp units (delta of percentages is in
+  // percentage points), and in min for the minutes metric.
+  const deltaSuffix = unit === "min" ? " min" : " pp";
 
   return (
     <div style={{

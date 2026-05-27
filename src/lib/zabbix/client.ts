@@ -611,7 +611,12 @@ export class ZabbixClient {
       }
     };
 
-    const PER_ITEM_LIMIT = 50000;
+    // 42 d × 1440 samples/day = 60 480 history records per item in the worst
+    // case. 50 000 would silently drop the oldest ~10 k samples (sortorder
+    // DESC keeps recent, clips old) — that's a real correctness bug for the
+    // max-range compare query, so bump to 75 000 to cover the full window
+    // with headroom. Zabbix per-call payload is still well under 1 MB.
+    const PER_ITEM_LIMIT = 75000;
     const CONCURRENCY = 24;
     const trendPromise = (async () => {
       try {

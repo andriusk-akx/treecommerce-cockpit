@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CompareMeta, CompareOverlay, OverlayPoint } from "./types";
 import { exportOverlayPng } from "./CompareExports";
 
@@ -43,7 +43,6 @@ interface Props {
 }
 
 export function CompareOverlayChart({ overlay, meta }: Props) {
-  const id = useId();
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [exporting, setExporting] = useState(false);
   const onExport = async () => {
@@ -78,6 +77,13 @@ export function CompareOverlayChart({ overlay, meta }: Props) {
 
   // ── Hover state ────────────────────────────────────────────────────
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  // Reset hover index when the overlay payload changes (new Run, new
+  // alignment). Without this, an idx pointing into the old `points` array
+  // can land out-of-bounds for the new array and render a phantom hover
+  // marker outside the chart bounds.
+  useEffect(() => {
+    setHoverIdx(null);
+  }, [overlay.points, overlay.alignment, overlay.slotMinutes]);
   const onMove = (evt: React.MouseEvent<SVGSVGElement>) => {
     const svg = evt.currentTarget;
     const rect = svg.getBoundingClientRect();
@@ -93,7 +99,11 @@ export function CompareOverlayChart({ overlay, meta }: Props) {
     setHoverIdx(idx);
   };
   const onLeave = () => setHoverIdx(null);
-  const hovered = hoverIdx != null ? overlay.points[hoverIdx] : null;
+  // Defensive bounds check — overlay.points length can change before the
+  // useEffect above runs (during the same render after a payload swap).
+  const hovered = hoverIdx != null && hoverIdx < overlay.points.length
+    ? overlay.points[hoverIdx]
+    : null;
 
   return (
     <div style={{
@@ -108,7 +118,10 @@ export function CompareOverlayChart({ overlay, meta }: Props) {
         <svg
           ref={svgRef}
           viewBox={`0 0 ${VB_W} ${VB_H}`}
-          preserveAspectRatio="none"
+          // Default preserveAspectRatio = "xMidYMid meet" keeps the chart's
+          // intrinsic aspect ratio so hover dots stay circular instead of
+          // being squashed to ellipses by `none` stretching. The container
+          // has a fixed 320px height so the chart still fills horizontally.
           style={{ width: "100%", height: 320, display: "block", userSelect: "none" }}
           onMouseMove={onMove}
           onMouseLeave={onLeave}
@@ -186,7 +199,6 @@ export function CompareOverlayChart({ overlay, meta }: Props) {
             </foreignObject>
           )}
         </svg>
-        <span style={{ position: "absolute", top: 4, right: 8, fontSize: 9, color: "#cbd5e1" }}>{id.slice(-4)}</span>
       </div>
     </div>
   );

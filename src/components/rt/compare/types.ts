@@ -60,8 +60,10 @@ export interface CompareOverlay {
   alignment: CompareAlignment;
   /** Total slots on the X axis. */
   totalSlots: number;
-  /** Slot width in minutes — 1 for absolute-offset (minute resolution),
-   *  1 for time-of-day (24h * 60 minutes). */
+  /** Slot width in minutes — auto-picked by the aligner. Time-of-day is
+   *  always 5-min slots (288/period). Absolute-offset scales from 1 min
+   *  (short periods) up to 240 min (max-retention 42-day windows) so the
+   *  total slot count stays under ~336. */
   slotMinutes: number;
   points: OverlayPoint[];
 }

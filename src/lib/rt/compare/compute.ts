@@ -173,16 +173,21 @@ function groupSamplesByHost(samples: RawSample[]): Map<string, RawSample[]> {
   return m;
 }
 
+/**
+ * Sample-weighted mean across daily aggregates.
+ *
+ * Weight per day = totalSamples (1 per minute of history) if any history was
+ * received, otherwise 1440 — representing a full 24h day reconstructed from
+ * 24 hourly trend aggregates. Using 60 (one hour) would make trend-only days
+ * weigh ~24× less than history days, so a 7-day window that's half-on-trend
+ * would get pulled almost entirely toward the history half. 1440 keeps the
+ * two sources roughly equivalent per day.
+ */
 function weightedMean(daily: PeriodPayload["daily"]): number {
   let sum = 0;
   let total = 0;
   for (const d of daily) {
-    // `avg` is the per-day mean; weight by `totalSamples + 60*hourlyCount`
-    // would be ideal, but we only carry totalSamples here. For days with
-    // zero raw samples (trend-only) treat each day as one hourly aggregate
-    // representing 60 minutes — gives trend-only days a non-zero weight
-    // so the period mean isn't dominated by the recent 14d window.
-    const weight = d.totalSamples > 0 ? d.totalSamples : 60;
+    const weight = d.totalSamples > 0 ? d.totalSamples : 1440;
     sum += d.avg * weight;
     total += weight;
   }
@@ -206,8 +211,10 @@ export function buildCompareResponse(input: ComputeInput): CompareResponse {
   // Fleet-wide KPIs
   const sumA = hostRows.reduce((s, r) => s + r.aMinutesAbove, 0);
   const sumB = hostRows.reduce((s, r) => s + r.bMinutesAbove, 0);
-  const meanA = weightedFleetMean(input.periodA.daily);
-  const meanB = weightedFleetMean(input.periodB.daily);
+  // Fleet mean: same weighting logic as per-host, but the input is the
+  // flat array of ALL hosts' daily entries.
+  const meanA = weightedMean(input.periodA.daily);
+  const meanB = weightedMean(input.periodB.daily);
   const p95A = p95(input.periodA.samples.map((s) => s.value));
   const p95B = p95(input.periodB.samples.map((s) => s.value));
 
@@ -254,17 +261,6 @@ export function buildCompareResponse(input: ComputeInput): CompareResponse {
     overlay,
     hostRows,
   };
-}
-
-function weightedFleetMean(daily: PeriodPayload["daily"]): number {
-  let sum = 0;
-  let total = 0;
-  for (const d of daily) {
-    const weight = d.totalSamples > 0 ? d.totalSamples : 60;
-    sum += d.avg * weight;
-    total += weight;
-  }
-  return total === 0 ? 0 : sum / total;
 }
 
 function roundTenth(v: number): number {

@@ -10,7 +10,7 @@
  * stitches together the KPI cards, overlay chart, and host delta table.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
 import { useRtFilters } from "../RtFiltersContext";
 import {
@@ -97,15 +97,12 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   const { filters } = useRtFilters();
   const persisted = useMemo(() => loadPersisted(pilot.id), [pilot.id]);
 
-  // Default range: most recent week vs week before.
-  const today = todayIsoUtc();
-  const defaultAFrom = persisted?.aFrom ?? addDaysIso(today, -14);
-  const defaultATo = persisted?.aTo ?? addDaysIso(today, -8);
-  const defaultBFrom = persisted?.bFrom ?? addDaysIso(today, -7);
-
-  const [aFrom, setAFrom] = useState(defaultAFrom);
-  const [aTo, setATo] = useState(defaultATo);
-  const [bFrom, setBFrom] = useState(defaultBFrom);
+  // Default range: most recent week vs week before. Lazy init so the date
+  // math runs once on mount instead of on every render — `todayIsoUtc()`
+  // includes a `new Date()` call that would otherwise re-evaluate.
+  const [aFrom, setAFrom] = useState<string>(() => persisted?.aFrom ?? addDaysIso(todayIsoUtc(), -14));
+  const [aTo, setATo] = useState<string>(() => persisted?.aTo ?? addDaysIso(todayIsoUtc(), -8));
+  const [bFrom, setBFrom] = useState<string>(() => persisted?.bFrom ?? addDaysIso(todayIsoUtc(), -7));
   const [aLabel, setALabel] = useState(persisted?.aLabel ?? "");
   const [bLabel, setBLabel] = useState(persisted?.bLabel ?? "");
   const [alignment, setAlignment] = useState<CompareAlignment>(persisted?.alignment ?? "time-of-day");
@@ -134,6 +131,14 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
     if (aLength < 1) return "Periods must be at least 1 day long.";
     if (aLength > 42) return "Periods cannot exceed 42 days (Zabbix retention).";
     if (rangesOverlap(aFrom, aTo, bFrom, bTo)) return "Period A and Period B must not overlap.";
+    // Period start age — Zabbix history.get retention is ~42 days. Catch this
+    // client-side so the user gets immediate feedback instead of waiting for
+    // a server 422.
+    const today = todayIsoUtc();
+    const ageA = daysInclusive(aFrom, today) - 1;
+    const ageB = daysInclusive(bFrom, today) - 1;
+    const oldest = Math.max(ageA, ageB);
+    if (oldest > 42) return `Period start is older than 42 days (current oldest = ${oldest}d). Zabbix history retention won't cover it.`;
     return null;
   }, [aFrom, aTo, bFrom, bTo, aLength]);
 
@@ -142,9 +147,18 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [useMock, setUseMock] = useState(false);
+  // Abort the in-flight request if the user clicks Run again before it
+  // completes — without this, the slower response can overwrite the newer
+  // one and the user sees stale data.
+  const abortRef = useRef<AbortController | null>(null);
 
-  const runComparison = useCallback(async () => {
+  // Plain function — useCallback would only matter if a child memoised on
+  // this reference, which none do.
+  const runComparison = async () => {
     if (validationError) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setError(null);
     try {
@@ -159,22 +173,27 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
       if (aLabel) url.searchParams.set("aLabel", aLabel);
       if (bLabel) url.searchParams.set("bLabel", bLabel);
       if (useMock) url.searchParams.set("mock", "1");
-      const res = await fetch(url.toString(), { cache: "no-store" });
+      const res = await fetch(url.toString(), { cache: "no-store", signal: controller.signal });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error(typeof body?.error === "string" ? body.error : `HTTP ${res.status}`);
       }
       const payload = (await res.json()) as CompareResponse;
+      // Bail if a newer request superseded us between fetch and resolve.
+      if (abortRef.current !== controller) return;
       setData(payload);
       setShowInheritedHint(false);
       savePersisted(pilot.id, { aFrom, aTo, bFrom, aLabel, bLabel, threshold, alignment });
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setError(e instanceof Error ? e.message : "Failed to load comparison");
       setData(null);
     } finally {
-      setLoading(false);
+      if (abortRef.current === controller) {
+        setLoading(false);
+      }
     }
-  }, [aFrom, aTo, bFrom, bTo, aLabel, bLabel, threshold, alignment, pilot.id, validationError, useMock]);
+  };
 
   useEffect(() => {
     savePersisted(pilot.id, { aFrom, aTo, bFrom, aLabel, bLabel, threshold, alignment });
