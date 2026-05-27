@@ -1,0 +1,539 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1900" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <defs>
+    <style>
+      .frame { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; rx: 8; }
+      .panel { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1; rx: 6; }
+      .panel-hd { fill: #f1f5f9; stroke: #e2e8f0; stroke-width: 1; rx: 6; }
+      .label { font-size: 11px; fill: #475569; }
+      .label-sm { font-size: 10px; fill: #64748b; }
+      .label-strong { font-size: 12px; fill: #0f172a; font-weight: 600; }
+      .heading { font-size: 14px; fill: #0f172a; font-weight: 600; }
+      .title { font-size: 18px; fill: #0f172a; font-weight: 700; }
+      .muted { font-size: 10px; fill: #94a3b8; }
+      .input { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1; rx: 4; }
+      .input-locked { fill: #f1f5f9; stroke: #cbd5e1; stroke-width: 1; rx: 4; }
+      .btn-primary { fill: #2563eb; stroke: none; rx: 6; }
+      .btn-secondary { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1; rx: 6; }
+      .btn-tab-active { fill: #0f172a; stroke: none; rx: 6; }
+      .btn-tab-idle { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; rx: 6; }
+      .btn-text-light { font-size: 12px; fill: #ffffff; font-weight: 600; }
+      .btn-text-dark { font-size: 12px; fill: #0f172a; font-weight: 500; }
+      .kpi-card { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; rx: 8; }
+      .kpi-label { font-size: 11px; fill: #64748b; font-weight: 500; }
+      .kpi-value { font-size: 22px; fill: #0f172a; font-weight: 700; }
+      .delta-pos { font-size: 13px; fill: #ef4444; font-weight: 600; } /* worsening (red) */
+      .delta-neg { font-size: 13px; fill: #16a34a; font-weight: 600; } /* improving (green) */
+      .a-color { fill: #2563eb; } /* blue-600 */
+      .b-color { fill: #f97316; } /* orange-500 */
+      .grid-line { stroke: #e2e8f0; stroke-width: 0.5; }
+      .threshold-line { stroke: #ef4444; stroke-width: 1.5; stroke-dasharray: 4 4; fill: none; }
+      .table-row-alt { fill: #f8fafc; }
+      .chip-blue { fill: #dbeafe; rx: 12; }
+      .chip-orange { fill: #ffedd5; rx: 12; }
+      .chip-green { fill: #dcfce7; rx: 12; }
+      .chip-red { fill: #fee2e2; rx: 12; }
+      .chip-amber { fill: #fef3c7; rx: 12; }
+      .icon-circle { fill: #1f2937; }
+    </style>
+    <pattern id="dotgrid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.6" fill="#e2e8f0"/>
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1400" height="1900" fill="#f1f5f9"/>
+
+  <!-- Title -->
+  <text x="40" y="36" class="title">CPU Timeline · Compare periods (RT) — wireframe v1</text>
+  <text x="40" y="56" class="label">Sub-view inside CPU Timeline tab. URL: /retellect/[pilotId]?tab=timeline&amp;view=compare</text>
+
+  <!-- ============ Top tab strip (existing pilot tabs) ============ -->
+  <g transform="translate(40, 80)">
+    <rect class="panel-hd" width="1320" height="44"/>
+    <text x="16" y="28" class="label-strong">Rimi SCO Investigation · Retellect pilot</text>
+    <g transform="translate(720, 8)">
+      <rect class="btn-tab-idle" width="80" height="28"/><text x="40" y="18" text-anchor="middle" class="btn-text-dark">Overview</text>
+      <rect class="btn-tab-idle" x="86" width="90" height="28"/><text x="131" y="18" text-anchor="middle" class="btn-text-dark">CPU Matrix</text>
+      <rect class="btn-tab-active" x="182" width="100" height="28"/><text x="232" y="18" text-anchor="middle" class="btn-text-light">CPU Timeline</text>
+      <rect class="btn-tab-idle" x="288" width="100" height="28"/><text x="338" y="18" text-anchor="middle" class="btn-text-dark">Host Inventory</text>
+      <rect class="btn-tab-idle" x="394" width="110" height="28"/><text x="449" y="18" text-anchor="middle" class="btn-text-dark">CPU Comparison</text>
+      <rect class="btn-tab-idle" x="510" width="80" height="28"/><text x="550" y="18" text-anchor="middle" class="btn-text-dark">Incidents</text>
+    </g>
+  </g>
+
+  <!-- ============ Sub-view selector ============ -->
+  <g transform="translate(40, 140)">
+    <text x="0" y="14" class="muted">Sub-view selector (NEW)</text>
+    <rect class="frame" y="22" width="320" height="44"/>
+    <rect class="btn-tab-idle" x="8" y="30" width="100" height="28"/>
+    <text x="58" y="48" text-anchor="middle" class="btn-text-dark">Heatmap</text>
+    <rect class="btn-tab-active" x="116" y="30" width="160" height="28"/>
+    <text x="196" y="48" text-anchor="middle" class="btn-text-light">Compare periods</text>
+  </g>
+
+  <!-- ============ Filter bar ============ -->
+  <g transform="translate(40, 220)">
+    <text x="0" y="14" class="muted">Filter bar — two periods locked to equal length</text>
+    <rect class="frame" y="22" width="1320" height="160"/>
+
+    <!-- Row 1: Period A -->
+    <g transform="translate(20, 44)">
+      <rect class="chip-blue" width="76" height="22"/>
+      <text x="38" y="16" text-anchor="middle" class="label-strong" fill="#1e40af">Period A</text>
+      <text x="92" y="16" class="label">From</text>
+      <rect class="input" x="128" y="2" width="120" height="20"/>
+      <text x="188" y="16" text-anchor="middle" class="label-strong">2026-04-25</text>
+      <text x="262" y="16" class="label">To</text>
+      <rect class="input" x="288" y="2" width="120" height="20"/>
+      <text x="348" y="16" text-anchor="middle" class="label-strong">2026-05-01</text>
+      <text x="418" y="16" class="muted">(7 days)</text>
+      <text x="488" y="16" class="label">Label</text>
+      <rect class="input" x="528" y="2" width="280" height="20"/>
+      <text x="540" y="16" class="label-strong">Pre BES rollout</text>
+    </g>
+
+    <!-- Row 2: Period B -->
+    <g transform="translate(20, 78)">
+      <rect class="chip-orange" width="76" height="22"/>
+      <text x="38" y="16" text-anchor="middle" class="label-strong" fill="#9a3412">Period B</text>
+      <text x="92" y="16" class="label">From</text>
+      <rect class="input" x="128" y="2" width="120" height="20"/>
+      <text x="188" y="16" text-anchor="middle" class="label-strong">2026-05-10</text>
+      <text x="262" y="16" class="label">To</text>
+      <rect class="input-locked" x="288" y="2" width="120" height="20"/>
+      <text x="348" y="16" text-anchor="middle" class="label-strong" fill="#64748b">2026-05-16</text>
+      <text x="418" y="16" class="muted">(auto, 7d)</text>
+      <g transform="translate(410, -4)">
+        <circle r="6" cx="6" cy="14" fill="#cbd5e1"/>
+        <text x="6" y="18" text-anchor="middle" font-size="9" fill="#1f2937" font-weight="700">🔒</text>
+      </g>
+      <text x="488" y="16" class="label">Label</text>
+      <rect class="input" x="528" y="2" width="280" height="20"/>
+      <text x="540" y="16" class="label-strong">Post BES rollout</text>
+    </g>
+
+    <!-- Row 3: Threshold + hosts + run -->
+    <g transform="translate(20, 116)">
+      <text x="0" y="20" class="label">Threshold</text>
+      <g transform="translate(60, 4)">
+        <rect class="btn-tab-idle" width="34" height="24"/><text x="17" y="16" text-anchor="middle" class="btn-text-dark">50%</text>
+        <rect class="btn-tab-idle" x="36" width="34" height="24"/><text x="53" y="16" text-anchor="middle" class="btn-text-dark">60%</text>
+        <rect class="btn-tab-active" x="72" width="34" height="24"/><text x="89" y="16" text-anchor="middle" class="btn-text-light">70%</text>
+        <rect class="btn-tab-idle" x="108" width="34" height="24"/><text x="125" y="16" text-anchor="middle" class="btn-text-dark">80%</text>
+        <rect class="btn-tab-idle" x="144" width="34" height="24"/><text x="161" y="16" text-anchor="middle" class="btn-text-dark">90%</text>
+      </g>
+      <text x="260" y="20" class="label">Hosts</text>
+      <rect class="input" x="296" y="6" width="180" height="22"/>
+      <text x="306" y="20" class="label-strong">All 6 hosts ▾</text>
+      <text x="500" y="20" class="label">Alignment</text>
+      <g transform="translate(568, 4)">
+        <rect class="btn-tab-idle" width="100" height="24"/><text x="50" y="16" text-anchor="middle" class="btn-text-dark">Absolute</text>
+        <rect class="btn-tab-active" x="102" width="120" height="24"/><text x="162" y="16" text-anchor="middle" class="btn-text-light">Time-of-day</text>
+      </g>
+      <rect class="btn-primary" x="1120" y="4" width="180" height="28"/>
+      <text x="1210" y="22" text-anchor="middle" class="btn-text-light">▶ Run comparison</text>
+    </g>
+  </g>
+
+  <!-- ============ Data quality warning ribbon ============ -->
+  <g transform="translate(40, 400)">
+    <rect class="chip-amber" width="1320" height="28" rx="6"/>
+    <text x="16" y="18" class="label-strong" fill="#92400e">⚠ Period A (Apr 25–May 1) is older than 14 days. Minute-level data is partial; some metrics derived from hourly trend.</text>
+  </g>
+
+  <!-- ============ KPI cards ============ -->
+  <g transform="translate(40, 444)">
+    <text x="0" y="14" class="muted">Headline KPI cards (Δ = B − A; green = improvement, red = regression, neutral ±2pp = noise)</text>
+
+    <!-- Card 1 -->
+    <g transform="translate(0, 24)">
+      <rect class="kpi-card" width="320" height="124"/>
+      <text x="16" y="24" class="kpi-label">Minutes &gt; 70% CPU</text>
+      <g transform="translate(16, 36)">
+        <rect class="chip-blue" width="20" height="14" rx="3"/>
+        <text x="10" y="11" text-anchor="middle" font-size="9" fill="#1e40af" font-weight="700">A</text>
+        <text x="30" y="11" class="label-strong">1 240</text>
+        <text x="84" y="11" class="muted">min</text>
+      </g>
+      <g transform="translate(16, 56)">
+        <rect class="chip-orange" width="20" height="14" rx="3"/>
+        <text x="10" y="11" text-anchor="middle" font-size="9" fill="#9a3412" font-weight="700">B</text>
+        <text x="30" y="11" class="label-strong">480</text>
+        <text x="84" y="11" class="muted">min</text>
+      </g>
+      <text x="16" y="100" class="kpi-label">Δ</text>
+      <text x="40" y="104" class="delta-neg">−760 min</text>
+      <text x="140" y="104" class="delta-neg">(−61.3%)</text>
+    </g>
+
+    <!-- Card 2 -->
+    <g transform="translate(336, 24)">
+      <rect class="kpi-card" width="320" height="124"/>
+      <text x="16" y="24" class="kpi-label">Mean CPU</text>
+      <g transform="translate(16, 36)">
+        <rect class="chip-blue" width="20" height="14" rx="3"/>
+        <text x="10" y="11" text-anchor="middle" font-size="9" fill="#1e40af" font-weight="700">A</text>
+        <text x="30" y="11" class="label-strong">58.3%</text>
+      </g>
+      <g transform="translate(16, 56)">
+        <rect class="chip-orange" width="20" height="14" rx="3"/>
+        <text x="10" y="11" text-anchor="middle" font-size="9" fill="#9a3412" font-weight="700">B</text>
+        <text x="30" y="11" class="label-strong">41.7%</text>
+      </g>
+      <text x="16" y="100" class="kpi-label">Δ</text>
+      <text x="40" y="104" class="delta-neg">−16.6 pp</text>
+      <text x="140" y="104" class="delta-neg">(−28.5%)</text>
+    </g>
+
+    <!-- Card 3 -->
+    <g transform="translate(672, 24)">
+      <rect class="kpi-card" width="320" height="124"/>
+      <text x="16" y="24" class="kpi-label">P95 CPU</text>
+      <g transform="translate(16, 36)">
+        <rect class="chip-blue" width="20" height="14" rx="3"/>
+        <text x="10" y="11" text-anchor="middle" font-size="9" fill="#1e40af" font-weight="700">A</text>
+        <text x="30" y="11" class="label-strong">84.1%</text>
+      </g>
+      <g transform="translate(16, 56)">
+        <rect class="chip-orange" width="20" height="14" rx="3"/>
+        <text x="10" y="11" text-anchor="middle" font-size="9" fill="#9a3412" font-weight="700">B</text>
+        <text x="30" y="11" class="label-strong">71.5%</text>
+      </g>
+      <text x="16" y="100" class="kpi-label">Δ</text>
+      <text x="40" y="104" class="delta-neg">−12.6 pp</text>
+      <text x="140" y="104" class="delta-neg">(−15.0%)</text>
+    </g>
+
+    <!-- Card 4 -->
+    <g transform="translate(1008, 24)">
+      <rect class="kpi-card" width="320" height="124"/>
+      <text x="16" y="24" class="kpi-label">% time above 70%</text>
+      <g transform="translate(16, 36)">
+        <rect class="chip-blue" width="20" height="14" rx="3"/>
+        <text x="10" y="11" text-anchor="middle" font-size="9" fill="#1e40af" font-weight="700">A</text>
+        <text x="30" y="11" class="label-strong">12.3%</text>
+      </g>
+      <g transform="translate(16, 56)">
+        <rect class="chip-orange" width="20" height="14" rx="3"/>
+        <text x="10" y="11" text-anchor="middle" font-size="9" fill="#9a3412" font-weight="700">B</text>
+        <text x="30" y="11" class="label-strong">4.8%</text>
+      </g>
+      <text x="16" y="100" class="kpi-label">Δ</text>
+      <text x="40" y="104" class="delta-neg">−7.5 pp</text>
+      <text x="140" y="104" class="delta-neg">(−61.0%)</text>
+    </g>
+  </g>
+
+  <!-- ============ Overlay timeline chart ============ -->
+  <g transform="translate(40, 600)">
+    <text x="0" y="14" class="muted">Overlay timeline (A=blue, B=orange) — alignment: time-of-day</text>
+    <rect class="frame" y="22" width="1320" height="380"/>
+
+    <!-- Chart header -->
+    <g transform="translate(20, 42)">
+      <text class="heading">Mean CPU across selected hosts</text>
+      <g transform="translate(500, -4)">
+        <rect class="chip-blue" width="14" height="14" rx="2"/>
+        <text x="20" y="11" class="label-strong" fill="#1e40af">Pre BES rollout</text>
+        <text x="120" y="11" class="muted">(Apr 25 – May 1)</text>
+        <rect class="chip-orange" x="240" width="14" height="14" rx="2"/>
+        <text x="260" y="11" class="label-strong" fill="#9a3412">Post BES rollout</text>
+        <text x="370" y="11" class="muted">(May 10 – May 16)</text>
+      </g>
+      <g transform="translate(1100, -4)">
+        <rect class="btn-secondary" width="120" height="22"/>
+        <text x="60" y="15" text-anchor="middle" class="btn-text-dark">⬇ Export PNG</text>
+      </g>
+    </g>
+
+    <!-- Y axis labels and grid -->
+    <g transform="translate(60, 70)">
+      <text x="-12" y="14" text-anchor="end" class="label-sm">100%</text>
+      <line x1="0" y1="10" x2="1240" y2="10" class="grid-line"/>
+      <text x="-12" y="74" text-anchor="end" class="label-sm">75%</text>
+      <line x1="0" y1="70" x2="1240" y2="70" class="grid-line"/>
+      <text x="-12" y="134" text-anchor="end" class="label-sm">50%</text>
+      <line x1="0" y1="130" x2="1240" y2="130" class="grid-line"/>
+      <text x="-12" y="194" text-anchor="end" class="label-sm">25%</text>
+      <line x1="0" y1="190" x2="1240" y2="190" class="grid-line"/>
+      <text x="-12" y="254" text-anchor="end" class="label-sm">0%</text>
+      <line x1="0" y1="250" x2="1240" y2="250" class="grid-line"/>
+
+      <!-- Threshold line at 70% -->
+      <line x1="0" y1="82" x2="1240" y2="82" class="threshold-line"/>
+      <text x="1244" y="85" class="label-sm" fill="#ef4444">70%</text>
+
+      <!-- Period A curve (blue) -->
+      <path d="M 0,220 L 50,210 L 100,200 L 150,180 L 200,140 L 250,90 L 300,60 L 350,55 L 400,75 L 450,110 L 500,95 L 550,80 L 600,70 L 650,75 L 700,90 L 750,115 L 800,135 L 850,150 L 900,170 L 950,185 L 1000,195 L 1050,210 L 1100,220 L 1150,225 L 1200,230 L 1240,230"
+            fill="none" stroke="#2563eb" stroke-width="2.5"/>
+      <!-- Period A fill (subtle) -->
+      <path d="M 0,220 L 50,210 L 100,200 L 150,180 L 200,140 L 250,90 L 300,60 L 350,55 L 400,75 L 450,110 L 500,95 L 550,80 L 600,70 L 650,75 L 700,90 L 750,115 L 800,135 L 850,150 L 900,170 L 950,185 L 1000,195 L 1050,210 L 1100,220 L 1150,225 L 1200,230 L 1240,230 L 1240,250 L 0,250 Z"
+            fill="#2563eb" opacity="0.08"/>
+
+      <!-- Period B curve (orange, lower) -->
+      <path d="M 0,232 L 50,225 L 100,220 L 150,210 L 200,190 L 250,160 L 300,140 L 350,135 L 400,150 L 450,170 L 500,160 L 550,150 L 600,145 L 650,150 L 700,160 L 750,175 L 800,185 L 850,195 L 900,205 L 950,215 L 1000,222 L 1050,230 L 1100,235 L 1150,238 L 1200,240 L 1240,240"
+            fill="none" stroke="#f97316" stroke-width="2.5"/>
+      <path d="M 0,232 L 50,225 L 100,220 L 150,210 L 200,190 L 250,160 L 300,140 L 350,135 L 400,150 L 450,170 L 500,160 L 550,150 L 600,145 L 650,150 L 700,160 L 750,175 L 800,185 L 850,195 L 900,205 L 950,215 L 1000,222 L 1050,230 L 1100,235 L 1150,238 L 1200,240 L 1240,240 L 1240,250 L 0,250 Z"
+            fill="#f97316" opacity="0.06"/>
+
+      <!-- X axis -->
+      <line x1="0" y1="250" x2="1240" y2="250" stroke="#94a3b8" stroke-width="1"/>
+      <text x="0" y="270" class="label-sm">00:00</text>
+      <text x="155" y="270" text-anchor="middle" class="label-sm">04:00</text>
+      <text x="310" y="270" text-anchor="middle" class="label-sm">08:00</text>
+      <text x="465" y="270" text-anchor="middle" class="label-sm">12:00</text>
+      <text x="620" y="270" text-anchor="middle" class="label-sm">16:00</text>
+      <text x="775" y="270" text-anchor="middle" class="label-sm">20:00</text>
+      <text x="930" y="270" text-anchor="middle" class="label-sm">00:00</text>
+      <text x="1085" y="270" text-anchor="middle" class="label-sm">04:00</text>
+      <text x="1240" y="270" text-anchor="middle" class="label-sm">08:00</text>
+
+      <!-- Hover tooltip mockup -->
+      <g transform="translate(320, -10)">
+        <rect class="kpi-card" width="200" height="68" rx="4"/>
+        <text x="10" y="16" class="label-sm">Tue 10:30 (weekday-aligned)</text>
+        <g transform="translate(10, 28)">
+          <rect class="chip-blue" width="12" height="12" rx="2"/>
+          <text x="20" y="10" class="label-strong" fill="#1e40af">A: 68.4%</text>
+        </g>
+        <g transform="translate(10, 44)">
+          <rect class="chip-orange" width="12" height="12" rx="2"/>
+          <text x="20" y="10" class="label-strong" fill="#9a3412">B: 41.2%</text>
+        </g>
+        <text x="120" y="38" class="delta-neg">Δ −27.2 pp</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ============ Host delta table ============ -->
+  <g transform="translate(40, 1020)">
+    <text x="0" y="14" class="muted">Host delta table — sortable, default sort: Δ% asc (best improvement first)</text>
+    <rect class="frame" y="22" width="1320" height="660"/>
+
+    <!-- Header -->
+    <g transform="translate(20, 44)">
+      <text class="heading">Per-host comparison</text>
+      <g transform="translate(1080, -4)">
+        <rect class="btn-secondary" width="120" height="22"/>
+        <text x="60" y="15" text-anchor="middle" class="btn-text-dark">⬇ Export CSV</text>
+      </g>
+    </g>
+
+    <!-- Table head row -->
+    <g transform="translate(20, 80)">
+      <rect class="panel-hd" width="1280" height="32"/>
+      <text x="12" y="20" class="label-strong">Host</text>
+      <text x="200" y="20" class="label-strong">Store</text>
+      <text x="320" y="20" class="label-strong">CPU model</text>
+      <text x="480" y="20" class="label-strong">Cores</text>
+      <text x="540" y="20" text-anchor="end" class="label-strong">Min&gt;70 A</text>
+      <text x="630" y="20" text-anchor="end" class="label-strong">Min&gt;70 B</text>
+      <text x="720" y="20" text-anchor="end" class="label-strong">Δ abs</text>
+      <text x="800" y="20" text-anchor="end" class="label-strong">Δ % ▼</text>
+      <text x="870" y="20" text-anchor="end" class="label-strong">A̅ CPU</text>
+      <text x="940" y="20" text-anchor="end" class="label-strong">B̅ CPU</text>
+      <text x="1010" y="20" text-anchor="end" class="label-strong">P95 A</text>
+      <text x="1080" y="20" text-anchor="end" class="label-strong">P95 B</text>
+      <text x="1200" y="20" text-anchor="middle" class="label-strong">Sparkline</text>
+    </g>
+
+    <!-- Rows -->
+    <g transform="translate(20, 112)">
+      <!-- Row 1 - rimi-sco-01 -->
+      <g transform="translate(0, 0)">
+        <rect width="1280" height="44" fill="#ffffff" stroke="#f1f5f9" stroke-width="1"/>
+        <text x="12" y="18" class="label-strong">▾ rimi-sco-01</text>
+        <text x="12" y="34" class="muted">i7-8700, 6c · last seen 2 min ago</text>
+        <text x="200" y="26" class="label">Rimi Vilnius A1</text>
+        <text x="320" y="26" class="label">Intel i7-8700</text>
+        <text x="480" y="26" class="label">6</text>
+        <text x="540" y="26" text-anchor="end" class="label-strong">420</text>
+        <text x="630" y="26" text-anchor="end" class="label-strong">72</text>
+        <text x="720" y="26" text-anchor="end" class="delta-neg">−348</text>
+        <text x="800" y="26" text-anchor="end" class="delta-neg">−82.9%</text>
+        <text x="870" y="26" text-anchor="end" class="label">62.1%</text>
+        <text x="940" y="26" text-anchor="end" class="label">38.4%</text>
+        <text x="1010" y="26" text-anchor="end" class="label">88%</text>
+        <text x="1080" y="26" text-anchor="end" class="label">65%</text>
+        <!-- Spark A -->
+        <g transform="translate(1130, 12)">
+          <rect width="6" height="14" fill="#2563eb"/>
+          <rect x="8" width="6" height="20" fill="#2563eb"/>
+          <rect x="16" width="6" height="22" fill="#2563eb"/>
+          <rect x="24" width="6" height="18" fill="#2563eb"/>
+          <rect x="32" width="6" height="24" fill="#2563eb"/>
+          <rect x="40" width="6" height="16" fill="#2563eb"/>
+          <rect x="48" width="6" height="12" fill="#2563eb"/>
+        </g>
+        <g transform="translate(1200, 18)">
+          <rect width="6" height="6" fill="#f97316"/>
+          <rect x="8" width="6" height="4" fill="#f97316"/>
+          <rect x="16" width="6" height="8" fill="#f97316"/>
+          <rect x="24" width="6" height="5" fill="#f97316"/>
+          <rect x="32" width="6" height="10" fill="#f97316"/>
+          <rect x="40" width="6" height="6" fill="#f97316"/>
+          <rect x="48" width="6" height="4" fill="#f97316"/>
+        </g>
+      </g>
+
+      <!-- Drill-down panel (expanded under row 1) -->
+      <g transform="translate(0, 44)">
+        <rect width="1280" height="120" fill="#f8fafc"/>
+        <text x="40" y="22" class="label-strong">Per-day breakdown (rimi-sco-01)</text>
+        <g transform="translate(40, 32)">
+          <rect class="panel-hd" width="1200" height="20"/>
+          <text x="80" y="14" text-anchor="middle" class="label-sm">Mon</text>
+          <text x="240" y="14" text-anchor="middle" class="label-sm">Tue</text>
+          <text x="400" y="14" text-anchor="middle" class="label-sm">Wed</text>
+          <text x="560" y="14" text-anchor="middle" class="label-sm">Thu</text>
+          <text x="720" y="14" text-anchor="middle" class="label-sm">Fri</text>
+          <text x="880" y="14" text-anchor="middle" class="label-sm">Sat</text>
+          <text x="1040" y="14" text-anchor="middle" class="label-sm">Sun</text>
+        </g>
+        <g transform="translate(40, 56)">
+          <rect width="1200" height="48" fill="#ffffff" stroke="#e2e8f0"/>
+          <!-- A row -->
+          <g transform="translate(8, 6)">
+            <rect class="chip-blue" width="14" height="14"/>
+            <text x="24" y="11" class="label-sm" fill="#1e40af">A</text>
+          </g>
+          <text x="80" y="18" text-anchor="middle" class="label-sm">42</text>
+          <text x="240" y="18" text-anchor="middle" class="label-sm">68</text>
+          <text x="400" y="18" text-anchor="middle" class="label-sm">85</text>
+          <text x="560" y="18" text-anchor="middle" class="label-sm">72</text>
+          <text x="720" y="18" text-anchor="middle" class="label-sm">95</text>
+          <text x="880" y="18" text-anchor="middle" class="label-sm">38</text>
+          <text x="1040" y="18" text-anchor="middle" class="label-sm">20</text>
+          <!-- B row -->
+          <g transform="translate(8, 28)">
+            <rect class="chip-orange" width="14" height="14"/>
+            <text x="24" y="11" class="label-sm" fill="#9a3412">B</text>
+          </g>
+          <text x="80" y="40" text-anchor="middle" class="label-sm">8</text>
+          <text x="240" y="40" text-anchor="middle" class="label-sm">12</text>
+          <text x="400" y="40" text-anchor="middle" class="label-sm">15</text>
+          <text x="560" y="40" text-anchor="middle" class="label-sm">10</text>
+          <text x="720" y="40" text-anchor="middle" class="label-sm">18</text>
+          <text x="880" y="40" text-anchor="middle" class="label-sm">5</text>
+          <text x="1040" y="40" text-anchor="middle" class="label-sm">4</text>
+        </g>
+        <g transform="translate(1080, 88)">
+          <rect class="btn-secondary" width="160" height="22"/>
+          <text x="80" y="15" text-anchor="middle" class="btn-text-dark">Open in heatmap →</text>
+        </g>
+      </g>
+
+      <!-- Row 2 - rimi-sco-02 -->
+      <g transform="translate(0, 164)">
+        <rect width="1280" height="32" fill="#ffffff" stroke="#f1f5f9" stroke-width="1"/>
+        <text x="12" y="20" class="label-strong">▸ rimi-sco-02</text>
+        <text x="200" y="20" class="label">Rimi Vilnius A1</text>
+        <text x="320" y="20" class="label">Intel i7-8700</text>
+        <text x="480" y="20" class="label">6</text>
+        <text x="540" y="20" text-anchor="end" class="label-strong">280</text>
+        <text x="630" y="20" text-anchor="end" class="label-strong">110</text>
+        <text x="720" y="20" text-anchor="end" class="delta-neg">−170</text>
+        <text x="800" y="20" text-anchor="end" class="delta-neg">−60.7%</text>
+        <text x="870" y="20" text-anchor="end" class="label">55.0%</text>
+        <text x="940" y="20" text-anchor="end" class="label">39.8%</text>
+        <text x="1010" y="20" text-anchor="end" class="label">82%</text>
+        <text x="1080" y="20" text-anchor="end" class="label">68%</text>
+      </g>
+
+      <!-- Row 3 -->
+      <g transform="translate(0, 196)">
+        <rect width="1280" height="32" class="table-row-alt"/>
+        <text x="12" y="20" class="label-strong">▸ rimi-sco-03</text>
+        <text x="200" y="20" class="label">Rimi Kaunas K3</text>
+        <text x="320" y="20" class="label">Intel i5-7500</text>
+        <text x="480" y="20" class="label">4</text>
+        <text x="540" y="20" text-anchor="end" class="label-strong">210</text>
+        <text x="630" y="20" text-anchor="end" class="label-strong">95</text>
+        <text x="720" y="20" text-anchor="end" class="delta-neg">−115</text>
+        <text x="800" y="20" text-anchor="end" class="delta-neg">−54.8%</text>
+        <text x="870" y="20" text-anchor="end" class="label">52.8%</text>
+        <text x="940" y="20" text-anchor="end" class="label">42.1%</text>
+        <text x="1010" y="20" text-anchor="end" class="label">79%</text>
+        <text x="1080" y="20" text-anchor="end" class="label">70%</text>
+      </g>
+
+      <!-- Row 4 - small change -->
+      <g transform="translate(0, 228)">
+        <rect width="1280" height="32" fill="#ffffff" stroke="#f1f5f9" stroke-width="1"/>
+        <text x="12" y="20" class="label-strong">▸ rimi-sco-04</text>
+        <text x="200" y="20" class="label">Rimi Klaipėda K1</text>
+        <text x="320" y="20" class="label">Intel i5-7500</text>
+        <text x="480" y="20" class="label">4</text>
+        <text x="540" y="20" text-anchor="end" class="label-strong">180</text>
+        <text x="630" y="20" text-anchor="end" class="label-strong">158</text>
+        <text x="720" y="20" text-anchor="end" class="label">−22</text>
+        <text x="800" y="20" text-anchor="end" class="label">−12.2%</text>
+        <text x="870" y="20" text-anchor="end" class="label">49.3%</text>
+        <text x="940" y="20" text-anchor="end" class="label">47.1%</text>
+        <text x="1010" y="20" text-anchor="end" class="label">78%</text>
+        <text x="1080" y="20" text-anchor="end" class="label">76%</text>
+        <g transform="translate(1230, 6)">
+          <rect class="chip-amber" width="40" height="18"/>
+          <text x="20" y="13" text-anchor="middle" font-size="9" fill="#92400e" font-weight="600">noise</text>
+        </g>
+      </g>
+
+      <!-- Row 5 - regression -->
+      <g transform="translate(0, 260)">
+        <rect width="1280" height="32" class="table-row-alt"/>
+        <text x="12" y="20" class="label-strong">▸ rimi-sco-05</text>
+        <text x="200" y="20" class="label">Rimi Šiauliai S2</text>
+        <text x="320" y="20" class="label">Intel i3-6100</text>
+        <text x="480" y="20" class="label">2</text>
+        <text x="540" y="20" text-anchor="end" class="label-strong">110</text>
+        <text x="630" y="20" text-anchor="end" class="label-strong">145</text>
+        <text x="720" y="20" text-anchor="end" class="delta-pos">+35</text>
+        <text x="800" y="20" text-anchor="end" class="delta-pos">+31.8%</text>
+        <text x="870" y="20" text-anchor="end" class="label">42.0%</text>
+        <text x="940" y="20" text-anchor="end" class="label">48.5%</text>
+        <text x="1010" y="20" text-anchor="end" class="label">71%</text>
+        <text x="1080" y="20" text-anchor="end" class="label">78%</text>
+      </g>
+
+      <!-- Row 6 - added during period B -->
+      <g transform="translate(0, 292)">
+        <rect width="1280" height="32" fill="#ffffff" stroke="#f1f5f9" stroke-width="1"/>
+        <text x="12" y="20" class="label-strong">▸ rimi-sco-06</text>
+        <text x="200" y="20" class="label">Rimi Šiauliai S2</text>
+        <text x="320" y="20" class="label">Intel i5-9400</text>
+        <text x="480" y="20" class="label">6</text>
+        <text x="540" y="20" text-anchor="end" class="label-sm" fill="#94a3b8">—</text>
+        <text x="630" y="20" text-anchor="end" class="label-strong">62</text>
+        <text x="720" y="20" text-anchor="end" class="label-sm" fill="#94a3b8">—</text>
+        <text x="800" y="20" text-anchor="end" class="label-sm" fill="#94a3b8">—</text>
+        <text x="870" y="20" text-anchor="end" class="label-sm" fill="#94a3b8">—</text>
+        <text x="940" y="20" text-anchor="end" class="label">36.2%</text>
+        <text x="1010" y="20" text-anchor="end" class="label-sm" fill="#94a3b8">—</text>
+        <text x="1080" y="20" text-anchor="end" class="label">61%</text>
+        <g transform="translate(1180, 6)">
+          <rect class="chip-green" width="88" height="18"/>
+          <text x="44" y="13" text-anchor="middle" font-size="9" fill="#166534" font-weight="600">added in B</text>
+        </g>
+      </g>
+    </g>
+
+    <!-- Footer summary -->
+    <g transform="translate(20, 460)">
+      <rect class="panel-hd" width="1280" height="36"/>
+      <text x="12" y="22" class="label-strong">6 hosts · 5 improved, 1 regressed</text>
+      <text x="380" y="22" class="label">Net Δ: −620 min above 70% threshold across pilot</text>
+      <text x="950" y="22" class="muted">Generated 2026-05-27 14:08 · cached 5 min</text>
+    </g>
+  </g>
+
+  <!-- ============ Bottom note ============ -->
+  <g transform="translate(40, 1720)">
+    <rect width="1320" height="160" fill="#ffffff" stroke="#e2e8f0" rx="8"/>
+    <text x="20" y="28" class="heading">Notes for build</text>
+    <text x="20" y="56" class="label">• Sub-view selector is a segmented control inside CPU Timeline tab; URL ?view=compare for shareable deeplinks.</text>
+    <text x="20" y="76" class="label">• Period B length is locked to Period A length — the B "to" date input is read-only.</text>
+    <text x="20" y="96" class="label">• Δ color: green = improvement (less time above threshold), red = regression, neutral chip for ±2pp "noise" band.</text>
+    <text x="20" y="116" class="label">• Threshold values limited to {50, 60, 70, 80, 90}% because Zabbix getCpuHistoryDaily returns minutesAbove bins in 10pp steps only.</text>
+    <text x="20" y="136" class="label">• Drill-down expansion stays inside the table; "Open in heatmap" navigates back to the heatmap sub-view with that host pre-selected.</text>
+  </g>
+</svg>

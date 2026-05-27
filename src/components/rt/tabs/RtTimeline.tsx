@@ -14,6 +14,7 @@ import type { IntervalSlot } from "./rt-timeline-math";
 import { DataCoverageBanner } from "./DataCoverageBanner";
 import { ProcessCategoryReference } from "./ProcessCategoryReference";
 import { RtProcessTrend } from "./RtProcessTrend";
+import { RtCompareView } from "../compare/RtCompareView";
 import { useRtFilters } from "../RtFiltersContext";
 import { resolveCpuModel } from "./rt-inventory-helpers";
 import { isRetellectRunning, isRetellectDeployed, isRetellectActiveToday } from "./rt-overview-helpers";
@@ -227,6 +228,25 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     // shouldn't re-run this effect (they're already going through setPeriod).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlSearchParams]);
+
+  // ── Sub-view selector ────────────────────────────────────────────
+  //
+  // CPU Timeline hosts two distinct views: the existing per-day heatmap
+  // (default) and the new "Compare two periods" sub-page. We use the
+  // `?view=` URL param so the choice is shareable via deeplinks and
+  // survives reloads, matching the `?period=` pattern above. Spec:
+  // docs/specs/cpu-timeline-compare-periods-spec.md §4.1.
+  const subView: "heatmap" | "compare" = urlSearchParams.get("view") === "compare" ? "compare" : "heatmap";
+  const setSubView = (v: "heatmap" | "compare") => {
+    const live = typeof window !== "undefined" ? window.location.search : `?${urlSearchParams.toString()}`;
+    const params = new URLSearchParams(live);
+    if (v === "heatmap") {
+      params.delete("view");
+    } else {
+      params.set("view", v);
+    }
+    router.push(`${pathname}?${params.toString()}`);
+  };
 
   const setPeriod = (v: string) => {
     // Update context immediately so the UI feels responsive while the SSR
@@ -1937,10 +1957,24 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     );
   })();
 
+  // ═══ COMPARE SUB-VIEW ═══════════════════════════════════════════════
+  // Short-circuit: when ?view=compare is set, render the Compare component
+  // instead of the heatmap. The sub-view selector is rendered above either
+  // path so the user can switch back without losing the URL context.
+  if (subView === "compare") {
+    return (
+      <>
+        <SubViewSelector value={subView} onChange={setSubView} />
+        <RtCompareView pilot={pilot} zabbix={zabbix} />
+      </>
+    );
+  }
+
   // ═══ NO DRILL ═══════════════════════════════════════════════════════
   if (!drill) {
     return (
       <>
+        <SubViewSelector value={subView} onChange={setSubView} />
         {filterBar(false)}
         <h2 style={{ fontSize: 17, fontWeight: 600, color: "#212529", marginBottom: 4 }}>CPU Threshold Timeline</h2>
         <p style={{ fontSize: 13, color: "#868e96", marginBottom: 10 }}>
@@ -2092,6 +2126,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // ═══ WITH DRILL ═══════════════════════════════════════════════════
   return (
     <>
+    <SubViewSelector value={subView} onChange={setSubView} />
     <div ref={split.containerRef} style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 200px)", minHeight: 500, marginBottom: -24 }}>
       {/* TOP PANE */}
       <div style={{ height: split.splitPx, minHeight: 120, overflow: "auto", flexShrink: 0 }}>
@@ -2573,5 +2608,57 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       periodDays={periodDays}
     />
     </>
+  );
+}
+
+// ─── Sub-view selector ────────────────────────────────────────────────
+//
+// Top-of-tab segmented control that flips between the existing per-day
+// Heatmap and the new "Compare periods" sub-view. Lives at the top so it
+// stays visible across drill-down states. Visual language matches the
+// FilterSegmented buttons used elsewhere in rt/, but it's kept as a
+// dedicated component to avoid leaking sub-view state into the shared
+// filter primitives. Spec: docs/specs/cpu-timeline-compare-periods-spec.md §4.1.
+function SubViewSelector({
+  value,
+  onChange,
+}: {
+  value: "heatmap" | "compare";
+  onChange: (v: "heatmap" | "compare") => void;
+}) {
+  const baseBtn: React.CSSProperties = {
+    padding: "5px 14px",
+    fontSize: 12,
+    fontWeight: 500,
+    border: "1px solid #e2e8f0",
+    background: "#fff",
+    color: "#0f172a",
+    cursor: "pointer",
+  };
+  const activeBtn: React.CSSProperties = {
+    ...baseBtn,
+    background: "#0f172a",
+    color: "#fff",
+    borderColor: "#0f172a",
+  };
+  return (
+    <div style={{ display: "inline-flex", marginBottom: 12, borderRadius: 6, overflow: "hidden", boxShadow: "0 1px 0 rgba(15,23,42,0.04)" }}>
+      <button
+        type="button"
+        aria-pressed={value === "heatmap"}
+        style={{ ...(value === "heatmap" ? activeBtn : baseBtn), borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: "none" }}
+        onClick={() => onChange("heatmap")}
+      >
+        Heatmap
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "compare"}
+        style={{ ...(value === "compare" ? activeBtn : baseBtn), borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
+        onClick={() => onChange("compare")}
+      >
+        Compare periods
+      </button>
+    </div>
   );
 }
