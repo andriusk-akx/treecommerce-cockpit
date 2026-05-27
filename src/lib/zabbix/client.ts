@@ -538,6 +538,180 @@ export class ZabbixClient {
   }
 
   /**
+   * Range variant of `getCpuHistoryDaily` — same trend.get + history.get merge
+   * logic, but with an explicit `[fromSec, toSec]` Unix-time window instead of
+   * a "days back from now" parameter. Used by the CPU Timeline Compare-periods
+   * sub-view, which needs to fetch two arbitrary historical windows.
+   *
+   * Additionally returns the raw 1-minute samples (`samples` array). The
+   * compare view's overlay chart aggregates these by hour-of-day or by
+   * minute-of-period; the heatmap doesn't need them.
+   *
+   * The existing `getCpuHistoryDaily` stays unchanged so the well-tested
+   * heatmap path is unaffected.
+   */
+  async getCpuHistoryForRange(
+    itemIds: string[],
+    itemHostMap: Map<string, string>,
+    fromSec: number,
+    toSec: number,
+  ): Promise<{
+    daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[];
+    samples: { hostId: string; clockSec: number; value: number }[];
+  }> {
+    if (itemIds.length === 0 || fromSec >= toSec) {
+      return { daily: [], samples: [] };
+    }
+    const cacheKey = `zabbix:cpuHistRange:${fromSec}:${toSec}:${itemIds.slice().sort().join(",")}`;
+    return cached(cacheKey, () => this._getCpuHistoryForRangeUncached(itemIds, itemHostMap, fromSec, toSec), 120_000);
+  }
+
+  private async _getCpuHistoryForRangeUncached(
+    itemIds: string[],
+    itemHostMap: Map<string, string>,
+    fromSec: number,
+    toSec: number,
+  ): Promise<{
+    daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[];
+    samples: { hostId: string; clockSec: number; value: number }[];
+  }> {
+    type Bucket = {
+      max: number; sum: number; min: number; count: number;
+      samples: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
+      totalSamples: number;
+    };
+    const dailyMap = new Map<string, Bucket>();
+    const localDate = (clockSec: number) =>
+      new Date(clockSec * 1000).toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" });
+    const newBucket = (value: number): Bucket => ({
+      max: value, sum: value, min: value, count: 1,
+      samples: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
+      totalSamples: 0,
+    });
+    const merge = (hostId: string, date: string, value: number, isRawSample: boolean) => {
+      const key = `${hostId}|${date}`;
+      let b = dailyMap.get(key);
+      if (!b) { b = newBucket(value); dailyMap.set(key, b); }
+      else {
+        b.max = Math.max(b.max, value);
+        b.min = Math.min(b.min, value);
+        b.sum += value;
+        b.count += 1;
+      }
+      if (isRawSample) {
+        b.totalSamples += 1;
+        if (value > 20) b.samples[20]++;
+        if (value > 30) b.samples[30]++;
+        if (value > 40) b.samples[40]++;
+        if (value > 50) b.samples[50]++;
+        if (value > 60) b.samples[60]++;
+        if (value > 70) b.samples[70]++;
+        if (value > 80) b.samples[80]++;
+        if (value > 90) b.samples[90]++;
+      }
+    };
+
+    const PER_ITEM_LIMIT = 50000;
+    const CONCURRENCY = 24;
+    const trendPromise = (async () => {
+      try {
+        return (await this.request("trend.get", {
+          output: ["itemid", "clock", "value_min", "value_avg", "value_max"],
+          itemids: itemIds,
+          time_from: String(fromSec),
+          time_till: String(toSec),
+          limit: 200000,
+        })) as Array<{ itemid: string; clock: string; value_min: string; value_avg: string; value_max: string }>;
+      } catch (e) {
+        console.warn("[Zabbix] trend.get failed in range, will rely on history.get:", e);
+        return [] as Array<{ itemid: string; clock: string; value_min: string; value_avg: string; value_max: string }>;
+      }
+    })();
+    const fetchOne = async (itemId: string): Promise<Array<{ itemid: string; clock: string; value: string }>> => {
+      try {
+        return (await this.request("history.get", {
+          output: ["itemid", "clock", "value"],
+          itemids: [itemId],
+          history: 0,
+          time_from: String(fromSec),
+          time_till: String(toSec),
+          sortfield: "clock",
+          sortorder: "DESC",
+          limit: PER_ITEM_LIMIT,
+        })) as Array<{ itemid: string; clock: string; value: string }>;
+      } catch (e) {
+        console.warn(`[Zabbix] history.get item ${itemId} failed in range:`, e);
+        return [];
+      }
+    };
+    const historyPromise = (async () => {
+      const allRecords: Array<{ itemid: string; clock: string; value: string }> = [];
+      for (let i = 0; i < itemIds.length; i += CONCURRENCY) {
+        const slice = itemIds.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(slice.map(fetchOne));
+        for (const records of results) {
+          for (const r of records) allRecords.push(r);
+        }
+      }
+      return allRecords;
+    })();
+
+    const [trends, historyRecords] = await Promise.all([trendPromise, historyPromise]);
+
+    for (const t of trends) {
+      const hostId = itemHostMap.get(t.itemid);
+      if (!hostId) continue;
+      const clockSec = parseInt(t.clock);
+      const date = localDate(clockSec);
+      const vmax = parseFloat(t.value_max);
+      const vavg = parseFloat(t.value_avg);
+      const vmin = parseFloat(t.value_min);
+      if (!Number.isFinite(vmax) || !Number.isFinite(vavg) || !Number.isFinite(vmin)) continue;
+      const key = `${hostId}|${date}`;
+      let b = dailyMap.get(key);
+      if (!b) {
+        b = newBucket(vmax);
+        b.sum = vavg * 60;
+        b.count = 60;
+        b.min = vmin;
+        dailyMap.set(key, b);
+      } else {
+        b.max = Math.max(b.max, vmax);
+        b.min = Math.min(b.min, vmin);
+        b.sum += vavg * 60;
+        b.count += 60;
+      }
+    }
+
+    const samples: { hostId: string; clockSec: number; value: number }[] = [];
+    for (const r of historyRecords) {
+      const hostId = itemHostMap.get(r.itemid);
+      if (!hostId) continue;
+      const clockSec = parseInt(r.clock);
+      const value = parseFloat(r.value);
+      if (!Number.isFinite(value)) continue;
+      const date = localDate(clockSec);
+      merge(hostId, date, value, true);
+      samples.push({ hostId, clockSec, value });
+    }
+
+    const daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[] = [];
+    for (const [key, data] of dailyMap) {
+      const [hostId, date] = key.split("|");
+      daily.push({
+        hostId,
+        date,
+        max: Math.round(data.max * 10) / 10,
+        avg: Math.round((data.sum / data.count) * 10) / 10,
+        min: Math.round(data.min * 10) / 10,
+        minutesAbove: data.samples,
+        totalSamples: data.totalSamples,
+      });
+    }
+    return { daily, samples };
+  }
+
+  /**
    * Get per-process CPU % items for the given hosts.
    *
    * On SCO hosts monitoring is configured with custom Zabbix keys of the form

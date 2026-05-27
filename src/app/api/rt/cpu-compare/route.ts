@@ -1,32 +1,37 @@
 /**
  * GET /api/rt/cpu-compare?pilotId=...&aFrom=...&aTo=...&bFrom=...&bTo=...
  *                       &threshold=70&aLabel=...&bLabel=...&hostIds=...
+ *                       &alignment=time-of-day|absolute-offset
+ *                       &mock=1
  *
  * Returns a side-by-side comparison of two equal-length periods (A vs B) for
  * the Retellect CPU Timeline sub-view. The contract is documented in
  *   docs/specs/cpu-timeline-compare-periods-spec.md §5
  *
- * Phase 1 (this commit):
- *   - Endpoint scaffolded with full input validation and a deterministic
- *     mocked payload so the UI can be wired end-to-end before Zabbix
- *     plumbing lands.
- *   - The mock seeds itself off the pilotId + period dates so reloads stay
- *     stable and screenshots are reproducible.
+ * Phase 2 (this commit):
+ *   - Real Zabbix path: resolve pilot devices to Zabbix items, run two
+ *     parallel `getCpuHistoryForRange` calls, hand the result to
+ *     `buildCompareResponse`.
+ *   - `?mock=1` flag keeps the deterministic mock payload available for
+ *     UI development and screenshot reproducibility.
  *
- * Phase 2 (next commit) wires this to two parallel `getCpuHistoryDaily`
- * calls (one per period) and computes real KPIs / overlay / host deltas
- * via `src/lib/rt/compare/compute.ts`.
+ * Phase 3+ will add per-host parallelism tuning and result caching.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getZabbixClient } from "@/lib/zabbix/client";
 import {
   COMPARE_THRESHOLDS,
+  type CompareAlignment,
   type CompareErrorResponse,
   type CompareHostRow,
   type CompareResponse,
   type CompareThreshold,
   type OverlayPoint,
+  type DataQuality,
 } from "@/components/rt/compare/types";
+import { resolvePilotHosts } from "@/lib/rt/compare/resolve";
+import { buildCompareResponse, type HostMeta } from "@/lib/rt/compare/compute";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +52,8 @@ interface ParsedQuery {
   aLabel: string | null;
   bLabel: string | null;
   hostIds: string[] | null;
+  alignment: CompareAlignment;
+  useMock: boolean;
 }
 
 function err(
@@ -60,7 +67,6 @@ function err(
 
 function parseDate(s: string | null, field: string): { ok: true; value: string } | { ok: false; field: string } {
   if (!s) return { ok: false, field };
-  // ISO YYYY-MM-DD strict
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return { ok: false, field };
   const d = new Date(`${s}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return { ok: false, field };
@@ -94,22 +100,47 @@ function daysSinceToday(iso: string): number {
   return daysBetween(iso, todayUtcIso()) - 1;
 }
 
-/** Deterministic PRNG seeded by a string so mock data stays stable
- *  across reloads. Mulberry32 — sufficient for visual testing. */
-function seededRng(seed: string): () => number {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 16777619);
+/**
+ * Convert an ISO date in pilot timezone (Europe/Vilnius) to a Unix seconds
+ * range covering midnight..midnight. We approximate via UTC + a fixed 0..-3h
+ * offset is wrong for Vilnius (UTC+2/+3 with DST); use Intl to walk the
+ * actual local boundary.
+ */
+function isoToVilniusUnix(iso: string, hour: number): number {
+  // Compute the Unix timestamp at which the given ISO date hits `hour`:00
+  // local-Vilnius time. Approach: trial-and-error against Intl, since JS has
+  // no clean way to construct a "Y-M-D in zone Z" Date.
+  const guessUtc = Date.UTC(
+    Number(iso.slice(0, 4)),
+    Number(iso.slice(5, 7)) - 1,
+    Number(iso.slice(8, 10)),
+    hour,
+    0,
+    0,
+  );
+  // Vilnius is UTC+2 in winter, UTC+3 in summer. Try -3, then -2, snap to whichever lands on the requested local hour.
+  for (const offsetHours of [-3, -2]) {
+    const candidate = guessUtc + offsetHours * 3600 * 1000;
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Vilnius",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(new Date(candidate));
+    let y = "", m = "", d = "", h = "";
+    for (const p of parts) {
+      if (p.type === "year") y = p.value;
+      else if (p.type === "month") m = p.value;
+      else if (p.type === "day") d = p.value;
+      else if (p.type === "hour") h = p.value;
+    }
+    const formattedIso = `${y}-${m}-${d}`;
+    const formattedHour = parseInt(h === "24" ? "0" : h, 10);
+    if (formattedIso === iso && formattedHour === hour) {
+      return Math.floor(candidate / 1000);
+    }
   }
-  let a = h >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+  // Fallback: treat as UTC if the locale walk fails.
+  return Math.floor(guessUtc / 1000);
 }
 
 function validate(req: NextRequest): { ok: true; q: ParsedQuery } | { ok: false; resp: NextResponse } {
@@ -124,7 +155,6 @@ function validate(req: NextRequest): { ok: true; q: ParsedQuery } | { ok: false;
   for (const r of [aFrom, aTo, bFrom, bTo]) {
     if (!r.ok) return { ok: false, resp: err(400, "VALIDATION", `Invalid or missing date: ${r.field}`) };
   }
-  // Type narrowing — TS doesn't see the for-loop guard.
   if (!aFrom.ok || !aTo.ok || !bFrom.ok || !bTo.ok) {
     return { ok: false, resp: err(400, "VALIDATION", "date parse error") };
   }
@@ -167,6 +197,12 @@ function validate(req: NextRequest): { ok: true; q: ParsedQuery } | { ok: false;
   const hostIdsRaw = sp.get("hostIds");
   const hostIds = hostIdsRaw ? hostIdsRaw.split(",").map((s) => s.trim()).filter(Boolean) : null;
 
+  const alignmentRaw = sp.get("alignment");
+  const alignment: CompareAlignment =
+    alignmentRaw === "absolute-offset" ? "absolute-offset" : "time-of-day";
+
+  const useMock = sp.get("mock") === "1";
+
   return {
     ok: true,
     q: {
@@ -179,9 +215,13 @@ function validate(req: NextRequest): { ok: true; q: ParsedQuery } | { ok: false;
       aLabel,
       bLabel,
       hostIds,
+      alignment,
+      useMock,
     },
   };
 }
+
+// ── Mock payload (kept from Phase 1; reachable via ?mock=1) ───────────
 
 interface MockHost {
   id: string;
@@ -191,20 +231,30 @@ interface MockHost {
   cpuCores: number | null;
 }
 
-async function resolveHosts(pilotId: string, hostFilter: string[] | null): Promise<MockHost[]> {
+function seededRng(seed: string): () => number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  let a = h >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+async function resolveMockHosts(pilotId: string, hostFilter: string[] | null): Promise<MockHost[]> {
   const pilot = await prisma.pilot.findUnique({
     where: { id: pilotId },
-    include: {
-      devices: {
-        include: { store: { select: { name: true } } },
-        orderBy: { name: "asc" },
-      },
-    },
+    include: { devices: { include: { store: { select: { name: true } } }, orderBy: { name: "asc" } } },
   });
   if (!pilot) return [];
   const all = pilot.devices.map((d) => ({
-    id: d.id,
-    name: d.name,
+    id: d.id, name: d.name,
     storeName: d.store?.name ?? "Unknown store",
     cpuModel: d.cpuModel ?? null,
     cpuCores: d.cpuCores ?? null,
@@ -214,41 +264,28 @@ async function resolveHosts(pilotId: string, hostFilter: string[] | null): Promi
   return all.filter((h) => allowed.has(h.id));
 }
 
-/**
- * Builds a synthetic-but-stable payload so the UI can be developed and demo'd
- * before the real data path lands. Numbers fall in a plausible range; B period
- * is biased lower (mock "post-rollout" improvement).
- */
 function buildMockPayload(q: ParsedQuery, hosts: MockHost[]): CompareResponse {
   const periodLength = daysBetween(q.aFrom, q.aTo);
   const seed = `${q.pilotId}|${q.aFrom}|${q.bFrom}|${q.threshold}`;
   const rng = seededRng(seed);
 
   const hostRows: CompareHostRow[] = hosts.map((h, idx) => {
-    // Per-host base activity, deterministic.
-    const baseMin = 80 + Math.floor(rng() * 380);   // ~80..460 min above threshold in period A
-    const improvement = 0.4 + rng() * 0.5;          // 40..90% reduction in mock
+    const baseMin = 80 + Math.floor(rng() * 380);
+    const improvement = 0.4 + rng() * 0.5;
     const aMinutes = baseMin;
     const bMinutes = Math.max(8, Math.round(baseMin * (1 - improvement)));
     const aMean = 35 + rng() * 30;
     const bMean = aMean - 8 - rng() * 10;
     const aP95 = Math.min(99, aMean + 15 + rng() * 15);
     const bP95 = Math.min(99, bMean + 10 + rng() * 12);
-
     const aSpark = Array.from({ length: periodLength }, () => Math.round(rng() * 100));
     const bSpark = Array.from({ length: periodLength }, () => Math.round(rng() * 60));
-
-    // Demonstrate the "added in B" badge for one row when the pilot has >=4 hosts.
     const hostScope = idx === hosts.length - 1 && hosts.length >= 4 ? "added-in-b" : "both";
     const aSamples = hostScope === "added-in-b" ? 0 : 9000 + Math.floor(rng() * 1500);
     const bSamples = 9000 + Math.floor(rng() * 1500);
-
     return {
-      hostId: h.id,
-      hostName: h.name,
-      storeName: h.storeName,
-      cpuModel: h.cpuModel,
-      cpuCores: h.cpuCores,
+      hostId: h.id, hostName: h.name, storeName: h.storeName,
+      cpuModel: h.cpuModel, cpuCores: h.cpuCores,
       aMinutesAbove: hostScope === "added-in-b" ? 0 : aMinutes,
       bMinutesAbove: bMinutes,
       deltaMinutesAbs: bMinutes - (hostScope === "added-in-b" ? 0 : aMinutes),
@@ -257,8 +294,7 @@ function buildMockPayload(q: ParsedQuery, hosts: MockHost[]): CompareResponse {
       bMeanCpu: Math.round(bMean * 10) / 10,
       aP95Cpu: Math.round(aP95 * 10) / 10,
       bP95Cpu: Math.round(bP95 * 10) / 10,
-      aSamples,
-      bSamples,
+      aSamples, bSamples,
       aSparkline: hostScope === "added-in-b" ? [] : aSpark,
       bSparkline: bSpark,
       dataQuality: daysSinceToday(q.aFrom) > HISTORY_GRAIN_DAYS ? "trend-only" : "full",
@@ -266,7 +302,6 @@ function buildMockPayload(q: ParsedQuery, hosts: MockHost[]): CompareResponse {
     };
   });
 
-  // Aggregate KPIs
   const sumA = hostRows.reduce((s, r) => s + r.aMinutesAbove, 0);
   const sumB = hostRows.reduce((s, r) => s + r.bMinutesAbove, 0);
   const meanA = hostRows.length === 0 ? 0
@@ -280,28 +315,23 @@ function buildMockPayload(q: ParsedQuery, hosts: MockHost[]): CompareResponse {
   const totalMinutesPerPeriod = periodLength * 24 * 60 * Math.max(hostRows.length, 1);
   const pctA = Math.round((sumA / totalMinutesPerPeriod) * 1000) / 10;
   const pctB = Math.round((sumB / totalMinutesPerPeriod) * 1000) / 10;
-
   const delta = (a: number, b: number) => ({
     a, b,
     deltaAbs: Math.round((b - a) * 10) / 10,
     deltaPct: a === 0 ? null : Math.round(((b - a) / a) * 1000) / 10,
   });
 
-  // Overlay: time-of-day alignment at 5-minute granularity (288 slots) so
-  // the chart stays cheap to render even in mock mode. Real path may use
-  // 1-min or downsample.
   const SLOT_MIN = 5;
-  const TOTAL_SLOTS = (24 * 60) / SLOT_MIN; // 288
+  const TOTAL_SLOTS = (24 * 60) / SLOT_MIN;
   const points: OverlayPoint[] = [];
   for (let i = 0; i < TOTAL_SLOTS; i++) {
-    const tod = i * SLOT_MIN;          // minutes since midnight
+    const tod = i * SLOT_MIN;
     const hour = tod / 60;
-    // Two daily peaks at ~10:30 and ~17:30, like Rimi traffic.
     const trafficShape = (hr: number) =>
       Math.exp(-Math.pow((hr - 10.5) / 2.4, 2)) +
       Math.exp(-Math.pow((hr - 17.5) / 2.6, 2));
     const shapeA = trafficShape(hour);
-    const shapeB = trafficShape(hour) * 0.55;     // mock improvement
+    const shapeB = trafficShape(hour) * 0.55;
     const noiseA = (rng() - 0.5) * 6;
     const noiseB = (rng() - 0.5) * 4;
     const aCpu = Math.min(95, Math.max(3, 18 + shapeA * 60 + noiseA));
@@ -327,12 +357,12 @@ function buildMockPayload(q: ParsedQuery, hosts: MockHost[]): CompareResponse {
         periodB: daysSinceToday(q.bFrom) > HISTORY_GRAIN_DAYS ? "trend-only" : "full",
         warnings: [
           ...(daysSinceToday(q.aFrom) > HISTORY_GRAIN_DAYS
-            ? [`Period A older than ${HISTORY_GRAIN_DAYS}d — minute-level data partial, using hourly trend`]
+            ? [`Period A older than ${HISTORY_GRAIN_DAYS}d - minute-level data partial, using hourly trend`]
             : []),
           ...(daysSinceToday(q.bFrom) > HISTORY_GRAIN_DAYS
-            ? [`Period B older than ${HISTORY_GRAIN_DAYS}d — minute-level data partial, using hourly trend`]
+            ? [`Period B older than ${HISTORY_GRAIN_DAYS}d - minute-level data partial, using hourly trend`]
             : []),
-          "MOCK PAYLOAD — real Zabbix path lands in next commit",
+          "MOCK PAYLOAD - ?mock=1 in URL",
         ],
       },
       generatedAt: new Date().toISOString(),
@@ -343,23 +373,86 @@ function buildMockPayload(q: ParsedQuery, hosts: MockHost[]): CompareResponse {
       p95Cpu: delta(p95A, p95B),
       pctTimeAboveThreshold: delta(pctA, pctB),
     },
-    overlay: {
-      alignment: "time-of-day",
-      totalSlots: TOTAL_SLOTS,
-      slotMinutes: SLOT_MIN,
-      points,
-    },
+    overlay: { alignment: "time-of-day", totalSlots: TOTAL_SLOTS, slotMinutes: SLOT_MIN, points },
     hostRows,
   };
+}
+
+// ── Real payload (Phase 2) ──────────────────────────────────────────
+
+function dataQualityFor(iso: string): DataQuality {
+  return daysSinceToday(iso) > HISTORY_GRAIN_DAYS ? "trend-only" : "full";
+}
+
+async function buildRealPayload(q: ParsedQuery, hosts: HostMeta[], itemIds: string[], itemHostMap: Map<string, string>): Promise<CompareResponse> {
+  const client = getZabbixClient();
+
+  // Period boundaries in Vilnius local time. aFrom = midnight start;
+  // aTo = midnight end of (aTo + 1) day to make `[aFromSec, aToSec)` inclusive.
+  const aFromSec = isoToVilniusUnix(q.aFrom, 0);
+  const aToSec = isoToVilniusUnix(addDayIso(q.aTo, 1), 0);
+  const bFromSec = isoToVilniusUnix(q.bFrom, 0);
+  const bToSec = isoToVilniusUnix(addDayIso(q.bTo, 1), 0);
+
+  const [periodA, periodB] = await Promise.all([
+    client.getCpuHistoryForRange(itemIds, itemHostMap, aFromSec, aToSec),
+    client.getCpuHistoryForRange(itemIds, itemHostMap, bFromSec, bToSec),
+  ]);
+
+  const warnings: string[] = [];
+  const dqA = dataQualityFor(q.aFrom);
+  const dqB = dataQualityFor(q.bFrom);
+  if (dqA !== "full") warnings.push(`Period A older than ${HISTORY_GRAIN_DAYS}d - minute-level data partial, using hourly trend`);
+  if (dqB !== "full") warnings.push(`Period B older than ${HISTORY_GRAIN_DAYS}d - minute-level data partial, using hourly trend`);
+
+  return buildCompareResponse({
+    pilotId: q.pilotId,
+    hosts,
+    threshold: q.threshold,
+    aFromSec, aToSec, bFromSec, bToSec,
+    aFromIso: q.aFrom, aToIso: q.aTo, bFromIso: q.bFrom, bToIso: q.bTo,
+    aLabel: q.aLabel, bLabel: q.bLabel,
+    alignment: q.alignment,
+    periodA, periodB,
+    dataQualityA: dqA,
+    dataQualityB: dqB,
+    warnings,
+  });
+}
+
+function addDayIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const v = validate(req);
   if (!v.ok) return v.resp;
-  const hosts = await resolveHosts(v.q.pilotId, v.q.hostIds);
-  if (hosts.length === 0) {
-    return err(404, "VALIDATION", "Pilot not found or has no devices", { pilotId: v.q.pilotId });
+
+  // ── Mock mode (?mock=1) ──────────────────────────────────────────
+  if (v.q.useMock) {
+    const hosts = await resolveMockHosts(v.q.pilotId, v.q.hostIds);
+    if (hosts.length === 0) {
+      return err(404, "VALIDATION", "Pilot not found or has no devices", { pilotId: v.q.pilotId });
+    }
+    return NextResponse.json(buildMockPayload(v.q, hosts));
   }
-  const payload = buildMockPayload(v.q, hosts);
-  return NextResponse.json(payload);
+
+  // ── Real path ────────────────────────────────────────────────────
+  try {
+    const resolved = await resolvePilotHosts(v.q.pilotId, v.q.hostIds);
+    if (resolved.hosts.length === 0) {
+      return err(404, "VALIDATION", "No matching Zabbix hosts found for the selected pilot/hosts", {
+        pilotId: v.q.pilotId,
+        unmatchedDeviceIds: resolved.unmatchedDeviceIds,
+      });
+    }
+    const payload = await buildRealPayload(v.q, resolved.hosts, resolved.itemIds, resolved.itemHostMap);
+    return NextResponse.json(payload);
+  } catch (e) {
+    console.error("[cpu-compare] real path failed:", e);
+    const message = e instanceof Error ? e.message : "Unknown error";
+    return err(500, "INTERNAL", `Failed to compute comparison: ${message}`);
+  }
 }
