@@ -10,7 +10,6 @@ import { getZabbixClient } from "@/lib/zabbix/client";
 import { cached } from "@/lib/zabbix/cache";
 import {
   chooseTelemetrySources,
-  averageSlot,
   averageSlotV2,
   normaliseValue,
   summariseDay,
@@ -611,7 +610,11 @@ export async function GET(req: NextRequest) {
         filled[k] = seen && i - seen.atSlot <= FILL_MAX_SLOTS ? seen.value : 0;
       }
     }
-    let { besclient: bes, elastic: ela, osCore: os } = filled;
+    // `os` is reassigned below by the post-fill re-clamp; `bes` and `ela`
+    // are read-only after destructure — split so ESLint's prefer-const
+    // (destructuring: "any") doesn't fail CI.
+    const { besclient: bes, elastic: ela } = filled;
+    let { osCore: os } = filled;
     // ── Post-fill OS Core re-clamp.
     //
     // averageSlotV2 clamps OS Core per slot so Σnamed ≤ hostCpu. But the
