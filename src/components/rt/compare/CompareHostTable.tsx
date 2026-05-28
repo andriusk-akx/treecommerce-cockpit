@@ -413,41 +413,33 @@ const UNKNOWN_CPU_LABEL = "Unknown CPU";
  * — using an explicit vendor allow-list closes that hole.
  */
 const CPU_VENDOR_PREFIXES = [
-  "intel",
-  "amd",
-  "apple",
-  "arm",
-  "qualcomm",
-  "snapdragon",
-  "ryzen",
-  "epyc",
-  "threadripper",
-  "xeon",
-  "core",
-  "pentium",
-  "celeron",
-  "atom",
+  "intel", "amd", "apple", "arm", "qualcomm", "snapdragon",
+  "ryzen", "epyc", "threadripper", "xeon", "core", "pentium",
+  "celeron", "atom",
 ];
+/** Mirror of resolve.ts BOGUS_VALUE_MARKERS — kept in sync manually
+ *  because the lib/rt boundary discourages reaching into server code. */
+const BOGUS_VALUE_MARKERS = /\b(SCO\d+|Rimi|Maxima|IKI|MHM|SHM|HM\d)\b/i;
 
 /**
  * Heuristic for a "real CPU model" string. A string passes when:
  *   1. It's non-blank after trim
- *   2. It starts with one of the recognised vendor/family prefixes above
- *   3. It contains at least one digit (so "Intel" alone wouldn't pass)
- *   4. It's no longer than 80 chars (longer = pasted multi-line junk)
- *   5. It has no newline characters in the body
+ *   2. It's no longer than 50 chars
+ *   3. No newlines
+ *   4. Contains at least one digit
+ *   5. Does NOT contain Rimi-domain hostname/store markers
+ *   6. Starts with a recognised vendor/family prefix
  *
- * Anything failing the test is folded into the single Unknown bucket so
- * the comparison table groups by real hardware, not by data-quality
- * fingerprints.
+ * Anything failing the test folds into the single Unknown bucket.
  */
 function isLikelyRealCpuModel(s: string | null | undefined): boolean {
   if (!s) return false;
   const trimmed = s.trim();
   if (trimmed === "" || trimmed === "—" || trimmed === "-") return false;
-  if (trimmed.length > 80) return false;
+  if (trimmed.length > 50) return false;
   if (/[\r\n]/.test(trimmed)) return false;
   if (!/\d/.test(trimmed)) return false;
+  if (BOGUS_VALUE_MARKERS.test(trimmed)) return false;
   const lower = trimmed.toLowerCase();
   return CPU_VENDOR_PREFIXES.some((p) => lower.startsWith(p));
 }

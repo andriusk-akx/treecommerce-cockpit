@@ -45,13 +45,24 @@ const VENDOR_PREFIXES = [
   "ryzen", "epyc", "threadripper", "xeon", "core", "pentium",
   "celeron", "atom",
 ];
+/**
+ * Retail-domain markers that should NEVER appear inside a CPU model
+ * string. When Zabbix inventory's `hardware` field gets polluted with
+ * hostnames or store names (we've seen "Intel Celeron J3060 SCO35 Rimi
+ * MHM Maluno"), the vendor prefix alone passes the heuristic — so we
+ * also reject anything that mentions these. Domain-specific but the
+ * cleanest way to keep bad inventory out of the comparison grouping.
+ */
+const BOGUS_VALUE_MARKERS = /\b(SCO\d+|Rimi|Maxima|IKI|MHM|SHM|HM\d)\b/i;
+
 function isLikelyRealCpuModel(s: string | null | undefined): boolean {
   if (!s) return false;
   const trimmed = s.trim();
   if (trimmed === "" || trimmed === "—" || trimmed === "-") return false;
-  if (trimmed.length > 80) return false;
+  if (trimmed.length > 50) return false;
   if (/[\r\n]/.test(trimmed)) return false;
   if (!/\d/.test(trimmed)) return false;
+  if (BOGUS_VALUE_MARKERS.test(trimmed)) return false;
   const lower = trimmed.toLowerCase();
   return VENDOR_PREFIXES.some((p) => lower.startsWith(p));
 }
