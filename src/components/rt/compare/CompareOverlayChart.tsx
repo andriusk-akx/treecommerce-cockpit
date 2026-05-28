@@ -72,8 +72,9 @@ export function CompareOverlayChart({ overlay, meta }: Props) {
   // Threshold horizontal line.
   const yThr = ys(meta.threshold);
 
-  // X axis tick labels: every 4 hours for time-of-day, evenly spaced ~6 ticks for absolute.
-  const xTicks = useMemo(() => buildXTicks(overlay), [overlay]);
+  // X axis tick labels: every 4 hours for time-of-day, DOW-aligned for
+  // absolute-offset (DOW names since both periods share the start DOW).
+  const xTicks = useMemo(() => buildXTicks(overlay, meta.periodA.from), [overlay, meta.periodA.from]);
 
   // ── Hover state ────────────────────────────────────────────────────
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -186,7 +187,7 @@ export function CompareOverlayChart({ overlay, meta }: Props) {
                 boxShadow: "0 2px 6px rgba(15,23,42,0.10)",
               }}>
                 <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                  {formatHoverLabel(overlay, hovered)}
+                  {formatHoverLabel(overlay, hovered, new Date(`${meta.periodA.from}T00:00:00Z`).getUTCDay())}
                 </div>
                 <Row color={PALETTE.aLine} label={meta.periodA.label ?? "Period A"} value={hovered.aCpu} />
                 <Row color={PALETTE.bLine} label={meta.periodB.label ?? "Period B"} value={hovered.bCpu} />
@@ -222,21 +223,24 @@ function formatDelta(a: number, b: number): string {
   return `${sign}${d.toFixed(1)} pp`;
 }
 
-function formatHoverLabel(overlay: CompareOverlay, p: OverlayPoint): string {
+function formatHoverLabel(overlay: CompareOverlay, p: OverlayPoint, startDow: number): string {
   if (overlay.alignment === "time-of-day") {
     const h = Math.floor(p.offsetMin / 60);
     const m = p.offsetMin % 60;
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   }
-  // absolute-offset: day + time
+  // absolute-offset: DOW + time. Both periods share the start DOW since
+  // the picker enforces same-DOW selection, so a single label suffices.
+  const DOW_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const day = Math.floor(p.offsetMin / 1440);
   const minOfDay = p.offsetMin % 1440;
   const h = Math.floor(minOfDay / 60);
   const m = minOfDay % 60;
-  return `Day ${day + 1}, ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  const dow = DOW_NAMES[(startDow + day) % 7];
+  return `${dow} ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-function buildXTicks(overlay: CompareOverlay): Array<{ idx: number; label: string }> {
+function buildXTicks(overlay: CompareOverlay, periodAFromIso: string): Array<{ idx: number; label: string }> {
   if (overlay.alignment === "time-of-day") {
     // Tick every 4 hours: 00, 04, 08, 12, 16, 20, 24.
     const ticks: Array<{ idx: number; label: string }> = [];
@@ -246,14 +250,22 @@ function buildXTicks(overlay: CompareOverlay): Array<{ idx: number; label: strin
     }
     return ticks;
   }
-  // absolute-offset: ~7 evenly spaced ticks labelled by day number.
-  const TICK_COUNT = 7;
+  // absolute-offset, day-of-week aligned: one tick at the start of each day.
+  // Labels use the short DOW name (Mon, Tue, ...) — same DOW for both A
+  // and B since the picker forces matching start DOW. For multi-week
+  // periods we suffix with the week number (W2 Mon, W3 Mon, ...).
+  const DOW_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const startDow = new Date(`${periodAFromIso}T00:00:00Z`).getUTCDay();
+  const totalDays = Math.ceil((overlay.totalSlots * overlay.slotMinutes) / 1440);
   const ticks: Array<{ idx: number; label: string }> = [];
-  for (let i = 0; i < TICK_COUNT; i++) {
-    const idx = Math.round(((overlay.totalSlots - 1) * i) / (TICK_COUNT - 1));
-    const offsetMin = idx * overlay.slotMinutes;
-    const dayIdx = Math.floor(offsetMin / 1440);
-    ticks.push({ idx, label: `D${dayIdx + 1}` });
+  // Pick an interval that keeps tick count under ~8 even for 28-day periods.
+  const stride = totalDays <= 7 ? 1 : totalDays <= 14 ? 2 : 4;
+  for (let day = 0; day < totalDays; day += stride) {
+    const idx = Math.min(overlay.totalSlots - 1, Math.round((day * 1440) / overlay.slotMinutes));
+    const dow = DOW_NAMES[(startDow + day) % 7];
+    const weekNum = Math.floor(day / 7) + 1;
+    const label = totalDays <= 7 ? dow : `W${weekNum} ${dow}`;
+    ticks.push({ idx, label });
   }
   return ticks;
 }

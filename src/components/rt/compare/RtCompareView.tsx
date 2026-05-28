@@ -15,7 +15,6 @@ import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
 import { useRtFilters } from "../RtFiltersContext";
 import {
   COMPARE_THRESHOLDS,
-  type CompareAlignment,
   type CompareResponse,
   type CompareThreshold,
 } from "./types";
@@ -44,14 +43,21 @@ const compareStorageKey = (pilotId: string) => `rtCompare:${pilotId}`;
 
 interface PersistedState {
   aFrom: string;
-  aTo: string;
   bFrom: string;
+  lengthDays: number;
   aLabel: string;
   bLabel: string;
   threshold: CompareThreshold;
-  alignment: CompareAlignment;
   cpuModel: string;
 }
+
+/** Period length presets the dashboard offers. Each is a whole number of
+ *  weeks so the day-of-week alignment (Mon-A vs Mon-B etc.) is exact. */
+const LENGTH_PRESETS = [
+  { id: "1w", label: "1 week", days: 7 },
+  { id: "2w", label: "2 weeks", days: 14 },
+  { id: "4w", label: "4 weeks", days: 28 },
+] as const;
 
 function todayIsoUtc(): string {
   const d = new Date();
@@ -72,6 +78,35 @@ function daysInclusive(fromIso: string, toIso: string): number {
 
 function rangesOverlap(aFrom: string, aTo: string, bFrom: string, bTo: string): boolean {
   return !(aTo < bFrom || bTo < aFrom);
+}
+
+/** 0 = Sunday, 1 = Monday, …, 6 = Saturday. UTC-based so the value is
+ *  stable regardless of the browser's local timezone. */
+function dayOfWeekUtc(iso: string): number {
+  return new Date(`${iso}T00:00:00Z`).getUTCDay();
+}
+
+/** Snap a date forward/backward to the nearest one matching the target
+ *  day-of-week. If the input already matches, returned unchanged.
+ *  We prefer moving backward (older date) so the suggestion lands inside
+ *  retention rather than blowing past today. */
+function snapToDow(iso: string, targetDow: number): string {
+  const current = dayOfWeekUtc(iso);
+  if (current === targetDow) return iso;
+  // Diff in [-6, +6]. Prefer negative (older) value.
+  let diff = targetDow - current;
+  if (diff > 0) diff -= 7;
+  return addDaysIso(iso, diff);
+}
+
+/** Locale-aware "Mon, Apr 27" rendering for date labels. */
+function formatDow(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", {
+    timeZone: "UTC",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function loadPersisted(pilotId: string): Partial<PersistedState> | null {
@@ -98,15 +133,35 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   const { filters } = useRtFilters();
   const persisted = useMemo(() => loadPersisted(pilot.id), [pilot.id]);
 
-  // Default range: most recent week vs week before. Lazy init so the date
-  // math runs once on mount instead of on every render — `todayIsoUtc()`
-  // includes a `new Date()` call that would otherwise re-evaluate.
-  const [aFrom, setAFrom] = useState<string>(() => persisted?.aFrom ?? addDaysIso(todayIsoUtc(), -14));
-  const [aTo, setATo] = useState<string>(() => persisted?.aTo ?? addDaysIso(todayIsoUtc(), -8));
-  const [bFrom, setBFrom] = useState<string>(() => persisted?.bFrom ?? addDaysIso(todayIsoUtc(), -7));
+  // Default: most-recent full week (Period A) vs previous full week (Period B),
+  // both starting on Monday. Lazy init keeps `todayIsoUtc()` from re-evaluating.
+  // The whole picker now revolves around two start dates + a length; ends are
+  // derived. Snapping enforces same DOW for both starts so day-of-week always
+  // pairs up Mon→Mon, Tue→Tue, etc.
+  const [lengthDays, setLengthDays] = useState<number>(() => persisted?.lengthDays ?? 7);
+  const [aFrom, setAFromRaw] = useState<string>(() => {
+    if (persisted?.aFrom) return persisted.aFrom;
+    // Start of most-recent full Monday: today's Monday minus 7d.
+    const today = todayIsoUtc();
+    const todayDow = dayOfWeekUtc(today);
+    // Monday = 1; back up to last Mon then one more week.
+    const offsetToLastMon = todayDow === 0 ? -6 : -(todayDow - 1) - 7;
+    return addDaysIso(today, offsetToLastMon);
+  });
+  const [bFrom, setBFromRaw] = useState<string>(() => {
+    if (persisted?.bFrom) return persisted.bFrom;
+    // Default: one period earlier than A (so length=7 → 7 days before A).
+    const len = persisted?.lengthDays ?? 7;
+    const a = persisted?.aFrom ?? (() => {
+      const today = todayIsoUtc();
+      const todayDow = dayOfWeekUtc(today);
+      const offsetToLastMon = todayDow === 0 ? -6 : -(todayDow - 1) - 7;
+      return addDaysIso(today, offsetToLastMon);
+    })();
+    return addDaysIso(a, -len);
+  });
   const [aLabel, setALabel] = useState(persisted?.aLabel ?? "");
   const [bLabel, setBLabel] = useState(persisted?.bLabel ?? "");
-  const [alignment, setAlignment] = useState<CompareAlignment>(persisted?.alignment ?? "time-of-day");
   // CPU model filter — defaults to "all"; the dropdown options come from
   // the pilot's device list so the user sees a closed set rather than
   // free-text. "all" passes through as null to the API.
@@ -135,33 +190,43 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   // Hint chip: show "inherited from Heatmap (N%)" until first Run or user override.
   const [showInheritedHint, setShowInheritedHint] = useState(() => persisted?.threshold == null);
 
-  // B "to" is locked — derived from B "from" + (A length − 1) days.
-  const aLength = daysInclusive(aFrom, aTo);
-  const bTo = addDaysIso(bFrom, aLength - 1);
+  // Derived: end dates from start + length.
+  const aTo = addDaysIso(aFrom, lengthDays - 1);
+  const bTo = addDaysIso(bFrom, lengthDays - 1);
+  const aLength = lengthDays;
+
+  // Snap B start to match A's day-of-week whenever either changes.
+  const setAFrom = (next: string) => {
+    setAFromRaw(next);
+    // Re-snap B so it stays on A's DOW.
+    const targetDow = dayOfWeekUtc(next);
+    setBFromRaw((prev) => (dayOfWeekUtc(prev) === targetDow ? prev : snapToDow(prev, targetDow)));
+  };
+  const setBFrom = (next: string) => {
+    const targetDow = dayOfWeekUtc(aFrom);
+    setBFromRaw(dayOfWeekUtc(next) === targetDow ? next : snapToDow(next, targetDow));
+  };
 
   // ── Validation ──────────────────────────────────────────────────────
+  // With end dates derived from start + lengthDays, and B snapped to A's
+  // DOW, the only remaining failure modes are: range overlap, retention
+  // overshoot, and (theoretically) length > 42d if a future custom preset
+  // lands. Day-of-week mismatch is impossible by construction.
   const validationError = useMemo<string | null>(() => {
-    if (aFrom > aTo) return "Period A: start date must be on or before end date.";
-    if (bFrom > bTo) return "Period B: start date must be on or before end date.";
-    if (aLength < 1) return "Periods must be at least 1 day long.";
-    if (aLength > 42) return "Periods cannot exceed 42 days (Zabbix retention).";
+    if (lengthDays > 42) return "Periods cannot exceed 42 days (Zabbix retention).";
     if (rangesOverlap(aFrom, aTo, bFrom, bTo)) return "Period A and Period B must not overlap.";
-    // Period start age — Zabbix history.get retention is ~42 days. Catch this
-    // client-side so the user gets immediate feedback instead of waiting for
-    // a server 422.
     const today = todayIsoUtc();
     const ageA = daysInclusive(aFrom, today) - 1;
     const ageB = daysInclusive(bFrom, today) - 1;
     const oldest = Math.max(ageA, ageB);
     if (oldest > 42) return `Period start is older than 42 days (current oldest = ${oldest}d). Zabbix history retention won't cover it.`;
     return null;
-  }, [aFrom, aTo, bFrom, bTo, aLength]);
+  }, [aFrom, aTo, bFrom, bTo, lengthDays]);
 
   // ── Data fetch ──────────────────────────────────────────────────────
   const [data, setData] = useState<CompareResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [useMock, setUseMock] = useState(false);
   // Abort the in-flight request if the user clicks Run again before it
   // completes — without this, the slower response can overwrite the newer
   // one and the user sees stale data.
@@ -184,11 +249,13 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
       url.searchParams.set("bFrom", bFrom);
       url.searchParams.set("bTo", bTo);
       url.searchParams.set("threshold", String(threshold));
-      url.searchParams.set("alignment", alignment);
+      // Always use absolute-offset alignment now that periods are
+      // guaranteed to start on the same day-of-week — minute N in A
+      // pairs with minute N in B at the same DOW + same time-of-day.
+      url.searchParams.set("alignment", "absolute-offset");
       if (cpuModel && cpuModel !== "all") url.searchParams.set("cpuModel", cpuModel);
       if (aLabel) url.searchParams.set("aLabel", aLabel);
       if (bLabel) url.searchParams.set("bLabel", bLabel);
-      if (useMock) url.searchParams.set("mock", "1");
       const res = await fetch(url.toString(), { cache: "no-store", signal: controller.signal });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -199,7 +266,7 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
       if (abortRef.current !== controller) return;
       setData(payload);
       setShowInheritedHint(false);
-      savePersisted(pilot.id, { aFrom, aTo, bFrom, aLabel, bLabel, threshold, alignment, cpuModel });
+      savePersisted(pilot.id, { aFrom, bFrom, lengthDays, aLabel, bLabel, threshold, cpuModel });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setError(e instanceof Error ? e.message : "Failed to load comparison");
@@ -212,8 +279,8 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   };
 
   useEffect(() => {
-    savePersisted(pilot.id, { aFrom, aTo, bFrom, aLabel, bLabel, threshold, alignment, cpuModel });
-  }, [pilot.id, aFrom, aTo, bFrom, aLabel, bLabel, threshold, alignment, cpuModel]);
+    savePersisted(pilot.id, { aFrom, bFrom, lengthDays, aLabel, bLabel, threshold, cpuModel });
+  }, [pilot.id, aFrom, bFrom, lengthDays, aLabel, bLabel, threshold, cpuModel]);
 
   return (
     <div style={{ padding: "8px 0 24px" }}>
@@ -221,8 +288,9 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
         Compare two periods
       </h2>
       <p style={{ fontSize: 13, color: PALETTE.textSec, marginBottom: 12 }}>
-        Pick two equal-length date ranges to compare CPU behaviour before and after a configuration change.
-        Period B&apos;s end date is locked to match Period A&apos;s length.
+        Pick a period length, then choose the start date for each period.
+        Both periods always begin on the same day of the week so Monday compares with Monday,
+        Tuesday with Tuesday, and so on.
       </p>
 
       {/* ── Filter bar ─────────────────────────────────────────────── */}
@@ -233,13 +301,44 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
         padding: 16,
         marginBottom: 12,
       }}>
+        {/* Row 1 — period length preset */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+          <label style={lbl}>Period length</label>
+          <div style={{ display: "inline-flex", gap: 0 }}>
+            {LENGTH_PRESETS.map((p, i) => {
+              const active = lengthDays === p.days;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setLengthDays(p.days)}
+                  style={{
+                    ...segButton,
+                    background: active ? PALETTE.text : "#fff",
+                    color: active ? "#fff" : PALETTE.text,
+                    borderColor: active ? PALETTE.text : PALETTE.border,
+                    borderTopLeftRadius: i === 0 ? 4 : 0,
+                    borderBottomLeftRadius: i === 0 ? 4 : 0,
+                    borderTopRightRadius: i === LENGTH_PRESETS.length - 1 ? 4 : 0,
+                    borderBottomRightRadius: i === LENGTH_PRESETS.length - 1 ? 4 : 0,
+                    marginLeft: i === 0 ? 0 : -1,
+                  }}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Row 2 — Period A */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
           <span style={periodBadge(PALETTE.aBlueBg, PALETTE.aBlue)}>Period A</span>
-          <label style={lbl}>From</label>
+          <label style={lbl}>Starts</label>
           <input type="date" value={aFrom} onChange={(e) => setAFrom(e.target.value)} style={dateInput} />
-          <label style={lbl}>To</label>
-          <input type="date" value={aTo} onChange={(e) => setATo(e.target.value)} style={dateInput} />
-          <span style={{ ...lbl }}>({aLength} day{aLength === 1 ? "" : "s"})</span>
+          <span style={{ ...lbl, color: PALETTE.text }}>
+            {formatDow(aFrom)} → {formatDow(aTo)}
+          </span>
           <label style={{ ...lbl, marginLeft: 6 }}>Label</label>
           <input
             type="text"
@@ -251,20 +350,20 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
           />
         </div>
 
+        {/* Row 3 — Period B */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
           <span style={periodBadge(PALETTE.bOrangeBg, PALETTE.bOrange)}>Period B</span>
-          <label style={lbl}>From</label>
-          <input type="date" value={bFrom} onChange={(e) => setBFrom(e.target.value)} style={dateInput} />
-          <label style={lbl}>To</label>
+          <label style={lbl}>Starts</label>
           <input
             type="date"
-            value={bTo}
-            readOnly
-            tabIndex={-1}
-            title={`Auto-locked to match Period A length (${aLength} day${aLength === 1 ? "" : "s"})`}
-            style={{ ...dateInput, background: PALETTE.panelBg, color: PALETTE.textSec, cursor: "not-allowed" }}
+            value={bFrom}
+            onChange={(e) => setBFrom(e.target.value)}
+            style={dateInput}
+            title="Auto-snaps to match Period A's day-of-week so Monday compares with Monday, etc."
           />
-          <span style={lbl}>(auto, {aLength} day{aLength === 1 ? "" : "s"})</span>
+          <span style={{ ...lbl, color: PALETTE.text }}>
+            {formatDow(bFrom)} → {formatDow(bTo)}
+          </span>
           <label style={{ ...lbl, marginLeft: 6 }}>Label</label>
           <input
             type="text"
@@ -318,48 +417,6 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
               <option key={m} value={m}>{m === "all" ? "All models" : m}</option>
             ))}
           </select>
-
-          <span style={{ width: 1, alignSelf: "stretch", background: PALETTE.border, margin: "0 4px" }} />
-
-          <label style={lbl}>Alignment</label>
-          <div style={{ display: "inline-flex", gap: 0 }}>
-            <button
-              type="button"
-              onClick={() => setAlignment("time-of-day")}
-              style={{
-                ...segButton,
-                borderTopRightRadius: 0, borderBottomRightRadius: 0,
-                background: alignment === "time-of-day" ? PALETTE.text : "#fff",
-                color: alignment === "time-of-day" ? "#fff" : PALETTE.text,
-                borderColor: alignment === "time-of-day" ? PALETTE.text : PALETTE.border,
-              }}
-            >
-              Time of day
-            </button>
-            <button
-              type="button"
-              onClick={() => setAlignment("absolute-offset")}
-              style={{
-                ...segButton,
-                borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
-                background: alignment === "absolute-offset" ? PALETTE.text : "#fff",
-                color: alignment === "absolute-offset" ? "#fff" : PALETTE.text,
-                borderColor: alignment === "absolute-offset" ? PALETTE.text : PALETTE.border,
-              }}
-            >
-              Absolute offset
-            </button>
-          </div>
-
-          <label style={{ ...lbl, marginLeft: 6 }} title="Use deterministic seed-based fake data instead of hitting Zabbix. Helpful for UI dev / demos when the real path is slow.">
-            <input
-              type="checkbox"
-              checked={useMock}
-              onChange={(e) => setUseMock(e.target.checked)}
-              style={{ marginRight: 4, verticalAlign: "middle" }}
-            />
-            Mock data
-          </label>
 
           {validationError && (
             <span style={{ marginLeft: 8, fontSize: 12, color: PALETTE.regress, fontWeight: 500 }}>
