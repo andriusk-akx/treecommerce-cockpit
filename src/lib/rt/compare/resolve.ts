@@ -22,6 +22,40 @@ interface ZHostWithInventory {
   inventory: { cpuModel: string | null } | null;
 }
 
+/**
+ * Server-side heuristic for "is this string a real CPU model?". Kept here
+ * (not just on the client) so the API responds with `cpuModel: null` for
+ * bogus values that leaked into Zabbix inventory hardware fields. This
+ * means even a client running stale JS — or a future client built against
+ * a different aggregation strategy — gets clean grouping by default.
+ *
+ * Real CPU model strings:
+ *   - start with a recognised vendor / family prefix (case-insensitive)
+ *   - contain at least one digit (rules out bare "Intel")
+ *   - are reasonably short (≤ 80 chars; longer = pasted multi-line junk)
+ *   - have no newlines in the body
+ *
+ * Examples that pass: "Intel i3-4330", "AMD Ryzen 5 5600X",
+ *   "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz".
+ * Examples that fail: "SCO35", "SCO35 Rimi MHM Maluno",
+ *   "Intel i3-4330\nRimi HM Panorama", any hostname-style string.
+ */
+const VENDOR_PREFIXES = [
+  "intel", "amd", "apple", "arm", "qualcomm", "snapdragon",
+  "ryzen", "epyc", "threadripper", "xeon", "core", "pentium",
+  "celeron", "atom",
+];
+function isLikelyRealCpuModel(s: string | null | undefined): boolean {
+  if (!s) return false;
+  const trimmed = s.trim();
+  if (trimmed === "" || trimmed === "—" || trimmed === "-") return false;
+  if (trimmed.length > 80) return false;
+  if (/[\r\n]/.test(trimmed)) return false;
+  if (!/\d/.test(trimmed)) return false;
+  const lower = trimmed.toLowerCase();
+  return VENDOR_PREFIXES.some((p) => lower.startsWith(p));
+}
+
 export interface ResolveResult {
   hosts: HostMeta[];
   itemIds: string[];
@@ -96,10 +130,15 @@ export async function resolvePilotHosts(
     const device = keyToDevice.get(z.name);
     if (device) {
       const resolved = resolveCpuModel(device.cpuModel, z.inventory?.cpuModel ?? null, "");
+      // Apply the real-CPU-model heuristic here, server-side. Anything
+      // failing the test surfaces as `cpuModel: null` in the response so
+      // even clients running cached JS aggregate it cleanly into the
+      // Unknown bucket — see the helper above for what counts as "real".
+      const cleaned = resolved && resolved !== "" ? resolved : null;
       matchedZAll.push({
         zHostId: z.hostid,
         device,
-        resolvedCpuModel: resolved && resolved !== "" ? resolved : null,
+        resolvedCpuModel: isLikelyRealCpuModel(cleaned) ? cleaned : null,
       });
     }
   }
