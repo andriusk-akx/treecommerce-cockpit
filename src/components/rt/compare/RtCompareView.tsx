@@ -223,15 +223,25 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   const [error, setError] = useState<string | null>(null);
 
   // Build dropdown options. Pre-Run: DB cpuModels only. Post-Run: union
-  // of DB cpuModels + resolved cpuModels in the response.
+  // of DB cpuModels + resolved cpuModels in the response. Bogus strings
+  // that don't look like CPU models (hostnames leaked into the inventory
+  // hardware field, single-word labels, etc.) are excluded so the
+  // dropdown stays clean — those rows still aggregate into the Unknown
+  // bucket in the table itself.
   const cpuModelOptions = useMemo(() => {
+    const isReal = (s: string | null | undefined): boolean => {
+      if (!s) return false;
+      const t = s.trim();
+      if (t === "" || t === "—" || t === "-") return false;
+      return /\s/.test(t) && /\d/.test(t);
+    };
     const set = new Set<string>();
     for (const d of pilot.devices) {
-      if (d.cpuModel && d.cpuModel.trim()) set.add(d.cpuModel.trim());
+      if (isReal(d.cpuModel)) set.add(d.cpuModel.trim());
     }
     if (data) {
       for (const r of data.hostRows) {
-        if (r.cpuModel && r.cpuModel.trim()) set.add(r.cpuModel.trim());
+        if (isReal(r.cpuModel)) set.add(r.cpuModel!.trim());
       }
     }
     return ["all", ...Array.from(set).sort()];

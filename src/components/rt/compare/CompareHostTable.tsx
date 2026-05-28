@@ -61,7 +61,7 @@ export function CompareHostTable({
     () => (groupBy === "cpuModel" ? aggregateByCpuModel(rows, periodLengthDays) : rows),
     [rows, groupBy, periodLengthDays],
   );
-  const sorted = useMemo(() => sortRows(displayRows, sortKey, sortDir), [displayRows, sortKey, sortDir]);
+  const sorted = useMemo(() => sortRows(displayRows, sortKey, sortDir, groupBy), [displayRows, sortKey, sortDir, groupBy]);
 
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) {
@@ -395,7 +395,29 @@ function padArray(arr: number[], n: number): number[] {
   return out;
 }
 
-function sortRows(rows: CompareHostRow[], k: SortKey, dir: SortDir): CompareHostRow[] {
+/** Token used as the CPU-model key for everything that isn't a recognisable
+ *  CPU string (null, blank, bogus values like "SCO35" that leaked from
+ *  Zabbix hostnames into the hardware inventory field). Centralised so
+ *  aggregation and sort agree on a single sentinel. */
+const UNKNOWN_CPU_LABEL = "Unknown CPU";
+
+/**
+ * Heuristic: a real CPU model string has at least one space AND at least
+ * one digit. Captures "Intel i3-4330", "AMD Ryzen 5 5600X", "Intel
+ * i3-12300HL"; rejects "SCO35", hostnames, single-word labels.
+ *
+ * Anything that fails the test is folded into the Unknown bucket so the
+ * comparison table has clean grouping instead of one synthetic "row per
+ * data-quality bug".
+ */
+function isLikelyRealCpuModel(s: string | null | undefined): boolean {
+  if (!s) return false;
+  const trimmed = s.trim();
+  if (trimmed === "" || trimmed === "—" || trimmed === "-") return false;
+  return /\s/.test(trimmed) && /\d/.test(trimmed);
+}
+
+function sortRows(rows: CompareHostRow[], k: SortKey, dir: SortDir, groupBy: GroupBy): CompareHostRow[] {
   const sign = dir === "asc" ? 1 : -1;
   const get = (r: CompareHostRow): string | number => {
     switch (k) {
@@ -410,12 +432,23 @@ function sortRows(rows: CompareHostRow[], k: SortKey, dir: SortDir): CompareHost
       case "bMean": return r.bMeanCpu;
     }
   };
-  return [...rows].sort((x, y) => {
+  const compare = (x: CompareHostRow, y: CompareHostRow) => {
     const xv = get(x);
     const yv = get(y);
     if (typeof xv === "number" && typeof yv === "number") return (xv - yv) * sign;
     return String(xv).localeCompare(String(yv)) * sign;
-  });
+  };
+  // Always push "unknown CPU" rows to the END of the list regardless of
+  // sort column (Andrius's call 2026-05-28). Two flavours:
+  //   - cpuModel-group mode: the single Unknown bucket row.
+  //   - host mode: individual hosts whose cpuModel string doesn't look
+  //     like a real CPU model (data-quality residuals).
+  const isUnknown = groupBy === "cpuModel"
+    ? (r: CompareHostRow) => r.cpuModel === UNKNOWN_CPU_LABEL
+    : (r: CompareHostRow) => !isLikelyRealCpuModel(r.cpuModel);
+  const real = rows.filter((r) => !isUnknown(r)).sort(compare);
+  const unknown = rows.filter(isUnknown).sort(compare);
+  return [...real, ...unknown];
 }
 
 /**
@@ -439,7 +472,11 @@ function sortRows(rows: CompareHostRow[], k: SortKey, dir: SortDir): CompareHost
 function aggregateByCpuModel(rows: CompareHostRow[], periodLengthDays: number): CompareHostRow[] {
   const byModel = new Map<string, CompareHostRow[]>();
   for (const r of rows) {
-    const key = r.cpuModel ?? "Unknown CPU";
+    // Anything that doesn't look like a real CPU model (null, blank,
+    // bogus values like "SCO35" that leaked from hostnames into Zabbix
+    // inventory hardware fields) goes into the single Unknown bucket so
+    // we don't end up with one synthetic row per data-quality bug.
+    const key = isLikelyRealCpuModel(r.cpuModel) ? (r.cpuModel as string).trim() : UNKNOWN_CPU_LABEL;
     const bucket = byModel.get(key);
     if (bucket) bucket.push(r);
     else byModel.set(key, [r]);
