@@ -34,8 +34,9 @@ const PALETTE = {
 type SortKey =
   | "host" | "store" | "cpu"
   | "aMinutes" | "bMinutes" | "deltaAbs" | "deltaPct"
-  | "aMean" | "bMean" | "aP95" | "bP95";
+  | "aMean" | "bMean";
 type SortDir = "asc" | "desc";
+type GroupBy = "host" | "cpuModel";
 
 export function CompareHostTable({
   rows,
@@ -51,8 +52,16 @@ export function CompareHostTable({
   const [sortKey, setSortKey] = useState<SortKey>("deltaPct");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [expandedHostId, setExpandedHostId] = useState<string | null>(null);
+  const [groupBy, setGroupBy] = useState<GroupBy>("host");
 
-  const sorted = useMemo(() => sortRows(rows, sortKey, sortDir), [rows, sortKey, sortDir]);
+  // When groupBy = "cpuModel", collapse the host list into one synthetic row
+  // per CPU model that sums minutes, weight-averages mean CPU, and
+  // element-wise sums sparklines across member hosts.
+  const displayRows = useMemo(
+    () => (groupBy === "cpuModel" ? aggregateByCpuModel(rows, periodLengthDays) : rows),
+    [rows, groupBy, periodLengthDays],
+  );
+  const sorted = useMemo(() => sortRows(displayRows, sortKey, sortDir), [displayRows, sortKey, sortDir]);
 
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) {
@@ -85,14 +94,30 @@ export function CompareHostTable({
       borderRadius: 8,
       padding: 16,
     }}>
-      <div style={{ display: "flex", alignItems: "baseline", marginBottom: 8, gap: 8 }}>
-        <strong style={{ fontSize: 13, color: PALETTE.text }}>Per-host comparison</strong>
-        <span style={{ marginLeft: "auto", fontSize: 11, color: PALETTE.textSec }}>
-          {rows.length} hosts · sorted by {sortKey} {sortDir === "asc" ? "↑" : "↓"}
+      <div style={{ display: "flex", alignItems: "center", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+        <strong style={{ fontSize: 13, color: PALETTE.text }}>
+          {groupBy === "cpuModel" ? "Per-CPU-model comparison" : "Per-host comparison"}
+        </strong>
+        <span style={{ fontSize: 11, color: PALETTE.textSec }}>
+          {groupBy === "cpuModel" ? `${displayRows.length} models, ${rows.length} hosts` : `${rows.length} hosts`}
+          {" · "}sorted by {sortKey} {sortDir === "asc" ? "↑" : "↓"}
         </span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: PALETTE.textSec }}>Group by</span>
+        <div style={{ display: "inline-flex", gap: 0 }}>
+          <button
+            type="button"
+            onClick={() => { setGroupBy("host"); setExpandedHostId(null); }}
+            style={groupBtnStyle(groupBy === "host", "left")}
+          >Host</button>
+          <button
+            type="button"
+            onClick={() => { setGroupBy("cpuModel"); setExpandedHostId(null); }}
+            style={groupBtnStyle(groupBy === "cpuModel", "right")}
+          >CPU model</button>
+        </div>
         <button
           type="button"
-          onClick={() => exportHostsCsv(meta, rows)}
+          onClick={() => exportHostsCsv(meta, displayRows)}
           style={{
             padding: "4px 10px", fontSize: 11, fontWeight: 500,
             background: "#fff", color: PALETTE.text,
@@ -105,20 +130,25 @@ export function CompareHostTable({
       </div>
 
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse", minWidth: 980 }}>
+        <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse", minWidth: 820 }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${PALETTE.border}` }}>
-              <Th label="Host" k="host" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="left" />
-              <Th label="Store" k="store" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="left" />
-              <Th label="CPU" k="cpu" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="left" />
+              <Th label={groupBy === "cpuModel" ? "CPU model" : "Host"} k="host" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="left" />
+              {groupBy === "host" && (
+                <Th label="Store" k="store" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="left" />
+              )}
+              {groupBy === "host" && (
+                <Th label="CPU" k="cpu" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="left" />
+              )}
+              {groupBy === "cpuModel" && (
+                <th style={{ padding: "6px 8px", fontSize: 11, fontWeight: 600, textAlign: "right", color: PALETTE.text }}>Hosts</th>
+              )}
               <Th label={`Min>${threshold} A`} k="aMinutes" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
               <Th label={`Min>${threshold} B`} k="bMinutes" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
               <Th label="Δ abs" k="deltaAbs" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
               <Th label="Δ %" k="deltaPct" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
               <Th label="Mean A" k="aMean" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
               <Th label="Mean B" k="bMean" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
-              <Th label="P95 A" k="aP95" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
-              <Th label="P95 B" k="bP95" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />
               <th style={{ padding: "6px 8px", fontSize: 11, fontWeight: 600, textAlign: "center", color: PALETTE.text }}>Per-day</th>
             </tr>
           </thead>
@@ -132,6 +162,7 @@ export function CompareHostTable({
                 onToggle={() => setExpandedHostId(expandedHostId === row.hostId ? null : row.hostId)}
                 threshold={threshold}
                 periodLengthDays={periodLengthDays}
+                groupBy={groupBy}
               />
             ))}
           </tbody>
@@ -186,10 +217,10 @@ function Th({
 }
 
 function HostRow({
-  row, idx, expanded, onToggle, threshold, periodLengthDays,
+  row, idx, expanded, onToggle, threshold, periodLengthDays, groupBy,
 }: {
   row: CompareHostRow; idx: number; expanded: boolean; onToggle: () => void;
-  threshold: number; periodLengthDays: number;
+  threshold: number; periodLengthDays: number; groupBy: GroupBy;
 }) {
   const noisy = row.deltaMinutesPct != null && Math.abs(row.deltaMinutesPct) <= 2;
   const positive = row.deltaMinutesPct != null && row.deltaMinutesPct > 2;
@@ -208,7 +239,9 @@ function HostRow({
       <tr style={{ background: rowBg, borderBottom: `1px solid ${PALETTE.border}`, cursor: "pointer" }} onClick={onToggle}>
         <td style={td}>
           <span style={{ marginRight: 6, color: PALETTE.textSec }}>{expanded ? "▾" : "▸"}</span>
-          <span style={{ fontWeight: 500 }}>{row.hostName}</span>
+          <span style={{ fontWeight: 500 }}>
+            {groupBy === "cpuModel" ? (row.cpuModel ?? "Unknown CPU") : row.hostName}
+          </span>
           {row.hostScope === "added-in-b" && (
             <span style={badge("#dcfce7", "#166534")}>added in B</span>
           )}
@@ -216,26 +249,32 @@ function HostRow({
             <span style={badge("#fee2e2", "#991b1b")}>removed before B</span>
           )}
         </td>
-        <td style={td}>{row.storeName}</td>
-        <td style={td}>
-          {row.cpuModel ?? "—"}
-          {row.cpuCores ? <span style={{ color: PALETTE.textSec, marginLeft: 4 }}>· {row.cpuCores}c</span> : null}
-        </td>
+        {groupBy === "host" && <td style={td}>{row.storeName}</td>}
+        {groupBy === "host" && (
+          <td style={td}>
+            {row.cpuModel ?? "—"}
+            {row.cpuCores ? <span style={{ color: PALETTE.textSec, marginLeft: 4 }}>· {row.cpuCores}c</span> : null}
+          </td>
+        )}
+        {groupBy === "cpuModel" && (
+          <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+            {/* hostCount is encoded into aSamples-as-row-count when grouped; show it instead. */}
+            {row.cpuCores ?? "—"}
+          </td>
+        )}
         <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{valueA}</td>
         <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{valueB}</td>
         <td style={{ ...td, textAlign: "right", color, fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>{deltaText}</td>
         <td style={{ ...td, textAlign: "right", color, fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>{deltaPctText}</td>
         <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{row.aMeanCpu}%</td>
         <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{row.bMeanCpu}%</td>
-        <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{row.aP95Cpu}%</td>
-        <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{row.bP95Cpu}%</td>
         <td style={{ padding: "4px 8px" }}>
           <Sparkline a={row.aSparkline} b={row.bSparkline} periodLengthDays={periodLengthDays} />
         </td>
       </tr>
       {expanded && (
         <tr style={{ background: PALETTE.drilldownBg }}>
-          <td colSpan={12} style={{ padding: 0 }}>
+          <td colSpan={groupBy === "host" ? 10 : 9} style={{ padding: 0 }}>
             <Drilldown row={row} periodLengthDays={periodLengthDays} threshold={threshold} />
           </td>
         </tr>
@@ -369,8 +408,6 @@ function sortRows(rows: CompareHostRow[], k: SortKey, dir: SortDir): CompareHost
       case "deltaPct": return r.deltaMinutesPct ?? Number.POSITIVE_INFINITY;
       case "aMean": return r.aMeanCpu;
       case "bMean": return r.bMeanCpu;
-      case "aP95": return r.aP95Cpu;
-      case "bP95": return r.bP95Cpu;
     }
   };
   return [...rows].sort((x, y) => {
@@ -379,6 +416,95 @@ function sortRows(rows: CompareHostRow[], k: SortKey, dir: SortDir): CompareHost
     if (typeof xv === "number" && typeof yv === "number") return (xv - yv) * sign;
     return String(xv).localeCompare(String(yv)) * sign;
   });
+}
+
+/**
+ * Collapse per-host rows into one synthetic row per CPU model.
+ *
+ * Aggregations:
+ *   - aMinutesAbove / bMinutesAbove: SUM across member hosts.
+ *   - aMeanCpu / bMeanCpu: sample-weighted mean (mean × samples summed,
+ *     then divided by total samples). For hosts with 0 samples in that
+ *     period (added-in-b / removed-before-b), the corresponding mean
+ *     contribution is dropped from that side.
+ *   - aSparkline / bSparkline: element-wise sum of per-day totals.
+ *   - cpuCores stores the HOST COUNT of the group (overload for the
+ *     "Hosts" column when grouped — saves a separate field on the type).
+ *   - hostName mirrors the CPU model so existing sort-by-name works.
+ *   - hostId is `cpu:<model>` so React keys stay stable.
+ *
+ * Δ% is recomputed from the summed minutes so it tells the truth about
+ * the group, not the average of per-host percentages.
+ */
+function aggregateByCpuModel(rows: CompareHostRow[], periodLengthDays: number): CompareHostRow[] {
+  const byModel = new Map<string, CompareHostRow[]>();
+  for (const r of rows) {
+    const key = r.cpuModel ?? "Unknown CPU";
+    const bucket = byModel.get(key);
+    if (bucket) bucket.push(r);
+    else byModel.set(key, [r]);
+  }
+  const out: CompareHostRow[] = [];
+  for (const [model, members] of byModel) {
+    const aSum = members.reduce((s, m) => s + m.aMinutesAbove, 0);
+    const bSum = members.reduce((s, m) => s + m.bMinutesAbove, 0);
+    let aMeanWeighted = 0, aWeight = 0, bMeanWeighted = 0, bWeight = 0;
+    for (const m of members) {
+      if (m.aSamples > 0) { aMeanWeighted += m.aMeanCpu * m.aSamples; aWeight += m.aSamples; }
+      if (m.bSamples > 0) { bMeanWeighted += m.bMeanCpu * m.bSamples; bWeight += m.bSamples; }
+    }
+    const aMean = aWeight > 0 ? aMeanWeighted / aWeight : 0;
+    const bMean = bWeight > 0 ? bMeanWeighted / bWeight : 0;
+    const aSpark: number[] = new Array(periodLengthDays).fill(0);
+    const bSpark: number[] = new Array(periodLengthDays).fill(0);
+    for (const m of members) {
+      for (let i = 0; i < Math.min(periodLengthDays, m.aSparkline.length); i++) aSpark[i] += m.aSparkline[i];
+      for (let i = 0; i < Math.min(periodLengthDays, m.bSparkline.length); i++) bSpark[i] += m.bSparkline[i];
+    }
+    const aSamples = members.reduce((s, m) => s + m.aSamples, 0);
+    const bSamples = members.reduce((s, m) => s + m.bSamples, 0);
+    const scope: CompareHostRow["hostScope"] =
+      aSamples === 0 && bSamples > 0 ? "added-in-b"
+      : bSamples === 0 && aSamples > 0 ? "removed-before-b"
+      : "both";
+    out.push({
+      hostId: `cpu:${model}`,
+      hostName: model,
+      storeName: `${members.length} host${members.length === 1 ? "" : "s"}`,
+      cpuModel: model,
+      // Re-purpose cpuCores as the host count for the grouped display.
+      cpuCores: members.length,
+      aMinutesAbove: aSum,
+      bMinutesAbove: bSum,
+      deltaMinutesAbs: bSum - aSum,
+      deltaMinutesPct: aSum === 0 ? null : Math.round(((bSum - aSum) / aSum) * 1000) / 10,
+      aMeanCpu: Math.round(aMean * 10) / 10,
+      bMeanCpu: Math.round(bMean * 10) / 10,
+      aSamples,
+      bSamples,
+      aSparkline: aSpark,
+      bSparkline: bSpark,
+      dataQuality: members.every((m) => m.dataQuality === "full") ? "full"
+        : members.some((m) => m.dataQuality === "partial-missing") ? "partial-missing"
+        : "trend-only",
+      hostScope: scope,
+    });
+  }
+  return out;
+}
+
+function groupBtnStyle(active: boolean, side: "left" | "right"): React.CSSProperties {
+  return {
+    padding: "3px 10px", fontSize: 11, fontWeight: 500,
+    background: active ? PALETTE.text : "#fff",
+    color: active ? "#fff" : PALETTE.text,
+    border: `1px solid ${active ? PALETTE.text : PALETTE.border}`,
+    borderTopLeftRadius: side === "left" ? 4 : 0,
+    borderBottomLeftRadius: side === "left" ? 4 : 0,
+    borderTopRightRadius: side === "right" ? 4 : 0,
+    borderBottomRightRadius: side === "right" ? 4 : 0,
+    cursor: "pointer",
+  };
 }
 
 const td: React.CSSProperties = {

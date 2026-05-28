@@ -26,6 +26,7 @@ export interface ResolveResult {
 export async function resolvePilotHosts(
   pilotId: string,
   hostFilter: string[] | null,
+  cpuModelFilter: string | null = null,
 ): Promise<ResolveResult> {
   const pilot = await prisma.pilot.findUnique({
     where: { id: pilotId },
@@ -41,7 +42,13 @@ export async function resolvePilotHosts(
   }
 
   const allowed = hostFilter && hostFilter.length > 0 ? new Set(hostFilter) : null;
-  const devices = pilot.devices.filter((d) => !allowed || allowed.has(d.id));
+  const devices = pilot.devices
+    .filter((d) => !allowed || allowed.has(d.id))
+    // CPU model filter: exact match against Device.cpuModel. When cpuModel
+    // is null we keep all rows. Note: Device.cpuModel may itself be null
+    // for devices where Zabbix inventory hasn't been resolved yet — those
+    // are excluded when a specific model is requested.
+    .filter((d) => !cpuModelFilter || d.cpuModel === cpuModelFilter);
   if (devices.length === 0) {
     return { hosts: [], itemIds: [], itemHostMap: new Map(), unmatchedDeviceIds: [] };
   }

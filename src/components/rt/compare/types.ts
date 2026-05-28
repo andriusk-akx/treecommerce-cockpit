@@ -38,8 +38,6 @@ export interface CompareKpis {
   minutesAboveThreshold: CompareDelta;
   /** Mean CPU % across all samples and hosts. */
   meanCpu: CompareDelta;
-  /** P95 of per-sample CPU % across all samples. */
-  p95Cpu: CompareDelta;
   /** Percentage of total time spent above threshold (0..100). */
   pctTimeAboveThreshold: CompareDelta;
 }
@@ -81,8 +79,6 @@ export interface CompareHostRow {
   deltaMinutesPct: number | null;
   aMeanCpu: number;
   bMeanCpu: number;
-  aP95Cpu: number;
-  bP95Cpu: number;
   aSamples: number;
   bSamples: number;
   /** Per-day micro-chart values for spark-bars (length = period length in days). */

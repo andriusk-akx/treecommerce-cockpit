@@ -73,13 +73,6 @@ function delta(a: number, b: number): CompareDelta {
   return { a, b, deltaAbs, deltaPct };
 }
 
-function p95(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((x, y) => x - y);
-  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95));
-  return sorted[idx];
-}
-
 /**
  * Build per-host comparison rows. The daily payload from Zabbix carries
  * `minutesAbove` bins by zHostId; we keyed the host metadata by zHostId too,
@@ -109,8 +102,12 @@ function buildHostRows(input: ComputeInput, periodLengthDays: number): CompareHo
 
     const aMeanCpu = weightedMean(aDaily);
     const bMeanCpu = weightedMean(bDaily);
-    const aP95Cpu = p95(aHostSamples.map((s) => s.value));
-    const bP95Cpu = p95(bHostSamples.map((s) => s.value));
+    // P95 was removed from the dashboard (Andrius, 2026-05-28) — it added
+    // a noisy column without surfacing actionable signal in the 5-card
+    // grid. minutesAboveThreshold + meanCpu already capture both severity
+    // and breadth; P95 was a third lens that mostly overlapped with mean
+    // in the Rimi fleet's CPU distribution.
+    void aHostSamples; void bHostSamples;
 
     const aSparkline = aDates.map((d) => aDaily.find((x) => x.date === d)?.minutesAbove[thr] ?? 0);
     const bSparkline = bDates.map((d) => bDaily.find((x) => x.date === d)?.minutesAbove[thr] ?? 0);
@@ -139,8 +136,6 @@ function buildHostRows(input: ComputeInput, periodLengthDays: number): CompareHo
       deltaMinutesPct,
       aMeanCpu: Math.round(aMeanCpu * 10) / 10,
       bMeanCpu: Math.round(bMeanCpu * 10) / 10,
-      aP95Cpu: Math.round(aP95Cpu * 10) / 10,
-      bP95Cpu: Math.round(bP95Cpu * 10) / 10,
       aSamples,
       bSamples,
       aSparkline,
@@ -215,8 +210,6 @@ export function buildCompareResponse(input: ComputeInput): CompareResponse {
   // flat array of ALL hosts' daily entries.
   const meanA = weightedMean(input.periodA.daily);
   const meanB = weightedMean(input.periodB.daily);
-  const p95A = p95(input.periodA.samples.map((s) => s.value));
-  const p95B = p95(input.periodB.samples.map((s) => s.value));
 
   // % time above threshold — denominator = total sample-minutes recorded
   // for the period across all hosts. If a host's monitoring went silent
@@ -255,7 +248,6 @@ export function buildCompareResponse(input: ComputeInput): CompareResponse {
     kpis: {
       minutesAboveThreshold: delta(sumA, sumB),
       meanCpu: delta(roundTenth(meanA), roundTenth(meanB)),
-      p95Cpu: delta(roundTenth(p95A), roundTenth(p95B)),
       pctTimeAboveThreshold: delta(pctA, pctB),
     },
     overlay,

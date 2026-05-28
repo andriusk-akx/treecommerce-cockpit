@@ -52,6 +52,9 @@ interface ParsedQuery {
   aLabel: string | null;
   bLabel: string | null;
   hostIds: string[] | null;
+  /** Optional: restrict comparison to hosts with this exact CPU model.
+   *  null = all CPU models. */
+  cpuModel: string | null;
   alignment: CompareAlignment;
   useMock: boolean;
 }
@@ -203,6 +206,9 @@ function validate(req: NextRequest): { ok: true; q: ParsedQuery } | { ok: false;
   const hostIdsRaw = sp.get("hostIds");
   const hostIds = hostIdsRaw ? hostIdsRaw.split(",").map((s) => s.trim()).filter(Boolean) : null;
 
+  const cpuModelRaw = sp.get("cpuModel");
+  const cpuModel = cpuModelRaw && cpuModelRaw.trim() && cpuModelRaw !== "all" ? cpuModelRaw.trim() : null;
+
   const alignmentRaw = sp.get("alignment");
   const alignment: CompareAlignment =
     alignmentRaw === "absolute-offset" ? "absolute-offset" : "time-of-day";
@@ -221,6 +227,7 @@ function validate(req: NextRequest): { ok: true; q: ParsedQuery } | { ok: false;
       aLabel,
       bLabel,
       hostIds,
+      cpuModel,
       alignment,
       useMock,
     },
@@ -282,8 +289,6 @@ function buildMockPayload(q: ParsedQuery, hosts: MockHost[]): CompareResponse {
     const bMinutes = Math.max(8, Math.round(baseMin * (1 - improvement)));
     const aMean = 35 + rng() * 30;
     const bMean = aMean - 8 - rng() * 10;
-    const aP95 = Math.min(99, aMean + 15 + rng() * 15);
-    const bP95 = Math.min(99, bMean + 10 + rng() * 12);
     const aSpark = Array.from({ length: periodLength }, () => Math.round(rng() * 100));
     const bSpark = Array.from({ length: periodLength }, () => Math.round(rng() * 60));
     const hostScope = idx === hosts.length - 1 && hosts.length >= 4 ? "added-in-b" : "both";
@@ -298,8 +303,6 @@ function buildMockPayload(q: ParsedQuery, hosts: MockHost[]): CompareResponse {
       deltaMinutesPct: hostScope === "added-in-b" ? null : Math.round(((bMinutes - aMinutes) / aMinutes) * 1000) / 10,
       aMeanCpu: Math.round(aMean * 10) / 10,
       bMeanCpu: Math.round(bMean * 10) / 10,
-      aP95Cpu: Math.round(aP95 * 10) / 10,
-      bP95Cpu: Math.round(bP95 * 10) / 10,
       aSamples, bSamples,
       aSparkline: hostScope === "added-in-b" ? [] : aSpark,
       bSparkline: bSpark,
@@ -314,10 +317,6 @@ function buildMockPayload(q: ParsedQuery, hosts: MockHost[]): CompareResponse {
     : Math.round((hostRows.reduce((s, r) => s + r.aMeanCpu, 0) / hostRows.length) * 10) / 10;
   const meanB = hostRows.length === 0 ? 0
     : Math.round((hostRows.reduce((s, r) => s + r.bMeanCpu, 0) / hostRows.length) * 10) / 10;
-  const p95A = hostRows.length === 0 ? 0
-    : Math.round((hostRows.reduce((s, r) => s + r.aP95Cpu, 0) / hostRows.length) * 10) / 10;
-  const p95B = hostRows.length === 0 ? 0
-    : Math.round((hostRows.reduce((s, r) => s + r.bP95Cpu, 0) / hostRows.length) * 10) / 10;
   const totalMinutesPerPeriod = periodLength * 24 * 60 * Math.max(hostRows.length, 1);
   const pctA = Math.round((sumA / totalMinutesPerPeriod) * 1000) / 10;
   const pctB = Math.round((sumB / totalMinutesPerPeriod) * 1000) / 10;
@@ -376,7 +375,6 @@ function buildMockPayload(q: ParsedQuery, hosts: MockHost[]): CompareResponse {
     kpis: {
       minutesAboveThreshold: delta(sumA, sumB),
       meanCpu: delta(meanA, meanB),
-      p95Cpu: delta(p95A, p95B),
       pctTimeAboveThreshold: delta(pctA, pctB),
     },
     overlay: { alignment: "time-of-day", totalSlots: TOTAL_SLOTS, slotMinutes: SLOT_MIN, points },
@@ -438,19 +436,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   // ── Mock mode (?mock=1) ──────────────────────────────────────────
   if (v.q.useMock) {
-    const hosts = await resolveMockHosts(v.q.pilotId, v.q.hostIds);
+    const allMock = await resolveMockHosts(v.q.pilotId, v.q.hostIds);
+    const hosts = v.q.cpuModel ? allMock.filter((h) => h.cpuModel === v.q.cpuModel) : allMock;
     if (hosts.length === 0) {
-      return err(404, "VALIDATION", "Pilot not found or has no devices", { pilotId: v.q.pilotId });
+      return err(404, "VALIDATION", "Pilot not found or has no matching devices", {
+        pilotId: v.q.pilotId, cpuModel: v.q.cpuModel,
+      });
     }
     return NextResponse.json(buildMockPayload(v.q, hosts));
   }
 
   // ── Real path ────────────────────────────────────────────────────
   try {
-    const resolved = await resolvePilotHosts(v.q.pilotId, v.q.hostIds);
+    const resolved = await resolvePilotHosts(v.q.pilotId, v.q.hostIds, v.q.cpuModel);
     if (resolved.hosts.length === 0) {
-      return err(404, "VALIDATION", "No matching Zabbix hosts found for the selected pilot/hosts", {
+      return err(404, "VALIDATION", "No matching Zabbix hosts found for the selected pilot/hosts/CPU model", {
         pilotId: v.q.pilotId,
+        cpuModel: v.q.cpuModel,
         unmatchedDeviceIds: resolved.unmatchedDeviceIds,
       });
     }

@@ -50,6 +50,7 @@ interface PersistedState {
   bLabel: string;
   threshold: CompareThreshold;
   alignment: CompareAlignment;
+  cpuModel: string;
 }
 
 function todayIsoUtc(): string {
@@ -106,6 +107,20 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   const [aLabel, setALabel] = useState(persisted?.aLabel ?? "");
   const [bLabel, setBLabel] = useState(persisted?.bLabel ?? "");
   const [alignment, setAlignment] = useState<CompareAlignment>(persisted?.alignment ?? "time-of-day");
+  // CPU model filter — defaults to "all"; the dropdown options come from
+  // the pilot's device list so the user sees a closed set rather than
+  // free-text. "all" passes through as null to the API.
+  const cpuModelOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of pilot.devices) {
+      if (d.cpuModel && d.cpuModel.trim()) set.add(d.cpuModel.trim());
+    }
+    return ["all", ...Array.from(set).sort()];
+  }, [pilot.devices]);
+  const [cpuModel, setCpuModel] = useState<string>(() => {
+    const init = persisted?.cpuModel ?? "all";
+    return cpuModelOptions.includes(init) ? init : "all";
+  });
 
   const [threshold, setThresholdState] = useState<CompareThreshold>(() => {
     const inherited = filters.threshold;
@@ -170,6 +185,7 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
       url.searchParams.set("bTo", bTo);
       url.searchParams.set("threshold", String(threshold));
       url.searchParams.set("alignment", alignment);
+      if (cpuModel && cpuModel !== "all") url.searchParams.set("cpuModel", cpuModel);
       if (aLabel) url.searchParams.set("aLabel", aLabel);
       if (bLabel) url.searchParams.set("bLabel", bLabel);
       if (useMock) url.searchParams.set("mock", "1");
@@ -183,7 +199,7 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
       if (abortRef.current !== controller) return;
       setData(payload);
       setShowInheritedHint(false);
-      savePersisted(pilot.id, { aFrom, aTo, bFrom, aLabel, bLabel, threshold, alignment });
+      savePersisted(pilot.id, { aFrom, aTo, bFrom, aLabel, bLabel, threshold, alignment, cpuModel });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setError(e instanceof Error ? e.message : "Failed to load comparison");
@@ -196,8 +212,8 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   };
 
   useEffect(() => {
-    savePersisted(pilot.id, { aFrom, aTo, bFrom, aLabel, bLabel, threshold, alignment });
-  }, [pilot.id, aFrom, aTo, bFrom, aLabel, bLabel, threshold, alignment]);
+    savePersisted(pilot.id, { aFrom, aTo, bFrom, aLabel, bLabel, threshold, alignment, cpuModel });
+  }, [pilot.id, aFrom, aTo, bFrom, aLabel, bLabel, threshold, alignment, cpuModel]);
 
   return (
     <div style={{ padding: "8px 0 24px" }}>
@@ -286,6 +302,22 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
               </span>
             )}
           </div>
+
+          <span style={{ width: 1, alignSelf: "stretch", background: PALETTE.border, margin: "0 4px" }} />
+
+          <label style={lbl}>CPU model</label>
+          <select
+            value={cpuModel}
+            onChange={(e) => setCpuModel(e.target.value)}
+            style={{
+              ...dateInput, padding: "4px 6px", maxWidth: 220,
+            }}
+            title="Restrict the comparison to hosts with this CPU model. Useful when comparing the same configuration change across different hardware generations."
+          >
+            {cpuModelOptions.map((m) => (
+              <option key={m} value={m}>{m === "all" ? "All models" : m}</option>
+            ))}
+          </select>
 
           <span style={{ width: 1, alignSelf: "stretch", background: PALETTE.border, margin: "0 4px" }} />
 

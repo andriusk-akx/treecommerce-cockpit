@@ -38,13 +38,12 @@ export function CompareKpiCards({ kpis, threshold }: { kpis: CompareKpis; thresh
   const cards: KpiSpec[] = [
     { label: `Minutes above ${threshold}%`, ...kpis.minutesAboveThreshold, unit: "min" },
     { label: "Mean CPU", ...kpis.meanCpu, unit: "%" },
-    { label: "P95 CPU", ...kpis.p95Cpu, unit: "%" },
     { label: `% time above ${threshold}%`, ...kpis.pctTimeAboveThreshold, unit: "pp" },
   ];
 
   return (
     <div style={{
-      display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16,
+      display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16,
     }}>
       {cards.map((c, i) => (
         <KpiCard key={i} {...c} />
