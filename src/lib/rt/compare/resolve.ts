@@ -13,7 +13,14 @@
  */
 import { prisma } from "@/lib/db";
 import { getZabbixClient } from "@/lib/zabbix/client";
+import { resolveCpuModel } from "@/components/rt/tabs/rt-inventory-helpers";
 import type { HostMeta } from "./compute";
+
+interface ZHostWithInventory {
+  hostid: string;
+  name: string;
+  inventory: { cpuModel: string | null } | null;
+}
 
 export interface ResolveResult {
   hosts: HostMeta[];
@@ -42,13 +49,11 @@ export async function resolvePilotHosts(
   }
 
   const allowed = hostFilter && hostFilter.length > 0 ? new Set(hostFilter) : null;
-  const devices = pilot.devices
-    .filter((d) => !allowed || allowed.has(d.id))
-    // CPU model filter: exact match against Device.cpuModel. When cpuModel
-    // is null we keep all rows. Note: Device.cpuModel may itself be null
-    // for devices where Zabbix inventory hasn't been resolved yet — those
-    // are excluded when a specific model is requested.
-    .filter((d) => !cpuModelFilter || d.cpuModel === cpuModelFilter);
+  const devices = pilot.devices.filter((d) => !allowed || allowed.has(d.id));
+  // CPU model filter is applied later, after inventory enrichment — see
+  // matchedZ filter below. Doing it here against Device.cpuModel alone
+  // would lose hosts whose Device row is null but whose Zabbix inventory
+  // does report a model.
   if (devices.length === 0) {
     return { hosts: [], itemIds: [], itemHostMap: new Map(), unmatchedDeviceIds: [] };
   }
@@ -75,13 +80,35 @@ export async function resolvePilotHosts(
   }
 
   const client = getZabbixClient();
-  const zHosts = (await client.getHosts()) as Array<{ hostid: string; name: string }>;
-  const matchedZ: Array<{ zHostId: string; device: typeof devices[number] }> = [];
+  const zHosts = (await client.getHosts()) as ZHostWithInventory[];
+  // Build the matched-zabbix list AND resolve the effective CPU model per
+  // host. `resolveCpuModel(dbValue, inventoryValue)` is the same fallback
+  // chain CPU Timeline uses (Device.cpuModel wins, Zabbix inventory fills
+  // in the gap). Without this, devices whose DB cpuModel hasn't been
+  // backfilled all collapse into a single "Unknown CPU" group even when
+  // Zabbix has the model right there in hardware/hardware_full.
+  let matchedZAll: Array<{
+    zHostId: string;
+    device: typeof devices[number];
+    resolvedCpuModel: string | null;
+  }> = [];
   for (const z of zHosts) {
     const device = keyToDevice.get(z.name);
-    if (device) matchedZ.push({ zHostId: z.hostid, device });
+    if (device) {
+      const resolved = resolveCpuModel(device.cpuModel, z.inventory?.cpuModel ?? null, "");
+      matchedZAll.push({
+        zHostId: z.hostid,
+        device,
+        resolvedCpuModel: resolved && resolved !== "" ? resolved : null,
+      });
+    }
   }
-  if (matchedZ.length === 0) {
+  // CPU model filter — apply against the RESOLVED model so the dropdown
+  // picks up inventory-only models too.
+  if (cpuModelFilter) {
+    matchedZAll = matchedZAll.filter((m) => m.resolvedCpuModel === cpuModelFilter);
+  }
+  if (matchedZAll.length === 0) {
     return {
       hosts: [],
       itemIds: [],
@@ -89,6 +116,7 @@ export async function resolvePilotHosts(
       unmatchedDeviceIds: devices.map((d) => d.id),
     };
   }
+  const matchedZ = matchedZAll;
 
   const matchedZHostIds = matchedZ.map((m) => m.zHostId);
   const items = (await client.getItems(matchedZHostIds, "system.cpu.util")) as Array<{
@@ -112,7 +140,7 @@ export async function resolvePilotHosts(
       zHostId: m.zHostId,
       hostName: m.device.name,
       storeName: m.device.store?.name ?? "Unknown store",
-      cpuModel: m.device.cpuModel ?? null,
+      cpuModel: m.resolvedCpuModel,
       cpuCores: m.device.cpuCores ?? null,
     }));
 

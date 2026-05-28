@@ -162,20 +162,14 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   });
   const [aLabel, setALabel] = useState(persisted?.aLabel ?? "");
   const [bLabel, setBLabel] = useState(persisted?.bLabel ?? "");
-  // CPU model filter — defaults to "all"; the dropdown options come from
-  // the pilot's device list so the user sees a closed set rather than
-  // free-text. "all" passes through as null to the API.
-  const cpuModelOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const d of pilot.devices) {
-      if (d.cpuModel && d.cpuModel.trim()) set.add(d.cpuModel.trim());
-    }
-    return ["all", ...Array.from(set).sort()];
-  }, [pilot.devices]);
-  const [cpuModel, setCpuModel] = useState<string>(() => {
-    const init = persisted?.cpuModel ?? "all";
-    return cpuModelOptions.includes(init) ? init : "all";
-  });
+  // CPU model filter — defaults to "all"; the dropdown options are a union
+  // of (a) what Device.cpuModel already carries in the DB and (b) the
+  // resolved cpuModel values seen in the most recent API response. The
+  // server uses the same resolveCpuModel fallback chain the CPU Timeline
+  // does (Device → Zabbix inventory), so after one Run the dropdown
+  // typically grows to cover every model in the fleet — even those whose
+  // Device row hasn't been backfilled yet.
+  const [cpuModel, setCpuModel] = useState<string>(() => persisted?.cpuModel ?? "all");
 
   const [threshold, setThresholdState] = useState<CompareThreshold>(() => {
     const inherited = filters.threshold;
@@ -227,6 +221,21 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   const [data, setData] = useState<CompareResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Build dropdown options. Pre-Run: DB cpuModels only. Post-Run: union
+  // of DB cpuModels + resolved cpuModels in the response.
+  const cpuModelOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of pilot.devices) {
+      if (d.cpuModel && d.cpuModel.trim()) set.add(d.cpuModel.trim());
+    }
+    if (data) {
+      for (const r of data.hostRows) {
+        if (r.cpuModel && r.cpuModel.trim()) set.add(r.cpuModel.trim());
+      }
+    }
+    return ["all", ...Array.from(set).sort()];
+  }, [pilot.devices, data]);
   // Abort the in-flight request if the user clicks Run again before it
   // completes — without this, the slower response can overwrite the newer
   // one and the user sees stale data.
