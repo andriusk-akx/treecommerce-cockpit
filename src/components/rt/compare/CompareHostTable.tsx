@@ -402,19 +402,54 @@ function padArray(arr: number[], n: number): number[] {
 const UNKNOWN_CPU_LABEL = "Unknown CPU";
 
 /**
- * Heuristic: a real CPU model string has at least one space AND at least
- * one digit. Captures "Intel i3-4330", "AMD Ryzen 5 5600X", "Intel
- * i3-12300HL"; rejects "SCO35", hostnames, single-word labels.
+ * Real-CPU vendor prefixes we recognise. Anything not starting with one
+ * of these is treated as a data-quality residual (Zabbix hostnames, store
+ * labels concatenated into the hardware inventory field, etc.) and folded
+ * into the Unknown bucket.
  *
- * Anything that fails the test is folded into the Unknown bucket so the
- * comparison table has clean grouping instead of one synthetic "row per
- * data-quality bug".
+ * Match is case-insensitive and applied AFTER trimming leading whitespace.
+ * The previous "space + digit" heuristic accepted bogus multi-line values
+ * like "SCO35\nRimi MHM Malūno" because the newline counted as whitespace
+ * — using an explicit vendor allow-list closes that hole.
+ */
+const CPU_VENDOR_PREFIXES = [
+  "intel",
+  "amd",
+  "apple",
+  "arm",
+  "qualcomm",
+  "snapdragon",
+  "ryzen",
+  "epyc",
+  "threadripper",
+  "xeon",
+  "core",
+  "pentium",
+  "celeron",
+  "atom",
+];
+
+/**
+ * Heuristic for a "real CPU model" string. A string passes when:
+ *   1. It's non-blank after trim
+ *   2. It starts with one of the recognised vendor/family prefixes above
+ *   3. It contains at least one digit (so "Intel" alone wouldn't pass)
+ *   4. It's no longer than 80 chars (longer = pasted multi-line junk)
+ *   5. It has no newline characters in the body
+ *
+ * Anything failing the test is folded into the single Unknown bucket so
+ * the comparison table groups by real hardware, not by data-quality
+ * fingerprints.
  */
 function isLikelyRealCpuModel(s: string | null | undefined): boolean {
   if (!s) return false;
   const trimmed = s.trim();
   if (trimmed === "" || trimmed === "—" || trimmed === "-") return false;
-  return /\s/.test(trimmed) && /\d/.test(trimmed);
+  if (trimmed.length > 80) return false;
+  if (/[\r\n]/.test(trimmed)) return false;
+  if (!/\d/.test(trimmed)) return false;
+  const lower = trimmed.toLowerCase();
+  return CPU_VENDOR_PREFIXES.some((p) => lower.startsWith(p));
 }
 
 function sortRows(rows: CompareHostRow[], k: SortKey, dir: SortDir, groupBy: GroupBy): CompareHostRow[] {

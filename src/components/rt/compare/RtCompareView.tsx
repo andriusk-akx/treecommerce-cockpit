@@ -223,17 +223,26 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   const [error, setError] = useState<string | null>(null);
 
   // Build dropdown options. Pre-Run: DB cpuModels only. Post-Run: union
-  // of DB cpuModels + resolved cpuModels in the response. Bogus strings
-  // that don't look like CPU models (hostnames leaked into the inventory
-  // hardware field, single-word labels, etc.) are excluded so the
-  // dropdown stays clean — those rows still aggregate into the Unknown
-  // bucket in the table itself.
+  // of DB cpuModels + resolved cpuModels in the response. The "real CPU
+  // model" heuristic is intentionally strict (must start with Intel/AMD/
+  // Ryzen/etc.) so multi-line concatenated junk from Zabbix inventory
+  // doesn't pollute the dropdown — those rows still aggregate into the
+  // Unknown bucket in the host table.
+  const VENDOR_PREFIXES = [
+    "intel", "amd", "apple", "arm", "qualcomm", "snapdragon",
+    "ryzen", "epyc", "threadripper", "xeon", "core", "pentium",
+    "celeron", "atom",
+  ];
   const cpuModelOptions = useMemo(() => {
     const isReal = (s: string | null | undefined): boolean => {
       if (!s) return false;
       const t = s.trim();
       if (t === "" || t === "—" || t === "-") return false;
-      return /\s/.test(t) && /\d/.test(t);
+      if (t.length > 80) return false;
+      if (/[\r\n]/.test(t)) return false;
+      if (!/\d/.test(t)) return false;
+      const lower = t.toLowerCase();
+      return VENDOR_PREFIXES.some((p) => lower.startsWith(p));
     };
     const set = new Set<string>();
     for (const d of pilot.devices) {
