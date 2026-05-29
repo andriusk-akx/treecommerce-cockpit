@@ -29,7 +29,12 @@ import { useRtFilters } from "../RtFiltersContext";
 import { resolveCpuModel } from "./rt-inventory-helpers";
 import { mergeOnOff, weightedAvg } from "@/lib/rollout-insights/aggregate";
 import { emptyOnOffAggregate } from "@/lib/rollout-insights/types";
-import type { RolloutOnOffAggregate, RolloutPerHostEntry } from "@/lib/rollout-insights/types";
+import type {
+  ActiveAboveBucket,
+  RolloutOnOffAggregate,
+  RolloutPerHostEntry,
+} from "@/lib/rollout-insights/types";
+import { ACTIVE_ABOVE_BUCKETS } from "@/lib/rollout-insights/types";
 import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterDivider } from "../filters/RtFilterControls";
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -75,6 +80,12 @@ interface CpuMatrixRow {
   /** Sum of minutes above the chosen threshold across the class.
    *  cpuCountFrom switches between active-only and all-tracked. */
   timeAboveNowMin: number | null;
+  /** Per-threshold-bucket minutes-above counts summed across the class.
+   *  Drives the principled projected-time-above calculation: shifting
+   *  CPU up by +impact_pp means projected minutes above `threshold` =
+   *  current minutes above `threshold − impact_pp`. Linear interpolation
+   *  between adjacent buckets approximates non-grid values. */
+  minutesAboveByBucket: Record<ActiveAboveBucket, number>;
   /** Max of per-host daily max — class-wide worst peak. */
   maxCpu: number | null;
   /** Measured Retellect direct CPU on ON hosts (avg over active min).
@@ -439,9 +450,9 @@ export function RtCpuMatrix({
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase w-[240px]">CPU class</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[150px]">Evidence base</th>
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Current state</th>
+                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Current CPU state</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[200px]">Planned Retellect impact</th>
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Projected state</th>
+                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Projected CPU state</th>
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[140px]">Decision</th>
                   <th
                     className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[100px] cursor-help"
@@ -517,7 +528,9 @@ function MatrixRowView({
         </div>
       </td>
 
-      {/* Evidence base */}
+      {/* Evidence base — factual numbers only. The "No Retellect ON data yet"
+          state is communicated by the badge under the CPU class; repeating it
+          here was redundant and crowded the cell. */}
       <td className="py-4 px-3">
         <div className="text-xl font-bold text-gray-900 leading-none">
           {row.hostCount} <span className="text-xs font-normal text-gray-500">hosts</span>
@@ -527,9 +540,6 @@ function MatrixRowView({
           <br />
           ON {row.hostsOn} · OFF {row.hostsOff}
         </div>
-        {row.evidence === "no-on-data" && (
-          <div className="text-[10px] text-amber-700 mt-1">No Retellect ON data yet</div>
-        )}
       </td>
 
       {/* Current state */}
@@ -555,14 +565,15 @@ function MatrixRowView({
               value: row.timeAboveNowMin,
               unit: "min",
               bar: "used",
-              tip: "Number of minutes above the selected CPU threshold in the selected period.",
+              tip: "Total minutes across this CPU class where measured CPU was above the selected threshold during the selected period. Reflects the current/baseline measured state — not split by Retellect ON/OFF.",
             },
             {
               label: "Max CPU",
               value: row.maxCpu,
               unit: "%",
               bar: "ghost",
-              tip: "Highest observed CPU value in the selected period.",
+              tip: "Highest observed CPU value in the selected period — secondary context, not the primary decision metric.",
+              secondary: true,
             },
           ]}
           threshold={threshold}
@@ -784,7 +795,7 @@ function MiniStack({
   rows,
   threshold,
 }: {
-  rows: { label: string; value: number | null; unit: "%" | "pp" | "min"; bar: BarVariant; approx?: boolean; tip?: string }[];
+  rows: { label: string; value: number | null; unit: "%" | "pp" | "min"; bar: BarVariant; approx?: boolean; tip?: string; secondary?: boolean }[];
   threshold: number;
 }) {
   return (
@@ -804,6 +815,7 @@ function MiniBar({
   approx,
   threshold,
   tip,
+  secondary,
 }: {
   label: string;
   value: number | null;
@@ -814,6 +826,10 @@ function MiniBar({
   /** Hover explanation — rendered as a native title attribute on the
    *  label span so it's discoverable without a custom tooltip component. */
   tip?: string;
+  /** True when this row is supporting context, not a primary decision
+   *  metric. Visually de-emphasised (neutral label colour, dimmer
+   *  value), matches the spec's "Max CPU is secondary context" rule. */
+  secondary?: boolean;
 }) {
   // Bar width is a visual heuristic — we scale to 100 for % values, to
   // threshold for pp values (so a full bar means "as wide as headroom
@@ -850,7 +866,7 @@ function MiniBar({
   return (
     <div className="flex items-center gap-2 text-[11px]">
       <span
-        className={`w-[110px] text-sky-700 font-medium truncate ${tip ? "cursor-help underline decoration-dotted decoration-sky-300 underline-offset-2" : ""}`}
+        className={`w-[110px] truncate font-medium ${secondary ? "text-gray-400" : "text-sky-700"} ${tip ? `cursor-help underline decoration-dotted underline-offset-2 ${secondary ? "decoration-gray-300" : "decoration-sky-300"}` : ""}`}
         title={tip ?? label}
       >
         {label}
@@ -1132,6 +1148,15 @@ function computeCpuMatrix(
     sumMinAboveTracked: number;
     /** Sum of activeMinutesAboveThreshold[threshold] from rolloutPerHost (active mode). */
     sumMinAboveActive: number;
+    /** Sum of cpuTrends.minutesAbove per bucket — drives the bucket-
+     *  derived projected-time-above calculation (the principled
+     *  "shift the distribution up by +impact_pp" model). */
+    minutesAboveByBucketTracked: Record<ActiveAboveBucket, number>;
+    /** Same as above but from the rolloutPerHost active-minutes path;
+     *  unused while the page is locked to tracked mode but kept for
+     *  symmetry so a future active-mode rollout can read straight from
+     *  here without a refactor. */
+    minutesAboveByBucketActive: Record<ActiveAboveBucket, number>;
     /** Aggregate of all deployed hosts (ON evidence). */
     onAgg: RolloutOnOffAggregate;
     /** Aggregate of all non-deployed hosts (OFF baseline). */
@@ -1162,6 +1187,8 @@ function computeCpuMatrix(
         maxCpu: null,
         sumMinAboveTracked: 0,
         sumMinAboveActive: 0,
+        minutesAboveByBucketTracked: emptyBucketRecord(),
+        minutesAboveByBucketActive: emptyBucketRecord(),
         onAgg: emptyOnOffAggregate(),
         offAgg: emptyOnOffAggregate(),
         hostsOnContributed: 0,
@@ -1198,6 +1225,9 @@ function computeCpuMatrix(
       }
       if (t.minutesAbove) {
         g.sumMinAboveTracked += t.minutesAbove[thKey] || 0;
+        for (const b of ACTIVE_ABOVE_BUCKETS) {
+          g.minutesAboveByBucketTracked[b] += t.minutesAbove[b] || 0;
+        }
       }
     }
 
@@ -1219,6 +1249,9 @@ function computeCpuMatrix(
         if (trackedMin > 0) g.hostsOffContributed++;
       }
       g.sumMinAboveActive += combined.activeMinutesAboveThreshold[thKey] || 0;
+      for (const b of ACTIVE_ABOVE_BUCKETS) {
+        g.minutesAboveByBucketActive[b] += combined.activeMinutesAboveThreshold[b] || 0;
+      }
       hostHasData = hostHasData || trackedMin > 0;
     }
 
@@ -1287,6 +1320,10 @@ function computeCpuMatrix(
         {
           typicalCpu,
           timeAboveNowMin,
+          minutesAboveByBucket:
+            cpuCountFrom === "active"
+              ? g.minutesAboveByBucketActive
+              : g.minutesAboveByBucketTracked,
           hostsWithData: g.hostsWithData,
           evidence,
         },
@@ -1294,15 +1331,26 @@ function computeCpuMatrix(
         threshold,
       );
 
-    // Confidence.
+    // Confidence — meaning is "decision confidence for rollout", not
+    // "data quality". Critical rule (spec 2026-05-29):
+    //   • High is reserved for genuinely Measured ON/OFF cases (≥5 ON
+    //     hosts AND ≥5 OFF hosts contributed, OR ≥10 hosts with data
+    //     when measured-on-off evidence exists). A class without any
+    //     Retellect ON data cannot give a High rollout decision no
+    //     matter how many OFF hosts the sample has — we'd be
+    //     extrapolating across an untested boundary.
+    //   • No Retellect ON data yet → capped at Medium.
+    //   • Insufficient evidence → always Low.
     let confidence: Confidence;
     const hostsWithData = g.hostsWithData;
+    const measuredEvidence = evidence === "measured-on-off";
     if (
-      hostsWithData >= 10 ||
-      (g.hostsOnContributed >= 5 && g.hostsOffContributed >= 5)
+      measuredEvidence &&
+      (hostsWithData >= 10 ||
+        (g.hostsOnContributed >= 5 && g.hostsOffContributed >= 5))
     ) {
       confidence = "high";
-    } else if (hostsWithData >= 3) {
+    } else if (hostsWithData >= 3 && evidence !== "insufficient") {
       confidence = "medium";
     } else {
       confidence = "low";
@@ -1335,6 +1383,8 @@ function computeCpuMatrix(
       typicalCpu,
       roomNow,
       timeAboveNowMin: timeAboveNowMin > 0 || hasUsableSample ? timeAboveNowMin : null,
+      minutesAboveByBucket:
+        cpuCountFrom === "active" ? g.minutesAboveByBucketActive : g.minutesAboveByBucketTracked,
       maxCpu,
       measuredRetellectCpuOn: avgRetellectOn,
       impactPp,
@@ -1373,7 +1423,7 @@ function computeCpuMatrix(
  */
 function applyImpact(
   row: Pick<CpuMatrixRow,
-    "typicalCpu" | "timeAboveNowMin" | "hostsWithData" | "evidence"
+    "typicalCpu" | "timeAboveNowMin" | "minutesAboveByBucket" | "hostsWithData" | "evidence"
   >,
   impactPp: number,
   threshold: number,
@@ -1386,10 +1436,9 @@ function applyImpact(
   const projectedCpu = row.typicalCpu === null ? null : row.typicalCpu + impactPp;
   const projectedRoom = projectedCpu === null ? null : threshold - projectedCpu;
   const projectedTimeAboveMin = projectTimeAbove(
-    row.timeAboveNowMin,
-    row.typicalCpu,
-    impactPp,
+    row.minutesAboveByBucket,
     threshold,
+    impactPp,
   );
 
   const hostsForNorm = Math.max(1, row.hostsWithData);
@@ -1442,43 +1491,68 @@ function conservativeImpactPp(model: string): number {
   return 8;
 }
 
-/** Project time above threshold after applying impactPp.
+/** Empty zero-filled bucket record — used as the zero element for
+ *  the per-class minutes-above accumulator. */
+function emptyBucketRecord(): Record<ActiveAboveBucket, number> {
+  const r = {} as Record<ActiveAboveBucket, number>;
+  for (const b of ACTIVE_ABOVE_BUCKETS) r[b] = 0;
+  return r;
+}
+
+/** Project time above threshold after applying +impactPp pp shift.
  *
- *  This is intentionally a rough linear scaling — we don't have
- *  per-minute distribution data here, so the projection scales the
- *  current time-above by how much closer the new typical CPU sits to
- *  the threshold. The UI labels the result with ~ to make the
- *  approximate nature visible.
+ *  Mathematical model the spec mandates:
  *
- *   • If current typical is already at/above threshold, projected ≈
- *     current × (1 + impact / room_now) so the curve climbs steeply.
- *   • If new typical crosses the threshold, project at least 60 min
- *     (one busy hour) so the row doesn't show "0 min" while the
- *     decision pill says "do not roll out".
- *   • If room remains comfortable, projected ≈ current * 1.5 — a
- *     gentle scale, never lower than current.
+ *    projected_cpu(t) = current_cpu(t) + impactPp
+ *
+ *  Therefore:
+ *
+ *    minutes where projected_cpu > threshold
+ *      ≡ minutes where current_cpu > (threshold − impactPp)
+ *
+ *  We have current minutes-above counts at the discrete buckets
+ *  {20, 30, 40, 50, 60, 70, 80, 90}. Linear interpolation between
+ *  adjacent buckets gives a non-grid value:
+ *
+ *    f(x) = minutes_above(x), monotonically decreasing in x.
+ *    For lower ≤ x ≤ upper (adjacent bucket keys), interpolate
+ *    f(x) ≈ f(lower) + (x − lower) × (f(upper) − f(lower)) / (upper − lower).
+ *
+ *  Boundary handling:
+ *   • effective ≤ 20 → saturate at f(20) (we have no lower bucket,
+ *     so this is the lower bound on "everything significant").
+ *   • effective ≥ 90 → return f(90) (the smallest bucket count).
+ *   • effective exactly on a bucket → that bucket's count.
+ *
+ *  Returns null only when no bucket data is available (no cpuTrends
+ *  for the class at all). Zero is a valid value and is returned as 0.
  */
 function projectTimeAbove(
-  current: number | null,
-  typical: number | null,
-  impactPp: number,
+  buckets: Record<ActiveAboveBucket, number>,
   threshold: number,
+  impactPp: number,
 ): number | null {
-  if (current === null || typical === null) return null;
-  const projectedTypical = typical + impactPp;
-  if (projectedTypical < threshold - 20) {
-    // Comfortable margin — scale up modestly.
-    return Math.round(Math.max(current, current * 1.2));
+  // Defensive — caller passes a populated record, but if somehow it's
+  // empty we can't say anything useful.
+  const allZero = ACTIVE_ABOVE_BUCKETS.every((b) => (buckets[b] ?? 0) === 0);
+  if (allZero) return null;
+
+  const effective = threshold - impactPp;
+  if (effective <= 20) return buckets[20] ?? 0;
+  if (effective >= 90) return buckets[90] ?? 0;
+
+  // Find adjacent buckets (lower ≤ effective ≤ upper).
+  let lower: ActiveAboveBucket = 20;
+  let upper: ActiveAboveBucket = 90;
+  for (const k of ACTIVE_ABOVE_BUCKETS) {
+    if (k <= effective && k >= lower) lower = k;
+    if (k >= effective && k <= upper) upper = k;
   }
-  if (projectedTypical >= threshold) {
-    // Pushed past the line — at minimum an hour of "above" time.
-    const ratio = Math.max(1.5, (projectedTypical - typical + 5) / 5);
-    return Math.round(Math.max(60, current * ratio));
-  }
-  // Within 20pp of threshold — moderate scale.
-  const roomShrinkRatio =
-    (threshold - typical) / Math.max(0.5, threshold - projectedTypical);
-  return Math.round(Math.max(current, current * roomShrinkRatio));
+  if (lower === upper) return buckets[lower] ?? 0;
+  const lowerVal = buckets[lower] ?? 0;
+  const upperVal = buckets[upper] ?? 0;
+  const t = (effective - lower) / (upper - lower);
+  return Math.round(lowerVal + (upperVal - lowerVal) * t);
 }
 
 function subtitleFor(
