@@ -30,11 +30,17 @@ import { readCpuHistoryHybrid } from "@/lib/cpu-rollup/reader";
 
 export const dynamic = "force-dynamic";
 
-/** Hard cap from Zabbix history.get retention on this deployment (~42 d).
- *  Periods that reach further back than this are rejected outright (422). */
-const MAX_RETENTION_DAYS = 42;
-/** Anything older than this falls back to hourly trend data → lower
- *  resolution. We accept the query but flag dataQuality = "trend-only". */
+/** Hard cap. With the Phase 4 DB rollup live, the practical retention
+ *  is the rollup's 365 days. Periods reaching further back than this
+ *  return 422 — we have no data to serve.
+ *
+ *  NOTE: pre-Phase 4 this was 42 (Zabbix's own retention floor). The
+ *  reader now transparently serves anything in the rollup, so the cap
+ *  bumped to the rollup's retention window. */
+const MAX_RETENTION_DAYS = 365;
+/** Threshold for the reader's DB-vs-Zabbix split. Periods entirely
+ *  beyond this fall back to hourly DB rollup; dataQuality flips to
+ *  "trend-only" so the UI surfaces the lower resolution. */
 const HISTORY_GRAIN_DAYS = 14;
 
 interface ParsedQuery {
@@ -242,13 +248,14 @@ function dataQualityFor(iso: string): DataQuality {
  */
 function inferDataQuality(
   bd: { zabbix: number; rollupHistory: number; rollupTrend: number },
-  iso: string,
+  _iso: string,
 ): DataQuality {
   const total = bd.zabbix + bd.rollupHistory + bd.rollupTrend;
   if (total === 0) return "partial-missing";
   if (bd.zabbix > 0 || bd.rollupHistory > 0) return "full";
-  // Only rollupTrend > 0 here → hourly trend backed.
-  return dataQualityFor(iso) === "full" ? "trend-only" : "trend-only";
+  // Only rollupTrend > 0 here → entire window served from hourly trend
+  // aggregate. Minute granularity unavailable for these dates.
+  return "trend-only";
 }
 
 async function buildRealPayload(q: ParsedQuery, hosts: HostMeta[], itemIds: string[], itemHostMap: Map<string, string>): Promise<CompareResponse> {

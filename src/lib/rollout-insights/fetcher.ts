@@ -222,7 +222,16 @@ async function _fetchRolloutRawBucketsUncached(
         const v = parseFloat(r.value);
         if (!Number.isFinite(v)) continue;
         if (meta.kind === "spss") bkt.spssCpu = v;
-        else if (meta.kind === "python") { bkt.retellectCpu += Math.max(0, v); bkt.sawPython = true; }
+        else if (meta.kind === "python") {
+          // Negative python.cpu values almost always mean the Zabbix item
+          // is misconfigured as a rate/counter (negative on counter reset)
+          // instead of a gauge. We clamp to 0 so the matrix still works,
+          // but log once per request so the bad template surfaces in ops.
+          if (v < 0) {
+            console.warn(`[rollout-insights] negative python.cpu (${v}) on item ${r.itemid} host ${meta.hostId} — likely Zabbix template misconfig`);
+          }
+          bkt.retellectCpu += Math.max(0, v); bkt.sawPython = true;
+        }
         else if (meta.kind === "system") bkt.totalCpu = v;
       }
     }

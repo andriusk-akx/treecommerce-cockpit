@@ -219,9 +219,15 @@ export async function readCpuHistoryHybrid(opts: ReadOptions): Promise<ReaderRes
 }
 
 /** Return the Vilnius local YYYY-MM-DD date for a Unix-second timestamp.
- *  Mirrors the writer's `localDate` so reader bounds round-trip exactly. */
+ *  Mirrors the writer's `localDate` so reader bounds round-trip exactly.
+ *  Validates the locale output — if Intl falls back to a different format,
+ *  the assertion catches it before we issue a malformed Prisma query. */
 function vilniusDateString(unixSec: number): string {
-  return new Date(unixSec * 1000).toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" });
+  const s = new Date(unixSec * 1000).toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    throw new Error(`vilniusDateString: unexpected Intl output "${s}" for unix=${unixSec}; en-CA + Europe/Vilnius should produce YYYY-MM-DD`);
+  }
+  return s;
 }
 
 /** Format YYYY-MM-DD from a Date that already represents a calendar day. */

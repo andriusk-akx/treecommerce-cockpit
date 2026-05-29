@@ -192,18 +192,20 @@ export async function rollupPilotRange(
   // parallel lets the pool's pipelining keep the connection busy
   // instead of round-tripping serially. ~5–10× speedup on Rimi fleet.
   //
-  // Fix #4: classify source as "merged" when a day has both history
-  // samples AND fewer than expected (trend likely filled gaps). We
-  // can't tell perfectly from this layer, but `totalSamples > 0 &&
-  // totalSamples < 60 * 24` is a strong signal that trend covered
-  // part of the day.
+  // Source classification (DST-aware): a Vilnius day is 1440 minutes
+  // normally, 1380 on spring-forward, 1500 on fall-back. We can't tell
+  // DST from this layer cheaply, so allow a 1320-sample floor (the
+  // spring-forward day minus a small tolerance for the few minutes
+  // Zabbix may legitimately miss). Below that, it's "merged" (history
+  // didn't fully cover the day, trend filled the rest).
+  const HISTORY_FULL_DAY_THRESHOLD = 1320;
   const dailyOps = daily
     .map((d) => {
       const deviceId = zHostToDeviceId.get(d.hostId);
       if (!deviceId) return null;
       const source = d.totalSamples === 0
         ? "trend"
-        : d.totalSamples < 60 * 24 ? "merged" : "history";
+        : d.totalSamples < HISTORY_FULL_DAY_THRESHOLD ? "merged" : "history";
       const dateObj = new Date(`${d.date}T00:00:00Z`);
       return prisma.cpuMetricDaily.upsert({
         where: { zHostId_date: { zHostId: d.hostId, date: dateObj } },
@@ -306,8 +308,15 @@ export async function rollupPilotRange(
   // Zabbix when this runs alongside the regular daily rollup.
   const zHostIds = resolved.map((r) => r.zHostId);
   if (zHostIds.length > 0) {
-    // periodDays caps at 90 in the fetcher. For backfill ranges we
-    // still want the full window — compute days back from today.
+    // KNOWN LIMITATION: `fetchRolloutRawBuckets` always queries Zabbix
+    // for the last N days FROM NOW, not for an arbitrary [from, to]
+    // window. The fetcher's cap of 90 days bounds how far back we can
+    // capture in a single call. The route enforces ≤ 45 days per call,
+    // so the cap is never hit in practice — but if that cap is ever
+    // relaxed, backfills > 90 days will silently miss the start of
+    // the requested range. TODO: refactor fetchRolloutRawBuckets to
+    // accept a fromSec / toSec window when Phase 4.5 needs longer
+    // back-fills than 90 days.
     const windowDays = Math.max(
       1,
       Math.ceil((Date.now() / 1000 - fromSec) / 86_400) + 1,
@@ -406,6 +415,12 @@ export async function rollupPilotRange(
 }
 
 function round1(v: number): number {
+  // Defensive: if upstream math produced NaN (e.g. division by zero on a
+  // host with zero samples — shouldn't happen but Zabbix is unpredictable),
+  // round1 would propagate NaN into the DB. Postgres accepts NaN for
+  // double-precision but it poisons every downstream aggregate. Clamp to
+  // 0 instead so the row is at least readable.
+  if (!Number.isFinite(v)) return 0;
   return Math.round(v * 10) / 10;
 }
 
