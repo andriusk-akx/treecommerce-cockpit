@@ -14,8 +14,18 @@ import { getZabbixClient } from "@/lib/zabbix/client";
 export const dynamic = "force-dynamic";
 
 const KEYWORDS = [
+  // English
   "trans", "active", "session", "scan", "kasa",
   "customer", "checkout", "busy", "minute", "purchase",
+  "receipt", "payment", "sale", "basket", "cart",
+  "barcode", "tender", "void", "loyal", "card",
+  // Lithuanian (SP / Rimi domain)
+  "tranzak", "aktyv", "klient", "minut", "mokej",
+  "cekis", "preke", "barkod", "krepsel",
+  // Generic event markers
+  "started", "begin", "open", "close", "event",
+  // POS / SCO log monitoring
+  "log", "trigger", "audit",
 ];
 
 function matchesKeyword(text: string | null | undefined): boolean {
@@ -337,6 +347,54 @@ export default async function ZabbixProbePage() {
           </>
         )}
       </section>
+
+      {/* ── Section 6: Pavilnionys SCO2 FULL inventory ─────────── */}
+      {sco2 && sco2Items.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-base font-semibold mb-2">
+            6. Pavilnionys SCO2 — ALL enabled items ({sco2Items.length})
+          </h2>
+          <p className="text-sm text-gray-500 mb-2">
+            Full inventory dump so we can spot anything potentially transaction-related
+            that the keyword filter missed. Sorted alphabetically by key.
+          </p>
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-gray-100 text-left">
+                <th className="px-2 py-1 border-b">Key</th>
+                <th className="px-2 py-1 border-b">Name</th>
+                <th className="px-2 py-1 border-b">Last value</th>
+                <th className="px-2 py-1 border-b">Last clock</th>
+                <th className="px-2 py-1 border-b">Delay</th>
+                <th className="px-2 py-1 border-b">vt</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...sco2Items]
+                .sort((a, b) => a.key_.localeCompare(b.key_))
+                .map((it) => {
+                  const fresh = it.lastclock
+                    ? (Date.now() / 1000 - parseInt(it.lastclock)) < 600
+                    : false;
+                  return (
+                    <tr key={it.itemid} className={`border-b ${fresh ? "bg-green-50" : ""}`}>
+                      <td className="px-2 py-1 font-mono">{it.key_}</td>
+                      <td className="px-2 py-1">{it.name}</td>
+                      <td className="px-2 py-1 font-mono">{it.lastvalue ?? "—"}</td>
+                      <td className="px-2 py-1">{fmtClock(it.lastclock)}{ageMin(it.lastclock)}</td>
+                      <td className="px-2 py-1">{it.delay}</td>
+                      <td className="px-2 py-1">{it.value_type}</td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+          <p className="text-xs text-gray-400 mt-2">
+            Green rows = sample arrived within last 10 minutes (i.e. actively reporting).
+            value_type: 0=float, 1=string, 2=log, 3=unsigned int, 4=text.
+          </p>
+        </section>
+      )}
 
       <p className="text-xs text-gray-400 mt-8">
         Probe ran at {new Date().toISOString()}. Refresh to re-poll Zabbix.
