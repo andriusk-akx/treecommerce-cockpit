@@ -133,9 +133,10 @@ model Pilot {
   incidents        Incident[]
   noteEntries      Note[]
   views            View[]
-  userAccess       UserPilotAccess[]
-  cpuMetricsDaily  CpuMetricDaily[]
-  cpuMetricsHourly CpuMetricHourly[]
+  userAccess              UserPilotAccess[]
+  cpuMetricsDaily         CpuMetricDaily[]
+  cpuMetricsHourly        CpuMetricHourly[]
+  cpuProcessMetricsHourly CpuProcessMetricHourly[]
 }
 
 model DataSource {
@@ -218,10 +219,11 @@ model Device {
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
 
-  pilot            Pilot             @relation(fields: [pilotId], references: [id])
-  store            Store?            @relation(fields: [storeId], references: [id])
-  cpuMetricsDaily  CpuMetricDaily[]
-  cpuMetricsHourly CpuMetricHourly[]
+  pilot                   Pilot                    @relation(fields: [pilotId], references: [id])
+  store                   Store?                   @relation(fields: [storeId], references: [id])
+  cpuMetricsDaily         CpuMetricDaily[]
+  cpuMetricsHourly        CpuMetricHourly[]
+  cpuProcessMetricsHourly CpuProcessMetricHourly[]
 }
 
 model Incident {
@@ -442,6 +444,53 @@ model CpuMetricDaily {
   @@index([pilotId, date])
   @@index([deviceId, date])
   @@index([date])
+}
+
+// Per-process hourly rollup for Rollout Insights (Phase 4.5).
+//
+// The ON/OFF matrix needs three separate CPU signals per host per time
+// bucket — spss.cpu (SCO main app), sum-of-python.cpu (Retellect helpers),
+// system.cpu.util (total host CPU) — to classify a slot as "Retellect ON"
+// vs "Retellect OFF" against a per-host adaptive baseline. The threshold
+// is configurable per request, so we have to store the raw signals,
+// not the precomputed ON/OFF state.
+//
+// Hourly grain is enough — the matrix re-aggregates anyway. Storage cost
+// stays well under 100 MB / year for the Rimi fleet.
+model CpuProcessMetricHourly {
+  id        String   @id @default(cuid())
+  pilotId   String
+  deviceId  String
+  zHostId   String
+  hourStart DateTime @db.Timestamptz(0)
+
+  /// SCO main-app CPU% for this hour (null = no spss/sp.sss sample arrived).
+  spssCpu      Float?
+  /// SUM of python*.cpu samples for the hour. null when no python item
+  /// reported; 0 when reported but zero. `sawPython` disambiguates.
+  retellectCpu Float?
+  /// Total host CPU% (system.cpu.util[,,avg1]) for the hour.
+  totalCpu     Float?
+  /// True when at least one python.cpu sample landed in this hour.
+  /// Used to distinguish "Retellect not installed" from "0% activity".
+  sawPython    Boolean
+  /// Number of minute samples that fed this row. 60 if a complete hour
+  /// of history.get data; 1 if only a trend.get aggregate covered the
+  /// hour. Drives weightMinutes when aggregating.
+  weightMinutes Int
+
+  /// "history" = built from raw 1-min samples; "trend" = built from
+  /// trend.get hourly aggregates; "merged" = mix.
+  source     String
+  capturedAt DateTime @default(now())
+
+  pilot  Pilot  @relation(fields: [pilotId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([zHostId, hourStart])
+  @@index([pilotId, hourStart])
+  @@index([deviceId, hourStart])
+  @@index([hourStart])
 }
 
 model CpuMetricHourly {

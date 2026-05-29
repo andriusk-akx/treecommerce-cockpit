@@ -12,6 +12,7 @@
  */
 import { prisma } from "@/lib/db";
 import { getZabbixClient } from "@/lib/zabbix/client";
+import { fetchRolloutRawBuckets } from "@/lib/rollout-insights/fetcher";
 
 interface PilotDevice {
   id: string;
@@ -30,6 +31,7 @@ export interface IngestStats {
   daysProcessed: number;
   dailyRowsUpserted: number;
   hourlyRowsUpserted: number;
+  processHourlyRowsUpserted: number;
   hostsResolved: number;
   warnings: string[];
 }
@@ -157,6 +159,7 @@ export async function rollupPilotRange(
     daysProcessed: 0,
     dailyRowsUpserted: 0,
     hourlyRowsUpserted: 0,
+    processHourlyRowsUpserted: 0,
     hostsResolved: 0,
     warnings: [],
   };
@@ -277,6 +280,107 @@ export async function rollupPilotRange(
     stats.hourlyRowsUpserted += 1;
   }
 
+  // ── Per-process hourly rollup (Phase 4.5) ────────────────────────
+  //
+  // Pull spss.cpu / python.cpu / system.cpu.util buckets from the
+  // Rollout Insights fetcher. Same hosts, same window. Aggregate any
+  // minute-grain buckets into hour-grain (mean), then upsert. The
+  // existing fetcher's cache (5 min) shields us from re-querying
+  // Zabbix when this runs alongside the regular daily rollup.
+  const zHostIds = resolved.map((r) => r.zHostId);
+  if (zHostIds.length > 0) {
+    // periodDays caps at 90 in the fetcher. For backfill ranges we
+    // still want the full window — compute days back from today.
+    const windowDays = Math.max(
+      1,
+      Math.ceil((Date.now() / 1000 - fromSec) / 86_400) + 1,
+    );
+    const raw = await fetchRolloutRawBuckets(client, zHostIds, Math.min(windowDays, 90));
+
+    interface HourAcc {
+      pilotId: string; deviceId: string; zHostId: string;
+      hourStart: Date;
+      spssCount: number; spssSum: number;
+      pythonCount: number; pythonSum: number;
+      sysCount: number; sysSum: number;
+      sawPython: boolean;
+      weightMinutes: number;
+      source: "history" | "trend" | "merged";
+    }
+    const hourMap = new Map<string, HourAcc>();
+    const fromMs = fromSec * 1000;
+    const toMs = toSecExclusive * 1000;
+    for (const { hostId, buckets } of raw.perHostBuckets) {
+      const deviceId = zHostToDeviceId.get(hostId);
+      if (!deviceId) continue;
+      for (const b of buckets) {
+        if (b.tsMs < fromMs || b.tsMs >= toMs) continue;
+        // Align this bucket to its hour (history buckets at minute grain
+        // collapse into the hour; trend buckets already are at hour).
+        const hourStartMs = Math.floor(b.tsMs / 3_600_000) * 3_600_000;
+        const key = `${hostId}|${hourStartMs}`;
+        let acc = hourMap.get(key);
+        if (!acc) {
+          acc = {
+            pilotId, deviceId, zHostId: hostId,
+            hourStart: new Date(hourStartMs),
+            spssCount: 0, spssSum: 0,
+            pythonCount: 0, pythonSum: 0,
+            sysCount: 0, sysSum: 0,
+            sawPython: false,
+            weightMinutes: 0,
+            source: b.source,
+          };
+          hourMap.set(key, acc);
+        }
+        if (b.spssCpu !== null && Number.isFinite(b.spssCpu)) {
+          acc.spssCount += 1;
+          acc.spssSum += b.spssCpu;
+        }
+        if (b.retellectCpu !== null && Number.isFinite(b.retellectCpu)) {
+          acc.pythonCount += 1;
+          acc.pythonSum += b.retellectCpu;
+          acc.sawPython = true;
+        } else if (b.retellectCpu === null && b.source === "history") {
+          // history bucket exists but no python sample → still counts
+          // as "we observed this minute and Retellect wasn't reporting".
+          // sawPython stays false; consumer interprets that as "not running".
+        }
+        if (b.totalCpu !== null && Number.isFinite(b.totalCpu)) {
+          acc.sysCount += 1;
+          acc.sysSum += b.totalCpu;
+        }
+        acc.weightMinutes += b.weightMinutes;
+        if (acc.source !== b.source) acc.source = "merged";
+      }
+    }
+
+    for (const acc of hourMap.values()) {
+      const spssCpu = acc.spssCount > 0 ? round1(acc.spssSum / acc.spssCount) : null;
+      const retellectCpu = acc.sawPython ? round1(acc.pythonSum / Math.max(acc.pythonCount, 1)) : null;
+      const totalCpu = acc.sysCount > 0 ? round1(acc.sysSum / acc.sysCount) : null;
+      await prisma.cpuProcessMetricHourly.upsert({
+        where: { zHostId_hourStart: { zHostId: acc.zHostId, hourStart: acc.hourStart } },
+        create: {
+          pilotId: acc.pilotId, deviceId: acc.deviceId, zHostId: acc.zHostId,
+          hourStart: acc.hourStart,
+          spssCpu, retellectCpu, totalCpu,
+          sawPython: acc.sawPython,
+          weightMinutes: Math.min(acc.weightMinutes, 60),
+          source: acc.source,
+        },
+        update: {
+          spssCpu, retellectCpu, totalCpu,
+          sawPython: acc.sawPython,
+          weightMinutes: Math.min(acc.weightMinutes, 60),
+          source: acc.source,
+          capturedAt: new Date(),
+        },
+      });
+      stats.processHourlyRowsUpserted += 1;
+    }
+  }
+
   // Count distinct dates in the daily output (matches "days processed").
   stats.daysProcessed = new Set(daily.map((d) => d.date)).size;
   return stats;
@@ -305,7 +409,8 @@ export async function rollupAllRetellectPilots(
     } catch (e) {
       results.push({
         pilotId: p.id,
-        daysProcessed: 0, dailyRowsUpserted: 0, hourlyRowsUpserted: 0, hostsResolved: 0,
+        daysProcessed: 0, dailyRowsUpserted: 0, hourlyRowsUpserted: 0,
+        processHourlyRowsUpserted: 0, hostsResolved: 0,
         warnings: [`exception: ${e instanceof Error ? e.message : String(e)}`],
       });
     }

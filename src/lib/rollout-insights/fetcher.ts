@@ -35,6 +35,12 @@ import { cached } from "../zabbix/cache";
 import type { HostBucket } from "./aggregate";
 import { aggregateHost } from "./aggregate";
 import type { RolloutPerHostPayload } from "./types";
+import { prisma } from "@/lib/db";
+
+/** Hours newer than this come from Zabbix; older from DB rollup. Matches
+ *  Phase 4 reader. Anything inside this window has minute-grain Zabbix
+ *  data still alive, so we don't lose resolution by reading live. */
+const HISTORY_GRAIN_DAYS = 14;
 
 // Zabbix item key patterns we care about. spss is sometimes registered
 // as `sp.sss.cpu` on older templates — we accept both.
@@ -324,6 +330,76 @@ export async function fetchRolloutPerHost(
 ): Promise<RolloutPerHostPayload> {
   const raw = await fetchRolloutRawBuckets(client, matchedHostIds, periodDays);
   return aggregateRawBuckets(raw, thresholdPp);
+}
+
+/**
+ * Phase 4.5: hybrid variant. Recent buckets (≤ HISTORY_GRAIN_DAYS back)
+ * come from Zabbix; older ones come from the CpuProcessMetricHourly
+ * rollup table. Lets the Rollout Insights matrix render 30/60/90 d
+ * windows that exceed Zabbix retention.
+ *
+ * When the requested window fits inside HISTORY_GRAIN_DAYS, this falls
+ * straight through to `fetchRolloutPerHost` (no DB hit, no overhead).
+ */
+export async function fetchRolloutPerHostHybrid(
+  client: ZabbixClient,
+  pilotId: string,
+  matchedHostIds: string[],
+  periodDays: number,
+  thresholdPp: number,
+): Promise<RolloutPerHostPayload> {
+  const safeDays = Math.max(1, Math.min(periodDays, 365));
+  if (safeDays <= HISTORY_GRAIN_DAYS) {
+    // Fast path: entirely inside Zabbix retention.
+    return fetchRolloutPerHost(client, matchedHostIds, safeDays, thresholdPp);
+  }
+
+  const cutoffMs = Date.now() - HISTORY_GRAIN_DAYS * 86_400_000;
+  const oldFromMs = Date.now() - safeDays * 86_400_000;
+
+  // Recent buckets from Zabbix (we still ask for HISTORY_GRAIN_DAYS so
+  // the trend retention covers the boundary cleanly).
+  const recent = await fetchRolloutRawBuckets(client, matchedHostIds, HISTORY_GRAIN_DAYS);
+  const perHostMap = new Map<string, HostBucket[]>();
+  for (const { hostId, buckets } of recent.perHostBuckets) {
+    perHostMap.set(hostId, buckets.filter((b) => b.tsMs >= cutoffMs));
+  }
+
+  // Old buckets from DB rollup.
+  const matchedSet = new Set(matchedHostIds);
+  const dbRows = await prisma.cpuProcessMetricHourly.findMany({
+    where: {
+      pilotId,
+      hourStart: { gte: new Date(oldFromMs), lt: new Date(cutoffMs) },
+    },
+  });
+  for (const r of dbRows) {
+    if (!matchedSet.has(r.zHostId)) continue;
+    const bucket: HostBucket = {
+      tsMs: r.hourStart.getTime(),
+      weightMinutes: r.weightMinutes,
+      source: r.source === "history" ? "history" : "trend",
+      spssCpu: r.spssCpu,
+      retellectCpu: r.sawPython ? r.retellectCpu : null,
+      totalCpu: r.totalCpu,
+    };
+    const arr = perHostMap.get(r.zHostId);
+    if (arr) arr.push(bucket);
+    else perHostMap.set(r.zHostId, [bucket]);
+  }
+
+  // Make sure every requested host shows up even if it has zero buckets
+  // (otherwise downstream "no data" hosts vanish from the matrix).
+  for (const hostId of matchedHostIds) {
+    if (!perHostMap.has(hostId)) perHostMap.set(hostId, []);
+  }
+
+  const merged: RawRolloutBuckets = {
+    periodDays: safeDays,
+    perHostBuckets: Array.from(perHostMap.entries()).map(([hostId, buckets]) => ({ hostId, buckets })),
+    generatedAt: new Date().toISOString(),
+  };
+  return aggregateRawBuckets(merged, thresholdPp);
 }
 
 /**

@@ -10,7 +10,7 @@ import { fetchSource } from "@/lib/data-source";
 import type { ProcessCategory } from "@/lib/zabbix/types";
 import { getCurrentUser } from "@/lib/auth/sessions";
 import { canAccessPilot, allowedTabsFor } from "@/lib/auth/permissions";
-import { fetchRolloutPerHost } from "@/lib/rollout-insights/fetcher";
+import { fetchRolloutPerHostHybrid } from "@/lib/rollout-insights/fetcher";
 import type { RolloutPerHostPayload } from "@/lib/rollout-insights/types";
 
 type ProcCpuPayload = {
@@ -669,8 +669,9 @@ async function loadZabbixDataPayload(
             perHost: [],
           };
         }
-        return await fetchRolloutPerHost(
+        return await fetchRolloutPerHostHybrid(
           client,
+          pilotId,
           Array.from(matchedHostIds),
           periodDays,
           activeThresholdPp,
