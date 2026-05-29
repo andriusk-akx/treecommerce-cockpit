@@ -22,7 +22,7 @@
  * detail; this page collapses each CPU class to one decision row.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
 import { useRtFilters } from "../RtFiltersContext";
@@ -188,10 +188,28 @@ export function RtCpuMatrix({
   // global filter context because it's a CPU-Matrix-only concern.
   const [hideSilent, setHideSilent] = useState<boolean>(false);
 
-  // Build decision matrix from current data snapshot.
+  // Defer the heavy compute inputs so the dropdown / segmented controls
+  // update instantly while computeCpuMatrix runs in a concurrent render.
+  //
+  // Why: changing the threshold on a Rimi-scale pilot (~116 hosts × 90 d
+  // of cpuTrends ≈ 10 k entries) used to block the main thread long
+  // enough for users to think the dropdown was broken. useDeferredValue
+  // tells React "use the old value while this update is in flight" and
+  // exposes an `isPending`-style signal via the deferred-vs-current
+  // comparison below, which drives the Updating... badge and the
+  // opacity dim on the matrix.
+  const deferredThreshold = useDeferredValue(threshold);
+  const deferredStore = useDeferredValue(storeFilter);
+  const deferredCountFrom = useDeferredValue(cpuCountFrom);
+  const isRefreshing =
+    deferredThreshold !== threshold ||
+    deferredStore !== storeFilter ||
+    deferredCountFrom !== cpuCountFrom;
+
+  // Build decision matrix from the deferred inputs.
   const { matrix, periodDays } = useMemo(
-    () => computeCpuMatrix(pilot, zabbix, threshold, storeFilter, cpuCountFrom),
-    [pilot, zabbix, threshold, storeFilter, cpuCountFrom],
+    () => computeCpuMatrix(pilot, zabbix, deferredThreshold, deferredStore, deferredCountFrom),
+    [pilot, zabbix, deferredThreshold, deferredStore, deferredCountFrom],
   );
 
   const filteredMatrix = useMemo(() => {
@@ -254,6 +272,25 @@ export function RtCpuMatrix({
             <span className={`w-1.5 h-1.5 rounded-full ${hideSilent ? "bg-amber-500" : "bg-gray-300"}`} />
             Hide silent
           </button>
+          {isRefreshing && (
+            <span
+              className="inline-flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1"
+              role="status"
+              aria-live="polite"
+            >
+              <svg
+                className="animate-spin w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
+                <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+              </svg>
+              Updating…
+            </span>
+          )}
         </FilterRow>
       </FilterBar>
 
@@ -262,6 +299,16 @@ export function RtCpuMatrix({
         <strong>room to threshold</strong>. Where Retellect ON data is unavailable, the rollout
         status is based on the measured baseline plus a conservative per-tier impact scenario.
       </p>
+
+      {/* Single dimmer wraps the matrix + cards + evidence boxes so the
+          whole filter-dependent surface fades together during the
+          deferred re-render. opacity-60 keeps prior values readable
+          while signalling "this is being replaced"; pointer-events-none
+          stops accidental clicks on the stale UI. */}
+      <div
+        className={`transition-opacity duration-200 ${isRefreshing ? "opacity-60 pointer-events-none" : ""}`}
+        aria-busy={isRefreshing || undefined}
+      >
 
       {/* ── Decision matrix ─────────────────────────────────────────── */}
       <section className="mb-6">
@@ -325,6 +372,7 @@ export function RtCpuMatrix({
           title="Where confidence comes from"
           body="High = ≥10 hosts with usable data, or Measured ON/OFF with ≥5 hosts each. Medium = 3–9 hosts. Low = <3 hosts — treat the row as directional, not decisive."
         />
+      </div>
       </div>
     </>
   );
