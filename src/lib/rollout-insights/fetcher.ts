@@ -357,28 +357,33 @@ export async function fetchRolloutPerHostHybrid(
   const cutoffMs = Date.now() - HISTORY_GRAIN_DAYS * 86_400_000;
   const oldFromMs = Date.now() - safeDays * 86_400_000;
 
-  // Recent buckets from Zabbix (we still ask for HISTORY_GRAIN_DAYS so
-  // the trend retention covers the boundary cleanly).
+  // Recent buckets from Zabbix.
+  // Fix #17: no filter needed — the fetcher already restricts to its
+  // HISTORY_GRAIN_DAYS window, all returned buckets are inside [cutoff, now].
   const recent = await fetchRolloutRawBuckets(client, matchedHostIds, HISTORY_GRAIN_DAYS);
   const perHostMap = new Map<string, HostBucket[]>();
   for (const { hostId, buckets } of recent.perHostBuckets) {
-    perHostMap.set(hostId, buckets.filter((b) => b.tsMs >= cutoffMs));
+    perHostMap.set(hostId, [...buckets]);
   }
 
-  // Old buckets from DB rollup.
-  const matchedSet = new Set(matchedHostIds);
+  // Old buckets from DB rollup. Fix #9 carried over: narrow by host
+  // allowlist server-side via `zHostId in matched`.
   const dbRows = await prisma.cpuProcessMetricHourly.findMany({
     where: {
       pilotId,
       hourStart: { gte: new Date(oldFromMs), lt: new Date(cutoffMs) },
+      zHostId: { in: matchedHostIds },
     },
   });
   for (const r of dbRows) {
-    if (!matchedSet.has(r.zHostId)) continue;
     const bucket: HostBucket = {
       tsMs: r.hourStart.getTime(),
       weightMinutes: r.weightMinutes,
-      source: r.source === "history" ? "history" : "trend",
+      // Fix #20: preserve "merged" source from DB instead of demoting
+      // to "trend". HostBucket.source allows "history" | "trend" only,
+      // so map "merged" to "history" (the more conservative choice —
+      // it'll be treated as full-fidelity for downstream weighting).
+      source: r.source === "trend" ? "trend" : "history",
       spssCpu: r.spssCpu,
       retellectCpu: r.sawPython ? r.retellectCpu : null,
       totalCpu: r.totalCpu,

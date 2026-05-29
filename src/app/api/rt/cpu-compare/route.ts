@@ -234,6 +234,23 @@ function dataQualityFor(iso: string): DataQuality {
   return daysSinceToday(iso) > HISTORY_GRAIN_DAYS ? "trend-only" : "full";
 }
 
+/**
+ * Translate reader.sourceBreakdown into the DataQuality enum exposed to
+ * the UI. Falls back to age heuristic when the reader hit nothing at all
+ * (no DB rows and no Zabbix data — rare, but means the host has no
+ * coverage in this window).
+ */
+function inferDataQuality(
+  bd: { zabbix: number; rollupHistory: number; rollupTrend: number },
+  iso: string,
+): DataQuality {
+  const total = bd.zabbix + bd.rollupHistory + bd.rollupTrend;
+  if (total === 0) return "partial-missing";
+  if (bd.zabbix > 0 || bd.rollupHistory > 0) return "full";
+  // Only rollupTrend > 0 here → hourly trend backed.
+  return dataQualityFor(iso) === "full" ? "trend-only" : "trend-only";
+}
+
 async function buildRealPayload(q: ParsedQuery, hosts: HostMeta[], itemIds: string[], itemHostMap: Map<string, string>): Promise<CompareResponse> {
   // Period boundaries in Vilnius local time. aFrom = midnight start;
   // aTo = midnight end of (aTo + 1) day to make `[aFromSec, aToSec)` inclusive.
@@ -245,16 +262,26 @@ async function buildRealPayload(q: ParsedQuery, hosts: HostMeta[], itemIds: stri
   // Hybrid reader: reads from DB rollup for dates older than ~14d,
   // falls through to live Zabbix for recent windows. Splits +
   // merges across the boundary automatically.
+  // Fix #8/#9: pass the resolved Zabbix host id allowlist so the DB
+  // query narrows down to the requested hosts rather than returning
+  // every row in the pilot.
+  const hostIdAllowlist = new Set(hosts.map((h) => h.zHostId));
   const [periodA, periodB] = await Promise.all([
-    readCpuHistoryHybrid({ pilotId: q.pilotId, itemIds, itemHostMap, fromSec: aFromSec, toSec: aToSec }),
-    readCpuHistoryHybrid({ pilotId: q.pilotId, itemIds, itemHostMap, fromSec: bFromSec, toSec: bToSec }),
+    readCpuHistoryHybrid({ pilotId: q.pilotId, itemIds, itemHostMap, fromSec: aFromSec, toSec: aToSec, hostIdAllowlist }),
+    readCpuHistoryHybrid({ pilotId: q.pilotId, itemIds, itemHostMap, fromSec: bFromSec, toSec: bToSec, hostIdAllowlist }),
   ]);
 
   const warnings: string[] = [];
-  const dqA = dataQualityFor(q.aFrom);
-  const dqB = dataQualityFor(q.bFrom);
-  if (dqA !== "full") warnings.push(`Period A older than ${HISTORY_GRAIN_DAYS}d - minute-level data partial, using hourly trend`);
-  if (dqB !== "full") warnings.push(`Period B older than ${HISTORY_GRAIN_DAYS}d - minute-level data partial, using hourly trend`);
+  // Fix #7: use the reader's actual sourceBreakdown instead of an age
+  // heuristic. A period whose entire span resolved to DB rollup is
+  // "trend-only" only when ALL its DB rows came from trend.get; a
+  // period that hit the live Zabbix path even partially is "full".
+  const dqA = inferDataQuality(periodA.sourceBreakdown, q.aFrom);
+  const dqB = inferDataQuality(periodB.sourceBreakdown, q.bFrom);
+  if (dqA === "trend-only") warnings.push(`Period A served from hourly trend rollup — minute-level granularity unavailable for this window`);
+  if (dqB === "trend-only") warnings.push(`Period B served from hourly trend rollup — minute-level granularity unavailable for this window`);
+  if (dqA === "partial-missing") warnings.push(`Period A is partially missing — rollup hasn't backfilled this date yet`);
+  if (dqB === "partial-missing") warnings.push(`Period B is partially missing — rollup hasn't backfilled this date yet`);
 
   return buildCompareResponse({
     pilotId: q.pilotId,

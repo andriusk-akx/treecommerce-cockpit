@@ -69,11 +69,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const daysInWindow = Math.round(
     (new Date(`${toIso}T00:00:00Z`).getTime() - new Date(`${fromIso}T00:00:00Z`).getTime()) / 86_400_000,
   ) + 1;
-  if (daysInWindow > 60) {
-    return NextResponse.json({ error: "range too large (max 60 days per call)" }, { status: 400 });
+  // Fix #16: lower cap to 45 — Zabbix retention is ~29–42 d, so even
+  // 45 is more than the backfill can possibly cover. Stops requests
+  // that can't return useful data.
+  if (daysInWindow > 45) {
+    return NextResponse.json({ error: "range too large (max 45 days per call)" }, { status: 400 });
   }
 
   const pilotId = sp.get("pilotId");
+  // Fix #19: validate pilotId shape (cuid: ~25 chars, starts with `c`,
+  // lowercase alphanumeric). Catches typos before they hit Prisma.
+  if (pilotId !== null && !/^c[a-z0-9]{20,30}$/.test(pilotId)) {
+    return NextResponse.json({ error: "invalid pilotId format" }, { status: 400 });
+  }
   const startedAt = new Date().toISOString();
 
   try {
@@ -84,14 +92,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Retention cleanup — same call so the cron has a single thing to
     // hit. Caller can skip with `?retention=skip` if they're just
     // backfilling and don't want side effects.
-    let retentionDeleted: { daily: number; hourly: number } | null = null;
+    // Fix #2: include CpuProcessMetricHourly in the cleanup so the
+    // per-process table doesn't grow unbounded.
+    // Fix #3: include the per-process delete count in the response.
+    let retentionDeleted:
+      | { daily: number; hourly: number; processHourly: number }
+      | null = null;
     if (sp.get("retention") !== "skip") {
       const cutoffDate = new Date(Date.now() - RETENTION_DAYS * 86_400 * 1000);
-      const [d1, d2] = await Promise.all([
+      const [d1, d2, d3] = await Promise.all([
         prisma.cpuMetricDaily.deleteMany({ where: { date: { lt: cutoffDate } } }),
         prisma.cpuMetricHourly.deleteMany({ where: { hourStart: { lt: cutoffDate } } }),
+        prisma.cpuProcessMetricHourly.deleteMany({ where: { hourStart: { lt: cutoffDate } } }),
       ]);
-      retentionDeleted = { daily: d1.count, hourly: d2.count };
+      retentionDeleted = { daily: d1.count, hourly: d2.count, processHourly: d3.count };
     }
 
     return NextResponse.json({

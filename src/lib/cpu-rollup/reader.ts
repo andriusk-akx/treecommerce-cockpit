@@ -53,6 +53,12 @@ interface ReadOptions {
   itemHostMap: Map<string, string>;
   fromSec: number;
   toSec: number;
+  /** Optional Zabbix host id allowlist. When set, DB queries only return
+   *  rows for these hosts — wastes less IO when the caller already
+   *  narrowed the fleet (e.g. via CPU model filter). When omitted,
+   *  returns all the pilot's rows in the window (matches the live
+   *  Zabbix path's "you asked for X items, you get X items" semantics). */
+  hostIdAllowlist?: Set<string>;
 }
 
 function todayMidnightVilniusUnix(): number {
@@ -104,7 +110,7 @@ function computeCutoffSec(): number {
  * Hybrid read.
  */
 export async function readCpuHistoryHybrid(opts: ReadOptions): Promise<ReaderResult> {
-  const { pilotId, itemIds, itemHostMap, fromSec, toSec } = opts;
+  const { pilotId, itemIds, itemHostMap, fromSec, toSec, hostIdAllowlist } = opts;
   const cutoffSec = computeCutoffSec();
 
   // Three windows:
@@ -120,13 +126,32 @@ export async function readCpuHistoryHybrid(opts: ReadOptions): Promise<ReaderRes
 
   // ── DB rollup portion ────────────────────────────────────────────
   if (fromSec < oldEnd) {
-    const fromDate = new Date(fromSec * 1000);
-    const toDate = new Date((oldEnd - 1) * 1000);
-    const dailyRows = await prisma.cpuMetricDaily.findMany({
-      where: {
-        pilotId,
-        date: { gte: dateOnly(fromDate), lte: dateOnly(toDate) },
+    // Fix #1: derive Vilnius local date strings for the bounds. The
+    // writer stores each Vilnius local day as `new Date("YYYY-MM-DD"
+    // + "T00:00:00Z")` — i.e. UTC midnight that shares the date string.
+    // If we read by `dateOnly(new Date(fromSec * 1000))` instead, we
+    // get the UTC date of a Vilnius-midnight unix timestamp, which is
+    // the PREVIOUS day. Result: query returns rows for the day before
+    // fromIso and Compare KPI totals over-count one extra day per host.
+    const fromVilniusDate = vilniusDateString(fromSec);
+    const toVilniusDate = vilniusDateString(oldEnd - 1);
+    const dailyWhere: {
+      pilotId: string;
+      date: { gte: Date; lte: Date };
+      zHostId?: { in: string[] };
+    } = {
+      pilotId,
+      date: {
+        gte: new Date(`${fromVilniusDate}T00:00:00Z`),
+        lte: new Date(`${toVilniusDate}T00:00:00Z`),
       },
+    };
+    // Fix #8: narrow to the caller's host allowlist when supplied.
+    if (hostIdAllowlist && hostIdAllowlist.size > 0) {
+      dailyWhere.zHostId = { in: Array.from(hostIdAllowlist) };
+    }
+    const dailyRows = await prisma.cpuMetricDaily.findMany({
+      where: dailyWhere,
       orderBy: { date: "asc" },
     });
     for (const r of dailyRows) {
@@ -156,11 +181,20 @@ export async function readCpuHistoryHybrid(opts: ReadOptions): Promise<ReaderRes
     // chart still has something to plot for old dates. We can't
     // recover minute-level data, so emit one synthetic sample per
     // hour at hourStart + 30min carrying the hour-mean CPU value.
+    const hourlyWhere: {
+      pilotId: string;
+      hourStart: { gte: Date; lt: Date };
+      zHostId?: { in: string[] };
+    } = {
+      pilotId,
+      hourStart: { gte: new Date(fromSec * 1000), lt: new Date(oldEnd * 1000) },
+    };
+    // Fix #9: same host narrowing for hourly query.
+    if (hostIdAllowlist && hostIdAllowlist.size > 0) {
+      hourlyWhere.zHostId = { in: Array.from(hostIdAllowlist) };
+    }
     const hourlyRows = await prisma.cpuMetricHourly.findMany({
-      where: {
-        pilotId,
-        hourStart: { gte: new Date(fromSec * 1000), lt: new Date(oldEnd * 1000) },
-      },
+      where: hourlyWhere,
       orderBy: { hourStart: "asc" },
     });
     for (const h of hourlyRows) {
@@ -184,9 +218,10 @@ export async function readCpuHistoryHybrid(opts: ReadOptions): Promise<ReaderRes
   return { daily, samples, sourceBreakdown: breakdown };
 }
 
-/** Trim a Date to its date portion (midnight UTC). */
-function dateOnly(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+/** Return the Vilnius local YYYY-MM-DD date for a Unix-second timestamp.
+ *  Mirrors the writer's `localDate` so reader bounds round-trip exactly. */
+function vilniusDateString(unixSec: number): string {
+  return new Date(unixSec * 1000).toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" });
 }
 
 /** Format YYYY-MM-DD from a Date that already represents a calendar day. */
