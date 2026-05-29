@@ -27,6 +27,7 @@ import { emptyOnOffAggregate } from "@/lib/rollout-insights/types";
 import { mergeOnOff, weightedAvg } from "@/lib/rollout-insights/aggregate";
 import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterDivider } from "../filters/RtFilterControls";
 import { OnOffLabel } from "../filters/RtStateBadge";
+import { RtCpuMatrix } from "./RtCpuMatrix";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -163,6 +164,90 @@ export function RtRolloutInsights({
   pilot: RtPilotData;
   zabbix: ZabbixData;
 }) {
+  // Sub-view selector — the CPU Matrix tab hosts two views:
+  //   • "matrix"  (default) → decision-oriented per-class summary
+  //   • "heatmap"           → legacy per-host rollout matrix
+  // URL-driven via ?view= so deep links and back-nav round-trip.
+  const urlSearchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const subView: "matrix" | "heatmap" =
+    urlSearchParams.get("view") === "heatmap" ? "heatmap" : "matrix";
+  const setSubView = (v: "matrix" | "heatmap") => {
+    const live = typeof window !== "undefined" ? window.location.search : `?${urlSearchParams.toString()}`;
+    const params = new URLSearchParams(live);
+    if (v === "matrix") {
+      params.delete("view");
+    } else {
+      params.set("view", v);
+    }
+    router.push(`${pathname}?${params.toString()}`);
+  };
+
+  if (subView === "matrix") {
+    return (
+      <>
+        <SubViewSelector value={subView} onChange={setSubView} />
+        <RtCpuMatrix pilot={pilot} zabbix={zabbix} />
+      </>
+    );
+  }
+
+  return <RtRolloutHeatmap pilot={pilot} zabbix={zabbix} subView={subView} onSubViewChange={setSubView} />;
+}
+
+// ─── SubViewSelector ────────────────────────────────────────────────
+
+function SubViewSelector({
+  value,
+  onChange,
+}: {
+  value: "matrix" | "heatmap";
+  onChange: (v: "matrix" | "heatmap") => void;
+}) {
+  return (
+    <div className="inline-flex mb-4 rounded-md overflow-hidden shadow-sm">
+      <button
+        type="button"
+        aria-pressed={value === "matrix"}
+        onClick={() => onChange("matrix")}
+        className={`px-4 py-1.5 text-xs font-medium border ${
+          value === "matrix"
+            ? "bg-gray-900 text-white border-gray-900"
+            : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+        } rounded-l-md`}
+      >
+        Matrix
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "heatmap"}
+        onClick={() => onChange("heatmap")}
+        className={`px-4 py-1.5 text-xs font-medium border-y border-r ${
+          value === "heatmap"
+            ? "bg-gray-900 text-white border-gray-900"
+            : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+        } rounded-r-md`}
+      >
+        Heatmap
+      </button>
+    </div>
+  );
+}
+
+// ─── Legacy heatmap rollout view (extracted) ────────────────────────
+
+function RtRolloutHeatmap({
+  pilot,
+  zabbix,
+  subView,
+  onSubViewChange,
+}: {
+  pilot: RtPilotData;
+  zabbix: ZabbixData;
+  subView: "matrix" | "heatmap";
+  onSubViewChange: (v: "matrix" | "heatmap") => void;
+}) {
   const { filters, setFilter } = useRtFilters();
   const threshold = filters.threshold;
   const storeFilter = filters.store;
@@ -297,6 +382,8 @@ export function RtRolloutInsights({
 
   return (
     <>
+      <SubViewSelector value={subView} onChange={onSubViewChange} />
+
       {/* Header block intentionally removed 2026-05-25 — the tab label in
           the sidebar already says "Rollout Insights", and the period /
           active-threshold / threshold details now read directly from the
