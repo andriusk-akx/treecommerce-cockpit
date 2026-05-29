@@ -11,6 +11,7 @@ const SETTINGS_NAV = [
   { href: "/settings/zabbix", label: "Zabbix" },
   { href: "/settings/treecommerce-api", label: "TreeCommerce API" },
   { href: "/settings/retellect", label: "Retellect" },
+  { href: "/settings/zabbix-probe", label: "Zabbix probe" },
 ];
 
 export function SettingsNav() {
