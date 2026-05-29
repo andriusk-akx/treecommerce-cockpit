@@ -13,6 +13,8 @@
 import { prisma } from "@/lib/db";
 import { getZabbixClient } from "@/lib/zabbix/client";
 import { fetchRolloutRawBuckets } from "@/lib/rollout-insights/fetcher";
+import { aggregateProcessHours, type ProcessBucket } from "./writer-process";
+import { runInChunks, round1, classifyDailySource } from "./helpers";
 
 interface PilotDevice {
   id: string;
@@ -192,20 +194,13 @@ export async function rollupPilotRange(
   // parallel lets the pool's pipelining keep the connection busy
   // instead of round-tripping serially. ~5–10× speedup on Rimi fleet.
   //
-  // Source classification (DST-aware): a Vilnius day is 1440 minutes
-  // normally, 1380 on spring-forward, 1500 on fall-back. We can't tell
-  // DST from this layer cheaply, so allow a 1320-sample floor (the
-  // spring-forward day minus a small tolerance for the few minutes
-  // Zabbix may legitimately miss). Below that, it's "merged" (history
-  // didn't fully cover the day, trend filled the rest).
-  const HISTORY_FULL_DAY_THRESHOLD = 1320;
+  // Source classification (DST-aware): uses `classifyDailySource` from
+  // ./helpers so the same thresholds are unit-tested.
   const dailyOps = daily
     .map((d) => {
       const deviceId = zHostToDeviceId.get(d.hostId);
       if (!deviceId) return null;
-      const source = d.totalSamples === 0
-        ? "trend"
-        : d.totalSamples < HISTORY_FULL_DAY_THRESHOLD ? "merged" : "history";
+      const source = classifyDailySource(d.totalSamples);
       const dateObj = new Date(`${d.date}T00:00:00Z`);
       return prisma.cpuMetricDaily.upsert({
         where: { zHostId_date: { zHostId: d.hostId, date: dateObj } },
@@ -323,88 +318,41 @@ export async function rollupPilotRange(
     );
     const raw = await fetchRolloutRawBuckets(client, zHostIds, Math.min(windowDays, 90));
 
-    interface HourAcc {
-      pilotId: string; deviceId: string; zHostId: string;
-      hourStart: Date;
-      spssCount: number; spssSum: number;
-      pythonCount: number; pythonSum: number;
-      sysCount: number; sysSum: number;
-      sawPython: boolean;
-      weightMinutes: number;
-      source: "history" | "trend" | "merged";
-    }
-    const hourMap = new Map<string, HourAcc>();
-    const fromMs = fromSec * 1000;
-    const toMs = toSecExclusive * 1000;
-    for (const { hostId, buckets } of raw.perHostBuckets) {
-      const deviceId = zHostToDeviceId.get(hostId);
-      if (!deviceId) continue;
-      for (const b of buckets) {
-        if (b.tsMs < fromMs || b.tsMs >= toMs) continue;
-        // Align this bucket to its hour (history buckets at minute grain
-        // collapse into the hour; trend buckets already are at hour).
-        const hourStartMs = Math.floor(b.tsMs / 3_600_000) * 3_600_000;
-        const key = `${hostId}|${hourStartMs}`;
-        let acc = hourMap.get(key);
-        if (!acc) {
-          acc = {
-            pilotId, deviceId, zHostId: hostId,
-            hourStart: new Date(hourStartMs),
-            spssCount: 0, spssSum: 0,
-            pythonCount: 0, pythonSum: 0,
-            sysCount: 0, sysSum: 0,
-            sawPython: false,
-            weightMinutes: 0,
-            source: b.source,
-          };
-          hourMap.set(key, acc);
-        }
-        if (b.spssCpu !== null && Number.isFinite(b.spssCpu)) {
-          acc.spssCount += 1;
-          acc.spssSum += b.spssCpu;
-        }
-        if (b.retellectCpu !== null && Number.isFinite(b.retellectCpu)) {
-          acc.pythonCount += 1;
-          acc.pythonSum += b.retellectCpu;
-          acc.sawPython = true;
-        } else if (b.retellectCpu === null && b.source === "history") {
-          // history bucket exists but no python sample → still counts
-          // as "we observed this minute and Retellect wasn't reporting".
-          // sawPython stays false; consumer interprets that as "not running".
-        }
-        if (b.totalCpu !== null && Number.isFinite(b.totalCpu)) {
-          acc.sysCount += 1;
-          acc.sysSum += b.totalCpu;
-        }
-        acc.weightMinutes += b.weightMinutes;
-        if (acc.source !== b.source) acc.source = "merged";
-      }
-    }
-
-    // Fix #13: chunked per-process upsert.
-    const processOps = Array.from(hourMap.values()).map((acc) => {
-      const spssCpu = acc.spssCount > 0 ? round1(acc.spssSum / acc.spssCount) : null;
-      const retellectCpu = acc.sawPython ? round1(acc.pythonSum / Math.max(acc.pythonCount, 1)) : null;
-      const totalCpu = acc.sysCount > 0 ? round1(acc.sysSum / acc.sysCount) : null;
-      return prisma.cpuProcessMetricHourly.upsert({
-        where: { zHostId_hourStart: { zHostId: acc.zHostId, hourStart: acc.hourStart } },
-        create: {
-          pilotId: acc.pilotId, deviceId: acc.deviceId, zHostId: acc.zHostId,
-          hourStart: acc.hourStart,
-          spssCpu, retellectCpu, totalCpu,
-          sawPython: acc.sawPython,
-          weightMinutes: Math.min(acc.weightMinutes, 60),
-          source: acc.source,
-        },
-        update: {
-          spssCpu, retellectCpu, totalCpu,
-          sawPython: acc.sawPython,
-          weightMinutes: Math.min(acc.weightMinutes, 60),
-          source: acc.source,
-          capturedAt: new Date(),
-        },
-      });
-    });
+    // Use the pure helper so the math has test coverage. We thread the
+    // pilot/device join back in afterwards (the helper is intentionally
+    // host-only — pilotId/deviceId are denormalised columns).
+    const processAggs = aggregateProcessHours(
+      raw.perHostBuckets.map(({ hostId, buckets }) => ({
+        hostId,
+        buckets: buckets as ProcessBucket[],
+      })),
+      fromSec * 1000,
+      toSecExclusive * 1000,
+    );
+    const processOps = processAggs
+      .map((agg) => {
+        const deviceId = zHostToDeviceId.get(agg.hostId);
+        if (!deviceId) return null;
+        const hourStart = new Date(agg.hourStartMs);
+        return prisma.cpuProcessMetricHourly.upsert({
+          where: { zHostId_hourStart: { zHostId: agg.hostId, hourStart } },
+          create: {
+            pilotId, deviceId, zHostId: agg.hostId, hourStart,
+            spssCpu: agg.spssCpu, retellectCpu: agg.retellectCpu, totalCpu: agg.totalCpu,
+            sawPython: agg.sawPython,
+            weightMinutes: agg.weightMinutes,
+            source: agg.source,
+          },
+          update: {
+            spssCpu: agg.spssCpu, retellectCpu: agg.retellectCpu, totalCpu: agg.totalCpu,
+            sawPython: agg.sawPython,
+            weightMinutes: agg.weightMinutes,
+            source: agg.source,
+            capturedAt: new Date(),
+          },
+        });
+      })
+      .filter((op): op is NonNullable<typeof op> => op !== null);
     await runInChunks(processOps, 8);
     stats.processHourlyRowsUpserted = processOps.length;
   }
@@ -414,32 +362,9 @@ export async function rollupPilotRange(
   return stats;
 }
 
-function round1(v: number): number {
-  // Defensive: if upstream math produced NaN (e.g. division by zero on a
-  // host with zero samples — shouldn't happen but Zabbix is unpredictable),
-  // round1 would propagate NaN into the DB. Postgres accepts NaN for
-  // double-precision but it poisons every downstream aggregate. Clamp to
-  // 0 instead so the row is at least readable.
-  if (!Number.isFinite(v)) return 0;
-  return Math.round(v * 10) / 10;
-}
-
-/** Run promise-returning operations with a concurrency cap. Used to
- *  parallelise upserts without overwhelming the Prisma connection pool. */
-async function runInChunks<T>(ops: Array<Promise<T>>, concurrency: number): Promise<T[]> {
-  // The promises are already created (Prisma queries start eagerly), so
-  // we can't actually limit concurrency at this point — `await` just
-  // waits for each. To truly cap concurrency we'd need thunks. For now
-  // chunk the awaits so connection-pool errors come back in batches
-  // rather than as one giant fail.
-  const results: T[] = [];
-  for (let i = 0; i < ops.length; i += concurrency) {
-    const slice = ops.slice(i, i + concurrency);
-    const batch = await Promise.all(slice);
-    results.push(...batch);
-  }
-  return results;
-}
+// `round1` and `runInChunks` now live in `./helpers` and are imported at the
+// top. Keeping them shared means the test suite covers the same
+// implementation that the writer runs in prod.
 
 /**
  * Roll up every Retellect pilot for the same window. Used by the daily
