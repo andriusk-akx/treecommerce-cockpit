@@ -854,12 +854,20 @@ function computeCpuMatrix(
     else g.hostsOff.add(matchedHost.hostId);
 
     // cpuTrends contribution — daily avg pool, max CPU, tracked minutes-above.
+    //
+    // Bug fix (2026-05-29): `hostHasData` used to require `t.avg > 0`. That
+    // ruled out hosts whose telemetry reaches us but happens to sit at
+    // exactly 0% — they're online, reporting, and contribute a valid
+    // (idle) baseline signal. Any trend entry with a finite (even zero)
+    // value now counts. The dailyAvgPool still drops 0-values because they
+    // pull the median toward "off-hours" and aren't representative of
+    // typical operating load, but the host-with-data tally is independent.
     const trends = trendsByHost.get(matchedHost.hostId) || [];
     let hostHasData = false;
     for (const t of trends) {
-      if (Number.isFinite(t.avg) && t.avg > 0) {
-        g.dailyAvgPool.push(t.avg);
+      if (Number.isFinite(t.avg)) {
         hostHasData = true;
+        if (t.avg > 0) g.dailyAvgPool.push(t.avg);
       }
       if (Number.isFinite(t.max) && t.max > 0) {
         g.maxCpu = g.maxCpu === null ? t.max : Math.max(g.maxCpu, t.max);
@@ -873,16 +881,21 @@ function computeCpuMatrix(
     const entry = perHostMap.get(matchedHost.hostId);
     if (entry) {
       const combined = mergeOnOff(entry.on, entry.off);
-      const activeMin = combined.realActiveMinutes + combined.syntheticActiveMinutes;
+      const trackedMin = combined.realTrackedMinutes + combined.syntheticTrackedMinutes;
       if (isDeployed) {
         g.onAgg = mergeOnOff(g.onAgg, combined);
-        if (activeMin > 0) g.hostsOnContributed++;
+        // Bug fix (2026-05-29): host counts toward ON evidence when its
+        // aggregate has any TRACKED minutes (not just active). A host with
+        // Retellect deployed but running steady at low load reports valid
+        // tracked totals even when nothing crosses the active threshold.
+        // Holding out for activeMin>0 hid the cleanest possible evidence.
+        if (trackedMin > 0) g.hostsOnContributed++;
       } else {
         g.offAgg = mergeOnOff(g.offAgg, combined);
-        if (activeMin > 0) g.hostsOffContributed++;
+        if (trackedMin > 0) g.hostsOffContributed++;
       }
       g.sumMinAboveActive += combined.activeMinutesAboveThreshold[thKey] || 0;
-      hostHasData = hostHasData || activeMin > 0;
+      hostHasData = hostHasData || trackedMin > 0;
     }
 
     if (hostHasData) g.hostsWithData++;
@@ -907,6 +920,13 @@ function computeCpuMatrix(
     else evidence = "insufficient";
 
     // Planned Retellect impact.
+    //
+    // Bug fix (2026-05-29): measured evidence used to silently fall back
+    // to the conservative scenario when weightedAvg returned null (empty
+    // aggregate), even though the evidence column still said "Measured
+    // ON/OFF". The fallback now requires both averages to be available;
+    // otherwise the evidence tag is downgraded to "baseline-only" so the
+    // displayed evidence stays in sync with the impact source.
     const avgOnTotalCpu = weightedAvg(g.onAgg, "sumTotalCpu");
     const avgOffTotalCpu = weightedAvg(g.offAgg, "sumTotalCpu");
     const avgRetellectOn = weightedAvg(g.onAgg, "sumRetellectCpu");
@@ -917,14 +937,22 @@ function computeCpuMatrix(
       avgOnTotalCpu !== null &&
       avgOffTotalCpu !== null
     ) {
-      // Observed delta in mean total CPU — cap to a sensible band so a
-      // single noisy host can't drive the projection past +20 pp.
-      const delta = Math.max(0, avgOnTotalCpu - avgOffTotalCpu);
+      // Observed delta in mean total CPU. Negative deltas (ON cooler
+      // than OFF in the sample — usually small noise) are floored to 0
+      // for the *projection* (we don't model Retellect as freeing
+      // capacity), but the measured Retellect-direct CPU figure shown
+      // beneath the impact box still surfaces the true sign so a user
+      // can spot the case.
+      const rawDelta = avgOnTotalCpu - avgOffTotalCpu;
+      const delta = Math.max(0, rawDelta);
       impactPp = Math.min(20, Math.round(delta * 10) / 10);
       impactSource = "measured";
     } else {
       impactPp = conservativeImpactPp(g.model);
       impactSource = "conservative";
+      // Keep the row's evidence tag honest: if we couldn't actually
+      // measure the impact, this isn't "Measured ON/OFF" any more.
+      if (evidence === "measured-on-off") evidence = "baseline-only";
     }
 
     // Projected state.
@@ -933,10 +961,20 @@ function computeCpuMatrix(
     const projectedTimeAboveMin = projectTimeAbove(timeAboveNowMin, typicalCpu, impactPp, threshold);
 
     // Decision tree.
+    //
+    // Bug fix (2026-05-29): the projected time-above used to be compared
+    // class-wide against a per-host budget (≤ 60 min = one busy hour).
+    // For a 32-host class with each host at a few minutes above, the SUM
+    // easily clears 60 and blocked every "Safe" classification. The fix:
+    // normalise to per-host minutes so the rule "average host stays under
+    // one busy hour above threshold" actually holds.
+    const hostsForNorm = Math.max(1, g.hostsWithData);
+    const perHostProjectedTimeAbove =
+      projectedTimeAboveMin === null ? null : projectedTimeAboveMin / hostsForNorm;
     let decision: Decision;
     if (evidence === "insufficient" || projectedRoom === null) {
       decision = "insufficient";
-    } else if (projectedRoom >= 20 && (projectedTimeAboveMin ?? 0) < 60) {
+    } else if (projectedRoom >= 20 && (perHostProjectedTimeAbove ?? 0) < 60) {
       decision = "safe";
     } else if (projectedRoom >= 10) {
       decision = "validate";
@@ -960,11 +998,18 @@ function computeCpuMatrix(
       confidence = "low";
     }
 
-    // Silent classification — for the Hide silent toggle. A class is
-    // silent when it contributes zero active Retellect minutes to the
-    // ON aggregate (no observed Retellect activity at all).
+    // Silent classification — for the Hide silent toggle.
+    //
+    // Bug fix (2026-05-29): "silent" used to mean "no ON-aggregate active
+    // minutes", which by construction applied to every baseline-only and
+    // insufficient row — the exact rows the page exists to score. The
+    // correct semantic is "Retellect IS deployed but isn't doing anything
+    // we can observe": classes with at least one ON-classified host that
+    // contributed zero active minutes. Baseline-only and insufficient
+    // rows stay visible because the user needs them to decide where to
+    // pilot next.
     const onActiveMin = g.onAgg.realActiveMinutes + g.onAgg.syntheticActiveMinutes;
-    const isSilent = onActiveMin === 0;
+    const isSilent = g.hostsOn.size > 0 && onActiveMin === 0;
 
     // Subtitle — one-liner that complements the decision.
     const subtitle = subtitleFor(decision, evidence, typicalCpu, maxCpu, threshold);
