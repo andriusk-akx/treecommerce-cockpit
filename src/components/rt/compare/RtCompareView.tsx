@@ -228,29 +228,42 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   // Ryzen/etc.) so multi-line concatenated junk from Zabbix inventory
   // doesn't pollute the dropdown — those rows still aggregate into the
   // Unknown bucket in the host table.
-  const VENDOR_PREFIXES = [
-    "intel", "amd", "apple", "arm", "qualcomm", "snapdragon",
-    "ryzen", "epyc", "threadripper", "xeon", "core", "pentium",
-    "celeron", "atom",
-  ];
   const cpuModelOptions = useMemo(() => {
-    const isReal = (s: string | null | undefined): boolean => {
-      if (!s) return false;
-      const t = s.trim();
-      if (t === "" || t === "—" || t === "-") return false;
-      if (t.length > 80) return false;
-      if (/[\r\n]/.test(t)) return false;
-      if (!/\d/.test(t)) return false;
-      const lower = t.toLowerCase();
+    const VENDOR_PREFIXES = [
+      "intel", "amd", "apple", "arm", "qualcomm", "snapdragon",
+      "ryzen", "epyc", "threadripper", "xeon", "core", "pentium",
+      "celeron", "atom",
+    ];
+    const BOGUS = /\b(SCO\d+|Rimi|Maxima|IKI|MHM|SHM|HM\d|Panorama|Mal[uū]no|Vilnius|Kaunas|Klaip[eė]da|Šiauliai|Panev[eė]žys|Pavilnionys|Pilait[eė]|Saul[eė]s)\b/i;
+    const passesShape = (s: string): boolean => {
+      if (s === "" || s === "—" || s === "-") return false;
+      if (s.length > 50) return false;
+      if (/[\r\n]/.test(s)) return false;
+      if (!/\d/.test(s)) return false;
+      const lower = s.toLowerCase();
       return VENDOR_PREFIXES.some((p) => lower.startsWith(p));
+    };
+    const extract = (s: string | null | undefined): string | null => {
+      if (!s) return null;
+      const t = s.trim();
+      if (t === "") return null;
+      if (!BOGUS.test(t) && passesShape(t)) return t;
+      const m = t.match(BOGUS);
+      if (m && m.index != null && m.index > 0) {
+        const prefix = t.substring(0, m.index).trim();
+        if (prefix && !BOGUS.test(prefix) && passesShape(prefix)) return prefix;
+      }
+      return null;
     };
     const set = new Set<string>();
     for (const d of pilot.devices) {
-      if (isReal(d.cpuModel)) set.add(d.cpuModel.trim());
+      const cleaned = extract(d.cpuModel);
+      if (cleaned) set.add(cleaned);
     }
     if (data) {
       for (const r of data.hostRows) {
-        if (isReal(r.cpuModel)) set.add(r.cpuModel!.trim());
+        const cleaned = extract(r.cpuModel);
+        if (cleaned) set.add(cleaned);
       }
     }
     return ["all", ...Array.from(set).sort()];

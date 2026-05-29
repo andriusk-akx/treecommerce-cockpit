@@ -53,18 +53,62 @@ const VENDOR_PREFIXES = [
  * also reject anything that mentions these. Domain-specific but the
  * cleanest way to keep bad inventory out of the comparison grouping.
  */
-const BOGUS_VALUE_MARKERS = /\b(SCO\d+|Rimi|Maxima|IKI|MHM|SHM|HM\d)\b/i;
+const BOGUS_VALUE_MARKERS = /\b(SCO\d+|Rimi|Maxima|IKI|MHM|SHM|HM\d|Panorama|Mal[uū]no|Vilnius|Kaunas|Klaip[eė]da|Šiauliai|Panev[eė]žys|Pavilnionys|Pilait[eė]|Saul[eė]s)\b/i;
 
-function isLikelyRealCpuModel(s: string | null | undefined): boolean {
-  if (!s) return false;
-  const trimmed = s.trim();
-  if (trimmed === "" || trimmed === "—" || trimmed === "-") return false;
-  if (trimmed.length > 50) return false;
-  if (/[\r\n]/.test(trimmed)) return false;
-  if (!/\d/.test(trimmed)) return false;
-  if (BOGUS_VALUE_MARKERS.test(trimmed)) return false;
-  const lower = trimmed.toLowerCase();
+/**
+ * Reject upfront. Used by the extractor below — keeps the regex in one
+ * place even when we accept post-extraction values.
+ */
+function hasBogusMarker(s: string): boolean {
+  return BOGUS_VALUE_MARKERS.test(s);
+}
+
+function passesBasicShape(s: string): boolean {
+  if (s === "" || s === "—" || s === "-") return false;
+  if (s.length > 50) return false;
+  if (/[\r\n]/.test(s)) return false;
+  if (!/\d/.test(s)) return false;
+  const lower = s.toLowerCase();
   return VENDOR_PREFIXES.some((p) => lower.startsWith(p));
+}
+
+/**
+ * Return a clean CPU model string, or null if the input looks bogus.
+ *
+ * Strategy:
+ *   1. If the trimmed value has no bogus markers and passes the basic
+ *      shape check (vendor prefix, has digit, sane length, no newlines),
+ *      return it unchanged.
+ *   2. Otherwise, look for the first occurrence of a bogus marker. If
+ *      there's anything before it, treat that prefix as the candidate
+ *      CPU model — strip the rest and re-test. This rescues polluted
+ *      values like "Intel Celeron J3060 SCO35 Rimi MHM Maluno" by
+ *      extracting "Intel Celeron J3060".
+ *   3. If extraction still fails, return null.
+ */
+function extractCleanCpuModel(s: string | null | undefined): string | null {
+  if (!s) return null;
+  const trimmed = s.trim();
+  if (trimmed === "") return null;
+  if (!hasBogusMarker(trimmed) && passesBasicShape(trimmed)) {
+    return trimmed;
+  }
+  const match = trimmed.match(BOGUS_VALUE_MARKERS);
+  if (match && match.index != null && match.index > 0) {
+    const prefix = trimmed.substring(0, match.index).trim();
+    if (prefix && !hasBogusMarker(prefix) && passesBasicShape(prefix)) {
+      return prefix;
+    }
+  }
+  return null;
+}
+
+/**
+ * Boolean wrapper used by the client mirror. Server code uses the
+ * extractor directly because it both validates AND cleans.
+ */
+function isLikelyRealCpuModel(s: string | null | undefined): boolean {
+  return extractCleanCpuModel(s) !== null;
 }
 
 export interface ResolveResult {
@@ -141,15 +185,16 @@ export async function resolvePilotHosts(
     const device = keyToDevice.get(z.name);
     if (device) {
       const resolved = resolveCpuModel(device.cpuModel, z.inventory?.cpuModel ?? null, "");
-      // Apply the real-CPU-model heuristic here, server-side. Anything
-      // failing the test surfaces as `cpuModel: null` in the response so
-      // even clients running cached JS aggregate it cleanly into the
-      // Unknown bucket — see the helper above for what counts as "real".
       const cleaned = resolved && resolved !== "" ? resolved : null;
+      // Use the extractor — it both validates AND strips polluted parts.
+      // A value like "Intel Celeron J3060 SCO35 Rimi MHM Maluno" comes
+      // back as "Intel Celeron J3060"; "SCO35" alone comes back as null;
+      // "Intel i3-4330" passes through unchanged.
+      const extracted = extractCleanCpuModel(cleaned);
       matchedZAll.push({
         zHostId: z.hostid,
         device,
-        resolvedCpuModel: isLikelyRealCpuModel(cleaned) ? cleaned : null,
+        resolvedCpuModel: extracted,
       });
     }
   }

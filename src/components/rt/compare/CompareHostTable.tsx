@@ -417,31 +417,44 @@ const CPU_VENDOR_PREFIXES = [
   "ryzen", "epyc", "threadripper", "xeon", "core", "pentium",
   "celeron", "atom",
 ];
-/** Mirror of resolve.ts BOGUS_VALUE_MARKERS — kept in sync manually
- *  because the lib/rt boundary discourages reaching into server code. */
-const BOGUS_VALUE_MARKERS = /\b(SCO\d+|Rimi|Maxima|IKI|MHM|SHM|HM\d)\b/i;
+/** Mirror of resolve.ts BOGUS_VALUE_MARKERS — keep in sync. */
+const BOGUS_VALUE_MARKERS = /\b(SCO\d+|Rimi|Maxima|IKI|MHM|SHM|HM\d|Panorama|Mal[uū]no|Vilnius|Kaunas|Klaip[eė]da|Šiauliai|Panev[eė]žys|Pavilnionys|Pilait[eė]|Saul[eė]s)\b/i;
+
+function passesBasicShape(s: string): boolean {
+  if (s === "" || s === "—" || s === "-") return false;
+  if (s.length > 50) return false;
+  if (/[\r\n]/.test(s)) return false;
+  if (!/\d/.test(s)) return false;
+  const lower = s.toLowerCase();
+  return CPU_VENDOR_PREFIXES.some((p) => lower.startsWith(p));
+}
 
 /**
- * Heuristic for a "real CPU model" string. A string passes when:
- *   1. It's non-blank after trim
- *   2. It's no longer than 50 chars
- *   3. No newlines
- *   4. Contains at least one digit
- *   5. Does NOT contain Rimi-domain hostname/store markers
- *   6. Starts with a recognised vendor/family prefix
- *
- * Anything failing the test folds into the single Unknown bucket.
+ * Mirror of resolve.ts `extractCleanCpuModel`. Same logic: strip polluted
+ * suffixes ("Intel Celeron J3060 SCO35 ..." → "Intel Celeron J3060"),
+ * return null for unrecoverable values. Server already runs this; client
+ * mirror handles the case where a stale browser bundle is rendering an
+ * older payload that wasn't extracted upstream.
  */
-function isLikelyRealCpuModel(s: string | null | undefined): boolean {
-  if (!s) return false;
+function extractCleanCpuModel(s: string | null | undefined): string | null {
+  if (!s) return null;
   const trimmed = s.trim();
-  if (trimmed === "" || trimmed === "—" || trimmed === "-") return false;
-  if (trimmed.length > 50) return false;
-  if (/[\r\n]/.test(trimmed)) return false;
-  if (!/\d/.test(trimmed)) return false;
-  if (BOGUS_VALUE_MARKERS.test(trimmed)) return false;
-  const lower = trimmed.toLowerCase();
-  return CPU_VENDOR_PREFIXES.some((p) => lower.startsWith(p));
+  if (trimmed === "") return null;
+  if (!BOGUS_VALUE_MARKERS.test(trimmed) && passesBasicShape(trimmed)) {
+    return trimmed;
+  }
+  const match = trimmed.match(BOGUS_VALUE_MARKERS);
+  if (match && match.index != null && match.index > 0) {
+    const prefix = trimmed.substring(0, match.index).trim();
+    if (prefix && !BOGUS_VALUE_MARKERS.test(prefix) && passesBasicShape(prefix)) {
+      return prefix;
+    }
+  }
+  return null;
+}
+
+function isLikelyRealCpuModel(s: string | null | undefined): boolean {
+  return extractCleanCpuModel(s) !== null;
 }
 
 function sortRows(rows: CompareHostRow[], k: SortKey, dir: SortDir, groupBy: GroupBy): CompareHostRow[] {
@@ -499,11 +512,12 @@ function sortRows(rows: CompareHostRow[], k: SortKey, dir: SortDir, groupBy: Gro
 function aggregateByCpuModel(rows: CompareHostRow[], periodLengthDays: number): CompareHostRow[] {
   const byModel = new Map<string, CompareHostRow[]>();
   for (const r of rows) {
-    // Anything that doesn't look like a real CPU model (null, blank,
-    // bogus values like "SCO35" that leaked from hostnames into Zabbix
-    // inventory hardware fields) goes into the single Unknown bucket so
-    // we don't end up with one synthetic row per data-quality bug.
-    const key = isLikelyRealCpuModel(r.cpuModel) ? (r.cpuModel as string).trim() : UNKNOWN_CPU_LABEL;
+    // Extract a clean CPU model string if possible; everything that
+    // can't be salvaged folds into the single Unknown bucket. The
+    // extractor handles both "SCO35" (returns null) and "Intel Celeron
+    // J3060 SCO35 Rimi MHM Maluno" (returns "Intel Celeron J3060").
+    const cleaned = extractCleanCpuModel(r.cpuModel);
+    const key = cleaned ?? UNKNOWN_CPU_LABEL;
     const bucket = byModel.get(key);
     if (bucket) bucket.push(r);
     else byModel.set(key, [r]);
