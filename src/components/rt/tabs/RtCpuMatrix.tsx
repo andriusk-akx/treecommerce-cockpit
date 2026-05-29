@@ -43,11 +43,17 @@ type Decision =
 
 type Confidence = "high" | "medium" | "low";
 
-/** What we know about a CPU class for the rollout decision. */
+/** What we know about a CPU class for the rollout decision.
+ *  Labels:
+ *    measured-on-off → "Measured ON/OFF"
+ *    no-on-data      → "No Retellect ON data yet"
+ *    insufficient    → "Insufficient evidence"
+ *  (Was "no-on-data" — renamed per the agreed terminology so the UI
+ *  reads as a decision-grade statement rather than a data-source label.) */
 type Evidence =
-  | "measured-on-off"  // ≥2 ON + ≥2 OFF hosts with usable samples
-  | "baseline-only"    // only OFF samples — no Retellect ON data
-  | "insufficient";    // no usable samples
+  | "measured-on-off"
+  | "no-on-data"
+  | "insufficient";
 
 /** Per-CPU-class decision row. */
 interface CpuMatrixRow {
@@ -76,10 +82,19 @@ interface CpuMatrixRow {
   measuredRetellectCpuOn: number | null;
 
   // ── Planned impact ────────────────────────────────────────────────
-  /** Planned Retellect impact in percentage points. */
+  /** Effective Planned Retellect impact in percentage points — this is
+   *  the value the projection / decision are calculated from. Defaults
+   *  to the measured-delta or per-tier conservative value, but can be
+   *  overridden manually by the user via the per-row input. */
   impactPp: number;
   /** Source of the impact figure. */
-  impactSource: "measured" | "conservative";
+  impactSource: "measured" | "conservative" | "manual";
+  /** Default impact (auto-derived) — preserved so the user can reset
+   *  back to it after manually overriding. */
+  defaultImpactPp: number;
+  /** True when the user has explicitly entered a value for this CPU
+   *  class. Drives the supporting-line text and the "Reset" affordance. */
+  hasManualOverride: boolean;
 
   // ── Projected state ───────────────────────────────────────────────
   projectedCpu: number | null;
@@ -130,13 +145,13 @@ const CONFIDENCE_STYLES: Record<Confidence, string> = {
 
 const EVIDENCE_LABEL: Record<Evidence, string> = {
   "measured-on-off": "Measured ON/OFF",
-  "baseline-only": "Baseline only",
+  "no-on-data": "No Retellect ON data yet",
   insufficient: "Insufficient evidence",
 };
 
 const EVIDENCE_STYLES: Record<Evidence, string> = {
   "measured-on-off": "bg-emerald-50 text-emerald-700 border-emerald-200",
-  "baseline-only": "bg-blue-50 text-blue-700 border-blue-200",
+  "no-on-data": "bg-blue-50 text-blue-700 border-blue-200",
   insufficient: "bg-gray-100 text-gray-500 border-gray-200",
 };
 
@@ -161,7 +176,12 @@ export function RtCpuMatrix({
   const { filters, setFilter } = useRtFilters();
   const threshold = filters.threshold;
   const storeFilter = filters.store;
-  const cpuCountFrom = filters.cpuCountFrom;
+  // Current page contract: calculation is always from ALL minutes in the
+  // selected period. Active-only mode is on the roadmap but disabled in
+  // the UI for now (see Minute scope below), so we force the compute
+  // input to "tracked" regardless of what the cross-tab filter context
+  // happens to hold from the legacy heatmap.
+  const cpuCountFrom = "tracked" as const;
 
   // Period selector mirrors RtTimeline / RtRolloutInsights — URL-driven
   // so a deep link keeps the same window.
@@ -207,10 +227,74 @@ export function RtCpuMatrix({
     deferredCountFrom !== cpuCountFrom;
 
   // Build decision matrix from the deferred inputs.
-  const { matrix, periodDays } = useMemo(
+  const { matrix: baselineMatrix, periodDays } = useMemo(
     () => computeCpuMatrix(pilot, zabbix, deferredThreshold, deferredStore, deferredCountFrom),
     [pilot, zabbix, deferredThreshold, deferredStore, deferredCountFrom],
   );
+
+  // ── Custom (manual) Planned Retellect impact, keyed by CPU model ──
+  //
+  // The Planned Retellect impact column is intentionally manual: an
+  // analyst can override the system-derived default per CPU class to
+  // try "what if Retellect adds +12 pp on this tier?" The override is
+  // persisted per (pilot, model) so the next visit picks up where the
+  // analyst left off.
+  //
+  // Empty string clears the override (back to default).
+  const impactStorageKey = `rtCpuMatrixImpacts:${pilot.id}`;
+  const [customImpacts, setCustomImpacts] = useState<Record<string, number>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = window.localStorage.getItem(impactStorageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed as Record<string, number>;
+      return {};
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(impactStorageKey, JSON.stringify(customImpacts));
+    } catch {
+      // Quota / privacy mode — silent.
+    }
+  }, [customImpacts, impactStorageKey]);
+
+  const setImpactFor = (model: string, value: number | null) => {
+    setCustomImpacts((prev) => {
+      const next = { ...prev };
+      if (value === null) delete next[model];
+      else next[model] = value;
+      return next;
+    });
+  };
+
+  // Overlay customImpacts onto the baseline matrix — recomputes
+  // projection + decision per row, but reuses the heavy current-state
+  // numbers from the baseline pass.
+  const matrix = useMemo(() => {
+    return baselineMatrix.map((row) => {
+      const override = customImpacts[row.model];
+      const hasManualOverride =
+        override !== undefined && Number.isFinite(override) && override !== row.defaultImpactPp;
+      if (!hasManualOverride) return row;
+      const effective = Math.max(0, Math.min(30, override));
+      const re = applyImpact(row, effective, deferredThreshold);
+      return {
+        ...row,
+        impactPp: effective,
+        impactSource: "manual" as const,
+        hasManualOverride: true,
+        projectedCpu: re.projectedCpu,
+        projectedRoom: re.projectedRoom,
+        projectedTimeAboveMin: re.projectedTimeAboveMin,
+        decision: re.decision,
+      };
+    });
+  }, [baselineMatrix, customImpacts, deferredThreshold]);
 
   const filteredMatrix = useMemo(() => {
     if (!hideSilent) return matrix;
@@ -251,13 +335,21 @@ export function RtCpuMatrix({
           />
           <FilterSegmented<"tracked" | "active">
             label="Minute scope"
-            value={cpuCountFrom}
-            info="All minutes counts every tracked minute (matches CPU Timeline). Active only restricts to busy windows."
+            value="tracked"
+            info="Current effective calculation: All minutes in the selected period. Active-only mode (busy-windows-only) is planned for a future iteration."
             options={[
               { v: "tracked", l: "All minutes" },
-              { v: "active", l: "Active only" },
+              {
+                v: "active",
+                l: "Active only (later)",
+                title: "Active-only mode (restricting the calculation to busy windows) is planned for a later release.",
+                disabled: true,
+              },
             ]}
-            onChange={(v) => setFilter("cpuCountFrom", v)}
+            onChange={() => {
+              /* no-op — Active only is intentionally disabled for now;
+                 the current page always computes from all tracked minutes. */
+            }}
           />
           <button
             type="button"
@@ -297,7 +389,8 @@ export function RtCpuMatrix({
       <p className="text-[11px] text-gray-500 mb-4 leading-relaxed">
         Threshold is used for two things: <strong>time above threshold</strong> and{" "}
         <strong>room to threshold</strong>. Where Retellect ON data is unavailable, the rollout
-        status is based on the measured baseline plus a conservative per-tier impact scenario.
+        status is based on the measured baseline plus scenario-based impact modeling. Current
+        effective calculation uses <strong>all minutes</strong> in the selected period.
       </p>
 
       {/* Single dimmer wraps the matrix + cards + evidence boxes so the
@@ -338,12 +431,22 @@ export function RtCpuMatrix({
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[200px]">Planned Retellect impact</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Projected state</th>
                   <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[140px]">Decision</th>
-                  <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[100px]">Confidence</th>
+                  <th
+                    className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[100px] cursor-help"
+                    title="Decision confidence for rollout, not general confidence in the underlying data."
+                  >
+                    Confidence
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {filteredMatrix.map((row) => (
-                  <MatrixRowView key={row.model} row={row} threshold={threshold} />
+                  <MatrixRowView
+                    key={row.model}
+                    row={row}
+                    threshold={threshold}
+                    onImpactChange={setImpactFor}
+                  />
                 ))}
               </tbody>
             </table>
@@ -380,7 +483,15 @@ export function RtCpuMatrix({
 
 // ─── Row sub-component ──────────────────────────────────────────────
 
-function MatrixRowView({ row, threshold }: { row: CpuMatrixRow; threshold: number }) {
+function MatrixRowView({
+  row,
+  threshold,
+  onImpactChange,
+}: {
+  row: CpuMatrixRow;
+  threshold: number;
+  onImpactChange: (model: string, value: number | null) => void;
+}) {
   return (
     <tr className="border-t border-gray-100 align-top">
       {/* CPU class */}
@@ -404,7 +515,7 @@ function MatrixRowView({ row, threshold }: { row: CpuMatrixRow; threshold: numbe
           <br />
           ON {row.hostsOn} · OFF {row.hostsOff}
         </div>
-        {row.evidence === "baseline-only" && (
+        {row.evidence === "no-on-data" && (
           <div className="text-[10px] text-amber-700 mt-1">No Retellect ON data yet</div>
         )}
       </td>
@@ -413,41 +524,54 @@ function MatrixRowView({ row, threshold }: { row: CpuMatrixRow; threshold: numbe
       <td className="py-4 px-3">
         <MiniStack
           rows={[
-            { label: "Typical CPU load", value: row.typicalCpu, unit: "%", bar: "used" },
-            { label: "Room to threshold", value: row.roomNow, unit: "pp", bar: "buffer" },
+            {
+              label: "Typical CPU load",
+              value: row.typicalCpu,
+              unit: "%",
+              bar: "used",
+              tip: "Median CPU over the selected period.",
+            },
+            {
+              label: "Room to threshold",
+              value: row.roomNow,
+              unit: "pp",
+              bar: "buffer",
+              tip: "Percentage points remaining until the selected CPU threshold.",
+            },
             {
               label: "Time above threshold",
               value: row.timeAboveNowMin,
               unit: "min",
-              bar: row.timeAboveNowMin && row.timeAboveNowMin > 0 ? "used" : "used",
+              bar: "used",
+              tip: "Number of minutes above the selected CPU threshold in the selected period.",
             },
-            { label: "Max CPU", value: row.maxCpu, unit: "%", bar: "ghost" },
+            {
+              label: "Max CPU",
+              value: row.maxCpu,
+              unit: "%",
+              bar: "ghost",
+              tip: "Highest observed CPU value in the selected period.",
+            },
           ]}
           threshold={threshold}
         />
       </td>
 
-      {/* Planned impact */}
+      {/* Planned Retellect impact — editable */}
       <td className="py-4 px-3">
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-200 bg-white text-xs text-gray-700">
-          Planned impact
-          <span className="font-bold text-gray-900">+{row.impactPp} pp</span>
-          <span
-            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-              row.impactSource === "measured"
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-blue-50 text-blue-700"
-            }`}
-          >
-            {row.impactSource === "measured" ? "measured" : "scenario"}
-          </span>
-        </div>
+        <ImpactInput
+          model={row.model}
+          value={row.impactPp}
+          defaultValue={row.defaultImpactPp}
+          hasManualOverride={row.hasManualOverride}
+          onChange={onImpactChange}
+        />
         <div className="text-[10px] text-gray-500 mt-2 leading-snug">
-          {row.measuredRetellectCpuOn !== null
-            ? `Measured Retellect CPU on ON hosts: ${row.measuredRetellectCpuOn.toFixed(1)}% avg`
-            : row.impactSource === "conservative"
-              ? "Projection only — no measured Retellect ON evidence yet"
-              : null}
+          {row.hasManualOverride
+            ? "Manual input for projection"
+            : row.measuredRetellectCpuOn !== null && row.measuredRetellectCpuOn > 0.05
+              ? `Reference evidence: ${row.measuredRetellectCpuOn.toFixed(1)}% avg direct CPU`
+              : "No measured ON data yet"}
         </div>
       </td>
 
@@ -464,20 +588,23 @@ function MatrixRowView({ row, threshold }: { row: CpuMatrixRow; threshold: numbe
                 unit: "%",
                 bar: "model",
                 approx: true,
+                tip: "Projected median CPU after applying the Planned Retellect impact.",
               },
               {
-                label: "Room left",
+                label: "Room to threshold",
                 value: row.projectedRoom,
                 unit: "pp",
                 bar: "buffer",
                 approx: true,
+                tip: "Percentage points remaining until the threshold after applying the Planned Retellect impact.",
               },
               {
-                label: "Time above threshold",
+                label: "Projected time above threshold",
                 value: row.projectedTimeAboveMin,
                 unit: "min",
                 bar: "used",
                 approx: true,
+                tip: "Estimated minutes above threshold after applying the Planned Retellect impact. Modeled value, not measured.",
               },
             ]}
             threshold={threshold}
@@ -499,11 +626,104 @@ function MatrixRowView({ row, threshold }: { row: CpuMatrixRow; threshold: numbe
       <td className="py-4 px-3 text-center">
         <span
           className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${CONFIDENCE_STYLES[row.confidence]}`}
+          title="Decision confidence for rollout, not general confidence in the underlying data."
         >
           {row.confidence}
         </span>
       </td>
     </tr>
+  );
+}
+
+// ─── Editable Planned Retellect impact input ────────────────────────
+
+/** Numeric input for Planned Retellect impact (in pp).
+ *
+ *  Behaviour:
+ *  - Pre-filled with the system default (measured delta or per-tier
+ *    conservative figure).
+ *  - User can edit; commit on blur or Enter. Clamped to 0–30 pp, snapped
+ *    to 0.5 pp granularity.
+ *  - "Reset" link appears when the user has overridden the default;
+ *    clicking it restores the system default.
+ *  - The orange ring on the input cues "this is a manual override" so
+ *    the user knows the number isn't system-derived.
+ */
+function ImpactInput({
+  model,
+  value,
+  defaultValue,
+  hasManualOverride,
+  onChange,
+}: {
+  model: string;
+  value: number;
+  defaultValue: number;
+  hasManualOverride: boolean;
+  onChange: (model: string, value: number | null) => void;
+}) {
+  const [draft, setDraft] = useState<string>(value.toFixed(1));
+  useEffect(() => {
+    setDraft(value.toFixed(1));
+  }, [value]);
+
+  const commit = () => {
+    const raw = parseFloat(draft);
+    if (!Number.isFinite(raw)) {
+      setDraft(value.toFixed(1));
+      return;
+    }
+    const clamped = Math.max(0, Math.min(30, raw));
+    const snapped = Math.round(clamped * 2) / 2;
+    setDraft(snapped.toFixed(1));
+    if (snapped === defaultValue) {
+      // Match default → clear the override.
+      if (hasManualOverride) onChange(model, null);
+    } else if (snapped !== value) {
+      onChange(model, snapped);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label
+        className="inline-flex items-center gap-1.5 text-[11px] text-gray-600"
+        title="Manual CPU impact input used for rollout projection."
+      >
+        <span>Planned impact</span>
+        <span className="text-gray-400">+</span>
+        <input
+          type="number"
+          min={0}
+          max={30}
+          step={0.5}
+          inputMode="decimal"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+              (e.currentTarget as HTMLInputElement).blur();
+            }
+          }}
+          className={`w-14 text-xs px-1.5 py-1 border rounded text-center bg-white tabular-nums focus:outline-none focus:border-blue-400 ${hasManualOverride ? "border-amber-300 text-amber-800 font-semibold" : "border-gray-200 text-gray-800"}`}
+          aria-label={`Planned Retellect impact for ${model}, percentage points`}
+        />
+        <span className="text-gray-400">pp</span>
+      </label>
+      {hasManualOverride && (
+        <button
+          type="button"
+          onClick={() => onChange(model, null)}
+          className="self-start text-[10px] text-blue-600 hover:underline"
+          title={`Reset to default +${defaultValue} pp`}
+        >
+          Reset to default
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -515,7 +735,7 @@ function MiniStack({
   rows,
   threshold,
 }: {
-  rows: { label: string; value: number | null; unit: "%" | "pp" | "min"; bar: BarVariant; approx?: boolean }[];
+  rows: { label: string; value: number | null; unit: "%" | "pp" | "min"; bar: BarVariant; approx?: boolean; tip?: string }[];
   threshold: number;
 }) {
   return (
@@ -534,6 +754,7 @@ function MiniBar({
   bar,
   approx,
   threshold,
+  tip,
 }: {
   label: string;
   value: number | null;
@@ -541,6 +762,9 @@ function MiniBar({
   bar: BarVariant;
   approx?: boolean;
   threshold: number;
+  /** Hover explanation — rendered as a native title attribute on the
+   *  label span so it's discoverable without a custom tooltip component. */
+  tip?: string;
 }) {
   // Bar width is a visual heuristic — we scale to 100 for % values, to
   // threshold for pp values (so a full bar means "as wide as headroom
@@ -576,7 +800,10 @@ function MiniBar({
 
   return (
     <div className="flex items-center gap-2 text-[11px]">
-      <span className="w-[95px] text-sky-700 font-medium truncate" title={label}>
+      <span
+        className={`w-[110px] text-sky-700 font-medium truncate ${tip ? "cursor-help underline decoration-dotted decoration-sky-300 underline-offset-2" : ""}`}
+        title={tip ?? label}
+      >
         {label}
       </span>
       <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden min-w-[40px]">
@@ -708,7 +935,7 @@ function ConfidenceLimitsCard({ matrix }: { matrix: CpuMatrixRow[] }) {
     );
   }
   const projectedOnly = matrix.filter(
-    (r) => r.evidence === "baseline-only" && r.decision !== "insufficient",
+    (r) => r.evidence === "no-on-data" && r.decision !== "insufficient",
   );
   if (projectedOnly.length > 0) {
     lines.push(
@@ -777,7 +1004,7 @@ function EvidenceBox({ title, body }: { title: string; body: string }) {
  *  • Planned impact:
  *      - Measured ON/OFF (≥2 ON + ≥2 OFF with samples): observed delta
  *        in weighted-avg Total CPU on active minutes.
- *      - Baseline only: conservative per-tier scenario.
+ *      - No Retellect ON data yet: conservative per-tier scenario.
  *  • Projected typical = typical + impact, projected time-above is a
  *    rough linear scaling — labelled with ~ in the UI to make the
  *    approximation visible.
@@ -964,7 +1191,7 @@ function computeCpuMatrix(
     const hasUsableSample = typicalCpu !== null;
     let evidence: Evidence;
     if (measuredOnOff) evidence = "measured-on-off";
-    else if (hasUsableSample) evidence = "baseline-only";
+    else if (hasUsableSample) evidence = "no-on-data";
     else evidence = "insufficient";
 
     // Planned Retellect impact.
@@ -973,7 +1200,7 @@ function computeCpuMatrix(
     // to the conservative scenario when weightedAvg returned null (empty
     // aggregate), even though the evidence column still said "Measured
     // ON/OFF". The fallback now requires both averages to be available;
-    // otherwise the evidence tag is downgraded to "baseline-only" so the
+    // otherwise the evidence tag is downgraded to "no-on-data" so the
     // displayed evidence stays in sync with the impact source.
     const avgOnTotalCpu = weightedAvg(g.onAgg, "sumTotalCpu");
     const avgOffTotalCpu = weightedAvg(g.offAgg, "sumTotalCpu");
@@ -1000,37 +1227,23 @@ function computeCpuMatrix(
       impactSource = "conservative";
       // Keep the row's evidence tag honest: if we couldn't actually
       // measure the impact, this isn't "Measured ON/OFF" any more.
-      if (evidence === "measured-on-off") evidence = "baseline-only";
+      if (evidence === "measured-on-off") evidence = "no-on-data";
     }
 
-    // Projected state.
-    const projectedCpu = typicalCpu === null ? null : typicalCpu + impactPp;
-    const projectedRoom = projectedCpu === null ? null : threshold - projectedCpu;
-    const projectedTimeAboveMin = projectTimeAbove(timeAboveNowMin, typicalCpu, impactPp, threshold);
-
-    // Decision tree.
-    //
-    // Bug fix (2026-05-29): the projected time-above used to be compared
-    // class-wide against a per-host budget (≤ 60 min = one busy hour).
-    // For a 32-host class with each host at a few minutes above, the SUM
-    // easily clears 60 and blocked every "Safe" classification. The fix:
-    // normalise to per-host minutes so the rule "average host stays under
-    // one busy hour above threshold" actually holds.
-    const hostsForNorm = Math.max(1, g.hostsWithData);
-    const perHostProjectedTimeAbove =
-      projectedTimeAboveMin === null ? null : projectedTimeAboveMin / hostsForNorm;
-    let decision: Decision;
-    if (evidence === "insufficient" || projectedRoom === null) {
-      decision = "insufficient";
-    } else if (projectedRoom >= 20 && (perHostProjectedTimeAbove ?? 0) < 60) {
-      decision = "safe";
-    } else if (projectedRoom >= 10) {
-      decision = "validate";
-    } else if (projectedRoom >= 0) {
-      decision = "optimize";
-    } else {
-      decision = "do-not-roll-out";
-    }
+    // Projected state + decision derive from the *default* impact here.
+    // The component layer recomputes both when the user manually
+    // overrides Planned Retellect impact for a CPU class. See applyImpact.
+    const { projectedCpu, projectedRoom, projectedTimeAboveMin, decision } =
+      applyImpact(
+        {
+          typicalCpu,
+          timeAboveNowMin,
+          hostsWithData: g.hostsWithData,
+          evidence,
+        },
+        impactPp,
+        threshold,
+      );
 
     // Confidence.
     let confidence: Confidence;
@@ -1077,6 +1290,8 @@ function computeCpuMatrix(
       measuredRetellectCpuOn: avgRetellectOn,
       impactPp,
       impactSource,
+      defaultImpactPp: impactPp,
+      hasManualOverride: false,
       projectedCpu,
       projectedRoom,
       projectedTimeAboveMin,
@@ -1098,6 +1313,55 @@ function computeCpuMatrix(
 }
 
 // ─── Compute helpers ────────────────────────────────────────────────
+
+/** Apply an impact figure (pp) to a row's current-state numbers and
+ *  re-derive the projected fields + decision.
+ *
+ *  Extracted so the page can recompute projections when the user edits
+ *  the impact input without touching the (expensive) baseline compute.
+ *  computeCpuMatrix uses it once with the default impact; the component
+ *  uses it again with the user's manual override.
+ */
+function applyImpact(
+  row: Pick<CpuMatrixRow,
+    "typicalCpu" | "timeAboveNowMin" | "hostsWithData" | "evidence"
+  >,
+  impactPp: number,
+  threshold: number,
+): {
+  projectedCpu: number | null;
+  projectedRoom: number | null;
+  projectedTimeAboveMin: number | null;
+  decision: Decision;
+} {
+  const projectedCpu = row.typicalCpu === null ? null : row.typicalCpu + impactPp;
+  const projectedRoom = projectedCpu === null ? null : threshold - projectedCpu;
+  const projectedTimeAboveMin = projectTimeAbove(
+    row.timeAboveNowMin,
+    row.typicalCpu,
+    impactPp,
+    threshold,
+  );
+
+  const hostsForNorm = Math.max(1, row.hostsWithData);
+  const perHostProjectedTimeAbove =
+    projectedTimeAboveMin === null ? null : projectedTimeAboveMin / hostsForNorm;
+
+  let decision: Decision;
+  if (row.evidence === "insufficient" || projectedRoom === null) {
+    decision = "insufficient";
+  } else if (projectedRoom >= 20 && (perHostProjectedTimeAbove ?? 0) < 60) {
+    decision = "safe";
+  } else if (projectedRoom >= 10) {
+    decision = "validate";
+  } else if (projectedRoom >= 0) {
+    decision = "optimize";
+  } else {
+    decision = "do-not-roll-out";
+  }
+
+  return { projectedCpu, projectedRoom, projectedTimeAboveMin, decision };
+}
 
 /** Median of a numeric pool. Returns null on empty input. */
 function median(xs: number[]): number | null {
