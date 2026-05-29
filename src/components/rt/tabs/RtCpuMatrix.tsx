@@ -542,7 +542,11 @@ function MatrixRowView({
         </div>
       </td>
 
-      {/* Current state */}
+      {/* Current state — note time-above is shown PER HOST (averaged
+          across the hosts in this class) so it matches the user's
+          natural reading. The internal decision logic already
+          normalises per-host (perHostProjectedTimeAbove < 60 min) so
+          the displayed value now matches the decision logic. */}
       <td className="py-4 px-3">
         <MiniStack
           rows={[
@@ -552,28 +556,32 @@ function MatrixRowView({
               unit: "%",
               bar: "used",
               tip: "Median CPU over the selected period.",
+              valueColor: typicalLoadColor(row.typicalCpu, threshold),
             },
             {
               label: "Room to threshold",
               value: row.roomNow,
               unit: "pp",
               bar: "buffer",
-              tip: "Percentage points remaining until the selected CPU threshold.",
+              tip: "Percentage points from the typical (median) CPU load to the selected threshold. Note: this is measured from the typical load — peaks (see Max CPU) may still cross the threshold even when the room number looks comfortable.",
+              valueColor: roomColor(row.roomNow),
             },
             {
               label: "Time above threshold",
-              value: row.timeAboveNowMin,
+              value: perHostMinutes(row.timeAboveNowMin, row.hostsWithData),
               unit: "min",
               bar: "used",
-              tip: "Total minutes across this CPU class where measured CPU was above the selected threshold during the selected period. Reflects the current/baseline measured state — not split by Retellect ON/OFF.",
+              tip: "Average minutes per host above the selected CPU threshold during the selected period. Reflects the current/baseline measured state — not split by Retellect ON/OFF.",
+              valueColor: timeAboveColor(perHostMinutes(row.timeAboveNowMin, row.hostsWithData)),
             },
             {
               label: "Max CPU",
               value: row.maxCpu,
               unit: "%",
               bar: "ghost",
-              tip: "Highest observed CPU value in the selected period — secondary context, not the primary decision metric.",
+              tip: "Highest observed CPU value in the selected period across the class. Supporting context: a high Max CPU with a calm Typical load means the workload is spiky — peaks may already cross the threshold even when room-to-threshold looks comfortable.",
               secondary: true,
+              valueColor: maxCpuColor(row.maxCpu),
             },
           ]}
           threshold={threshold}
@@ -615,7 +623,8 @@ function MatrixRowView({
         </div>
       </td>
 
-      {/* Projected state */}
+      {/* Projected state — projected time-above shown PER HOST in the
+          same units as Current state for honest visual comparison. */}
       <td className="py-4 px-3">
         {row.decision === "insufficient" ? (
           <div className="text-xs text-gray-400">No projection available</div>
@@ -629,6 +638,7 @@ function MatrixRowView({
                 bar: "model",
                 approx: true,
                 tip: "Projected median CPU after applying the Planned Retellect impact.",
+                valueColor: typicalLoadColor(row.projectedCpu, threshold),
               },
               {
                 label: "Room to threshold",
@@ -636,15 +646,17 @@ function MatrixRowView({
                 unit: "pp",
                 bar: "buffer",
                 approx: true,
-                tip: "Percentage points remaining until the threshold after applying the Planned Retellect impact.",
+                tip: "Percentage points from the projected typical CPU load to the selected threshold. Same caveat as in Current state: peaks may still cross even when this number looks comfortable.",
+                valueColor: roomColor(row.projectedRoom),
               },
               {
                 label: "Projected time above threshold",
-                value: row.projectedTimeAboveMin,
+                value: perHostMinutes(row.projectedTimeAboveMin, row.hostsWithData),
                 unit: "min",
                 bar: "used",
                 approx: true,
-                tip: "Estimated minutes above threshold after applying the Planned Retellect impact. Modeled value, not measured.",
+                tip: "Estimated minutes per host above threshold after applying the Planned Retellect impact. Modeled value derived from the underlying per-minute distribution, not measured.",
+                valueColor: timeAboveColor(perHostMinutes(row.projectedTimeAboveMin, row.hostsWithData)),
               },
             ]}
             threshold={threshold}
@@ -795,7 +807,19 @@ function MiniStack({
   rows,
   threshold,
 }: {
-  rows: { label: string; value: number | null; unit: "%" | "pp" | "min"; bar: BarVariant; approx?: boolean; tip?: string; secondary?: boolean }[];
+  rows: {
+    label: string;
+    value: number | null;
+    unit: "%" | "pp" | "min";
+    bar: BarVariant;
+    approx?: boolean;
+    tip?: string;
+    secondary?: boolean;
+    /** Optional Tailwind text-color class for the value — encodes
+     *  severity (green good / amber moderate / red bad) so the eye
+     *  catches the warnings without reading numbers. */
+    valueColor?: string;
+  }[];
   threshold: number;
 }) {
   return (
@@ -816,6 +840,7 @@ function MiniBar({
   threshold,
   tip,
   secondary,
+  valueColor,
 }: {
   label: string;
   value: number | null;
@@ -830,6 +855,8 @@ function MiniBar({
    *  metric. Visually de-emphasised (neutral label colour, dimmer
    *  value), matches the spec's "Max CPU is secondary context" rule. */
   secondary?: boolean;
+  /** Optional severity-based Tailwind text color for the value. */
+  valueColor?: string;
 }) {
   // Bar width is a visual heuristic — we scale to 100 for % values, to
   // threshold for pp values (so a full bar means "as wide as headroom
@@ -885,7 +912,7 @@ function MiniBar({
           <div className={`h-full ${barClass} rounded-full`} style={{ width: `${widthPct}%` }} />
         )}
       </div>
-      <span className="w-[55px] text-right font-semibold text-gray-800 tabular-nums">
+      <span className={`w-[55px] text-right font-semibold tabular-nums ${valueColor ?? "text-gray-800"}`}>
         {approx && value !== null ? `~${fmtValue}` : fmtValue}
       </span>
     </div>
@@ -1369,8 +1396,21 @@ function computeCpuMatrix(
     const onActiveMin = g.onAgg.realActiveMinutes + g.onAgg.syntheticActiveMinutes;
     const isSilent = g.hostsOn.size > 0 && onActiveMin === 0;
 
-    // Subtitle — one-liner that complements the decision.
-    const subtitle = subtitleFor(decision, evidence, typicalCpu, maxCpu, threshold);
+    // Subtitle — one-liner that complements the decision. Pass the
+    // per-host time-above so the subtitle can flag the
+    // "calm typical / hot peaks" mismatch (see subtitleFor doc).
+    const perHostTimeAbove =
+      timeAboveNowMin > 0 || hasUsableSample
+        ? timeAboveNowMin / Math.max(1, g.hostsWithData)
+        : null;
+    const subtitle = subtitleFor(
+      decision,
+      evidence,
+      typicalCpu,
+      maxCpu,
+      threshold,
+      perHostTimeAbove,
+    );
 
     matrix.push({
       model: g.model,
@@ -1459,6 +1499,64 @@ function applyImpact(
   }
 
   return { projectedCpu, projectedRoom, projectedTimeAboveMin, decision };
+}
+
+// ─── Display helpers — per-host normalization + severity colors ─────
+//
+// Time-above values stored on the row are CLASS-WIDE sums (sum across
+// every host in the class). The decision logic already normalises to
+// per-host (perHostProjectedTimeAbove < 60 min); the UI now follows
+// suit so a row that decides "Safe" because per-host averages to
+// ~14 min doesn't display "1.2 h" (5 hosts × 14 min) and trigger the
+// "wait, why is room comfortable but time-above huge?" reaction the
+// user flagged.
+
+function perHostMinutes(total: number | null, hostsWithData: number): number | null {
+  if (total === null) return null;
+  const denom = Math.max(1, hostsWithData);
+  return total / denom;
+}
+
+/** Colour the Typical CPU load value by how close it sits to the
+ *  selected threshold. Green when comfortable, amber as it approaches,
+ *  red once it would already meet the threshold. */
+function typicalLoadColor(value: number | null, threshold: number): string | undefined {
+  if (value === null) return undefined;
+  if (value >= threshold) return "text-red-600";
+  if (value >= threshold - 10) return "text-amber-700";
+  if (value >= threshold - 30) return "text-gray-800";
+  return "text-emerald-700";
+}
+
+/** Colour the Room to threshold value by remaining headroom. */
+function roomColor(value: number | null): string | undefined {
+  if (value === null) return undefined;
+  if (value < 0) return "text-red-600";
+  if (value < 10) return "text-amber-700";
+  if (value < 20) return "text-gray-800";
+  return "text-emerald-700";
+}
+
+/** Colour the Time above threshold value (per host minutes).
+ *  Anchored to "one busy hour per host across the period" as the
+ *  amber/red split — matches the decision logic's < 60 min cut-off. */
+function timeAboveColor(value: number | null): string | undefined {
+  if (value === null) return undefined;
+  if (value >= 120) return "text-red-600";
+  if (value >= 30) return "text-amber-700";
+  if (value > 0) return "text-gray-700";
+  return "text-emerald-700";
+}
+
+/** Colour the Max CPU value. Max CPU is "secondary" by default (gray
+ *  label) but the *value* gets a severity tint so a 99% peak draws
+ *  the eye instead of disappearing into the gray context tier. */
+function maxCpuColor(value: number | null): string | undefined {
+  if (value === null) return undefined;
+  if (value >= 95) return "text-red-600";
+  if (value >= 85) return "text-amber-700";
+  if (value >= 70) return "text-gray-700";
+  return "text-gray-500";
 }
 
 /** Median of a numeric pool. Returns null on empty input. */
@@ -1561,9 +1659,27 @@ function subtitleFor(
   typical: number | null,
   max: number | null,
   threshold: number,
+  perHostTimeAboveMin: number | null,
 ): string {
   if (evidence === "insufficient") return "Not enough samples to score";
-  if (decision === "safe") return "Best headroom in visible sample";
+
+  // Peak-vs-typical mismatch detector. A row can decide "safe" off the
+  // median while real peaks already cross the threshold (i3-6100 case
+  // flagged 2026-05-29: typical 20%, room 60 pp, but max 99% and
+  // 14 min/host above 80%). The subtitle must not contradict the data
+  // by claiming "best headroom" when peaks are clearly saturating.
+  const peakNearSaturation = max !== null && max >= 90;
+  const meaningfulTimeAbove =
+    perHostTimeAboveMin !== null && perHostTimeAboveMin >= 10;
+
+  if (decision === "safe") {
+    if (peakNearSaturation && meaningfulTimeAbove) {
+      return "Typical load is calm — but peaks already cross the threshold";
+    }
+    if (peakNearSaturation) return "Typical load is calm — but peaks reach the threshold";
+    if (meaningfulTimeAbove) return "Mostly calm — some time already above threshold";
+    return "Cool baseline, ample headroom";
+  }
   if (decision === "validate") return "Borderline — validate under load";
   if (decision === "optimize") return "Tight margin — reduce background load first";
   if (decision === "do-not-roll-out") {
