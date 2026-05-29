@@ -248,8 +248,20 @@ export function RtCpuMatrix({
       const raw = window.localStorage.getItem(impactStorageKey);
       if (!raw) return {};
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") return parsed as Record<string, number>;
-      return {};
+      if (!parsed || typeof parsed !== "object") return {};
+      // Bug fix (2026-05-29): the old `as Record<string, number>` was an
+      // unchecked assertion. A corrupted/legacy entry (string value,
+      // null, etc.) would flow into Math.min(30, "8.5") → NaN, then
+      // into value.toFixed(1) → "NaN", and every projection on the
+      // affected row turned into NaN. Validate each entry up front and
+      // drop anything that isn't a finite number in [0, 30].
+      const cleaned: Record<string, number> = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v !== "number" || !Number.isFinite(v)) continue;
+        if (v < 0 || v > 30) continue;
+        cleaned[k] = v;
+      }
+      return cleaned;
     } catch {
       return {};
     }
@@ -557,21 +569,38 @@ function MatrixRowView({
         />
       </td>
 
-      {/* Planned Retellect impact — editable */}
+      {/* Planned Retellect impact — editable (except when there is no
+          typical-CPU baseline to project from). For "Insufficient
+          evidence" rows the Projected state cell already reads
+          "No projection available", so an editable input here would be
+          a vanity control: it would accept input, persist it, but
+          change nothing visible because applyImpact pins the decision
+          to "insufficient" whenever typicalCpu is null. */}
       <td className="py-4 px-3">
         <ImpactInput
           model={row.model}
           value={row.impactPp}
           defaultValue={row.defaultImpactPp}
           hasManualOverride={row.hasManualOverride}
+          disabled={row.evidence === "insufficient"}
           onChange={onImpactChange}
         />
         <div className="text-[10px] text-gray-500 mt-2 leading-snug">
           {row.hasManualOverride
             ? "Manual input for projection"
-            : row.measuredRetellectCpuOn !== null && row.measuredRetellectCpuOn > 0.05
-              ? `Reference evidence: ${row.measuredRetellectCpuOn.toFixed(1)}% avg direct CPU`
-              : "No measured ON data yet"}
+            : // Bug fix (2026-05-29): only show measured Reference evidence
+              // when the row's evidence column also says "Measured ON/OFF".
+              // Otherwise we'd contradict the evidence tag — a row labelled
+              // "No Retellect ON data yet" can still have a non-null
+              // avgRetellectOn when exactly one host contributed python.cpu
+              // (the ≥2/≥2 measured-on-off rule failed). The label below
+              // would then claim measured evidence the column says we
+              // don't have.
+              row.evidence === "measured-on-off" &&
+                  row.measuredRetellectCpuOn !== null &&
+                  row.measuredRetellectCpuOn > 0.05
+                ? `Reference evidence: ${row.measuredRetellectCpuOn.toFixed(1)}% avg direct CPU`
+                : "No measured ON data yet"}
         </div>
       </td>
 
@@ -654,12 +683,18 @@ function ImpactInput({
   value,
   defaultValue,
   hasManualOverride,
+  disabled,
   onChange,
 }: {
   model: string;
   value: number;
   defaultValue: number;
   hasManualOverride: boolean;
+  /** When true, the input is read-only and the Reset link is hidden.
+   *  Used by Insufficient-evidence rows where there is no baseline to
+   *  project from, so a manual impact value can't change the displayed
+   *  projection ("No projection available"). */
+  disabled?: boolean;
   onChange: (model: string, value: number | null) => void;
 }) {
   const [draft, setDraft] = useState<string>(value.toFixed(1));
@@ -668,6 +703,7 @@ function ImpactInput({
   }, [value]);
 
   const commit = () => {
+    if (disabled) return;
     const raw = parseFloat(draft);
     if (!Number.isFinite(raw)) {
       setDraft(value.toFixed(1));
@@ -687,8 +723,12 @@ function ImpactInput({
   return (
     <div className="flex flex-col gap-1">
       <label
-        className="inline-flex items-center gap-1.5 text-[11px] text-gray-600"
-        title="Manual CPU impact input used for rollout projection."
+        className={`inline-flex items-center gap-1.5 text-[11px] ${disabled ? "text-gray-400" : "text-gray-600"}`}
+        title={
+          disabled
+            ? "No baseline to project from on this row — manual impact input has no effect."
+            : "Manual CPU impact input used for rollout projection."
+        }
       >
         <span>Planned impact</span>
         <span className="text-gray-400">+</span>
@@ -699,6 +739,8 @@ function ImpactInput({
           step={0.5}
           inputMode="decimal"
           value={draft}
+          disabled={disabled}
+          readOnly={disabled}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
@@ -708,12 +750,19 @@ function ImpactInput({
               (e.currentTarget as HTMLInputElement).blur();
             }
           }}
-          className={`w-14 text-xs px-1.5 py-1 border rounded text-center bg-white tabular-nums focus:outline-none focus:border-blue-400 ${hasManualOverride ? "border-amber-300 text-amber-800 font-semibold" : "border-gray-200 text-gray-800"}`}
+          className={`w-14 text-xs px-1.5 py-1 border rounded text-center bg-white tabular-nums focus:outline-none focus:border-blue-400 ${
+            disabled
+              ? "border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed"
+              : hasManualOverride
+                ? "border-amber-300 text-amber-800 font-semibold"
+                : "border-gray-200 text-gray-800"
+          }`}
           aria-label={`Planned Retellect impact for ${model}, percentage points`}
+          aria-disabled={disabled || undefined}
         />
         <span className="text-gray-400">pp</span>
       </label>
-      {hasManualOverride && (
+      {hasManualOverride && !disabled && (
         <button
           type="button"
           onClick={() => onChange(model, null)}
