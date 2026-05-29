@@ -553,11 +553,21 @@ async function loadZabbixDataPayload(
         if (cpuUtilItems.length === 0) return [];
         const itemIds = cpuUtilItems.map((i) => i.itemid);
         const itemHostMap = new Map(cpuUtilItems.map((i) => [i.itemid, i.hostid]));
-        // periodDays drives both the SQL/Zabbix window AND the dailyMap
-        // dimensions. <=14 d windows still return sample-accurate counters
-        // (minutesAbove); older days fall back to trend.get hourly aggregates
-        // so the Peak % heatmap mode renders honestly across the whole span.
-        return await client.getCpuHistoryDaily(itemIds, itemHostMap, periodDays);
+        // Phase 4: switch from direct Zabbix call to hybrid reader so the
+        // heatmap can render >29-day windows. For dates older than ~14d
+        // the reader pulls from the CpuMetricDaily rollup table; recent
+        // dates still come straight from Zabbix.
+        const nowSec = Math.floor(Date.now() / 1000);
+        const fromSec = nowSec - periodDays * 86400;
+        const { readCpuHistoryHybrid } = await import("@/lib/cpu-rollup/reader");
+        const { daily } = await readCpuHistoryHybrid({
+          pilotId,
+          itemIds,
+          itemHostMap,
+          fromSec,
+          toSec: nowSec,
+        });
+        return daily;
       },
     }),
     fetchSource(`zabbix-rt-agent-health-${pilotId}`, {

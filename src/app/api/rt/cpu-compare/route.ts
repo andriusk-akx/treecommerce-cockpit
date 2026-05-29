@@ -16,7 +16,6 @@
  * periods are guaranteed to start on the same day-of-week.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getZabbixClient } from "@/lib/zabbix/client";
 import {
   COMPARE_THRESHOLDS,
   type CompareAlignment,
@@ -27,6 +26,7 @@ import {
 } from "@/components/rt/compare/types";
 import { resolvePilotHosts } from "@/lib/rt/compare/resolve";
 import { buildCompareResponse, type HostMeta } from "@/lib/rt/compare/compute";
+import { readCpuHistoryHybrid } from "@/lib/cpu-rollup/reader";
 
 export const dynamic = "force-dynamic";
 
@@ -235,8 +235,6 @@ function dataQualityFor(iso: string): DataQuality {
 }
 
 async function buildRealPayload(q: ParsedQuery, hosts: HostMeta[], itemIds: string[], itemHostMap: Map<string, string>): Promise<CompareResponse> {
-  const client = getZabbixClient();
-
   // Period boundaries in Vilnius local time. aFrom = midnight start;
   // aTo = midnight end of (aTo + 1) day to make `[aFromSec, aToSec)` inclusive.
   const aFromSec = isoToVilniusUnix(q.aFrom, 0);
@@ -244,9 +242,12 @@ async function buildRealPayload(q: ParsedQuery, hosts: HostMeta[], itemIds: stri
   const bFromSec = isoToVilniusUnix(q.bFrom, 0);
   const bToSec = isoToVilniusUnix(addDayIso(q.bTo, 1), 0);
 
+  // Hybrid reader: reads from DB rollup for dates older than ~14d,
+  // falls through to live Zabbix for recent windows. Splits +
+  // merges across the boundary automatically.
   const [periodA, periodB] = await Promise.all([
-    client.getCpuHistoryForRange(itemIds, itemHostMap, aFromSec, aToSec),
-    client.getCpuHistoryForRange(itemIds, itemHostMap, bFromSec, bToSec),
+    readCpuHistoryHybrid({ pilotId: q.pilotId, itemIds, itemHostMap, fromSec: aFromSec, toSec: aToSec }),
+    readCpuHistoryHybrid({ pilotId: q.pilotId, itemIds, itemHostMap, fromSec: bFromSec, toSec: bToSec }),
   ]);
 
   const warnings: string[] = [];

@@ -93,15 +93,15 @@ enum ViewType {
 // ─── Models ────────────────────────────────────────────────────────
 
 model Client {
-  id          String       @id @default(cuid())
-  name        String
-  code        String       @unique
-  type        ClientType   @default(EXTERNAL)
-  status      ClientStatus @default(ACTIVE)
-  ownerName   String?
-  notes       String?      @db.Text
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id        String       @id @default(cuid())
+  name      String
+  code      String       @unique
+  type      ClientType   @default(EXTERNAL)
+  status    ClientStatus @default(ACTIVE)
+  ownerName String?
+  notes     String?      @db.Text
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
   pilots      Pilot[]
   stores      Store[]
@@ -111,29 +111,31 @@ model Client {
 }
 
 model Pilot {
-  id             String          @id @default(cuid())
-  clientId       String
-  name           String
-  shortCode      String          @unique
-  productType    PilotProductType @default(OTHER)
-  status         PilotStatus     @default(PLANNED)
-  visibility     PilotVisibility @default(INTERNAL)
-  startDate      DateTime?
-  endDate        DateTime?
-  goalSummary    String?         @db.Text
-  internalOwner  String?
-  notes          String?         @db.Text
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id            String           @id @default(cuid())
+  clientId      String
+  name          String
+  shortCode     String           @unique
+  productType   PilotProductType @default(OTHER)
+  status        PilotStatus      @default(PLANNED)
+  visibility    PilotVisibility  @default(INTERNAL)
+  startDate     DateTime?
+  endDate       DateTime?
+  goalSummary   String?          @db.Text
+  internalOwner String?
+  notes         String?          @db.Text
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
-  client         Client          @relation(fields: [clientId], references: [id])
-  dataSources    DataSource[]
-  stores         Store[]
-  devices        Device[]
-  incidents      Incident[]
-  noteEntries    Note[]
-  views          View[]
-  userAccess     UserPilotAccess[]
+  client           Client            @relation(fields: [clientId], references: [id])
+  dataSources      DataSource[]
+  stores           Store[]
+  devices          Device[]
+  incidents        Incident[]
+  noteEntries      Note[]
+  views            View[]
+  userAccess       UserPilotAccess[]
+  cpuMetricsDaily  CpuMetricDaily[]
+  cpuMetricsHourly CpuMetricHourly[]
 }
 
 model DataSource {
@@ -177,13 +179,13 @@ model Store {
 }
 
 model Device {
-  id               String     @id @default(cuid())
-  pilotId          String
-  storeId          String?
-  name             String
-  sourceHostKey    String?
-  deviceType       DeviceType @default(OTHER)
-  cpuModel         String?
+  id                  String     @id @default(cuid())
+  pilotId             String
+  storeId             String?
+  name                String
+  sourceHostKey       String?
+  deviceType          DeviceType @default(OTHER)
+  cpuModel            String?
   // CPU core count — drives per_counter / cpu_num normalisation in the
   // Retellect drill-down. Stored here (not derived from Zabbix on every
   // request) so:
@@ -194,7 +196,7 @@ model Device {
   //   3. Operators can manually override (e.g. when CPU model is known
   //      but the agent template hasn't been redeployed).
   // Refreshed via `scripts/backfill-device-cpu-cores.mjs` (24h cadence).
-  cpuCores         Int?
+  cpuCores            Int?
   // Provenance of `cpuCores`. Used by UI to show "4c (Zabbix)" vs.
   // "4c (inferred from CPU model)" vs. "4c (manual)" so operators can
   // judge confidence at a glance.
@@ -202,22 +204,24 @@ model Device {
   //   "inferred_from_model"  → derived from cpuModel via known-model table
   //   "manual"               → operator set the value via Settings UI
   //   null                   → never resolved (rendered as "?c" in UI)
-  cpuCoresSource   String?
+  cpuCoresSource      String?
   // Last time `cpuCores` was refreshed from Zabbix (or NULL if never).
   // The resolveCoresForHost helper re-probes when this is older than the
   // configured TTL (24h) so we eventually pick up hardware changes.
-  cpuCoresProbedAt DateTime?
-  ramGb            Float?
-  os               String?
-  status           String     @default("active")
-  retellectEnabled Boolean    @default(false)
+  cpuCoresProbedAt    DateTime?
+  ramGb               Float?
+  os                  String?
+  status              String     @default("active")
+  retellectEnabled    Boolean    @default(false)
   retellectConfidence String? // "high" | "low" — null when not installed
-  notes            String?    @db.Text
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  notes               String?    @db.Text
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
-  pilot Pilot  @relation(fields: [pilotId], references: [id])
-  store Store? @relation(fields: [storeId], references: [id])
+  pilot            Pilot             @relation(fields: [pilotId], references: [id])
+  store            Store?            @relation(fields: [storeId], references: [id])
+  cpuMetricsDaily  CpuMetricDaily[]
+  cpuMetricsHourly CpuMetricHourly[]
 }
 
 model Incident {
@@ -237,9 +241,9 @@ model Incident {
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
-  client Client  @relation(fields: [clientId], references: [id])
-  pilot  Pilot?  @relation(fields: [pilotId], references: [id])
-  store  Store?  @relation(fields: [storeId], references: [id])
+  client Client @relation(fields: [clientId], references: [id])
+  pilot  Pilot? @relation(fields: [pilotId], references: [id])
+  store  Store? @relation(fields: [storeId], references: [id])
   notes  Note[]
 }
 
@@ -261,15 +265,15 @@ model Note {
 }
 
 model View {
-  id          String         @id @default(cuid())
-  pilotId     String
-  name        String
-  slug        String
-  viewType    ViewType       @default(OVERVIEW)
-  visibility  PilotVisibility @default(INTERNAL)
-  configJson  String?        @db.Text
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id         String          @id @default(cuid())
+  pilotId    String
+  name       String
+  slug       String
+  viewType   ViewType        @default(OVERVIEW)
+  visibility PilotVisibility @default(INTERNAL)
+  configJson String?         @db.Text
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 
   pilot Pilot @relation(fields: [pilotId], references: [id])
 
@@ -292,20 +296,20 @@ model View {
 // could possibly work.
 
 model User {
-  id                  String   @id @default(cuid())
-  username            String   @unique
+  id                  String    @id @default(cuid())
+  username            String    @unique
   passwordHash        String
   // Top-level admin flag. Bypasses all per-pilot checks.
-  isAdmin             Boolean  @default(false)
+  isAdmin             Boolean   @default(false)
   // Optional template role for non-admins. Admins typically have null.
   roleId              String?
   // Account lockout fields — enterprise baseline.
-  failedLoginAttempts Int      @default(0)
+  failedLoginAttempts Int       @default(0)
   lockedUntil         DateTime?
   lastLoginAt         DateTime?
-  isActive            Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   role        Role?             @relation(fields: [roleId], references: [id], onDelete: SetNull)
   pilotAccess UserPilotAccess[]
@@ -340,7 +344,7 @@ model UserPilotAccess {
   // straightforward — copy from role.allowedTabs at creation, edit per pilot.
   allowedTabs String[]
   grantedAt   DateTime @default(now())
-  grantedBy   String?  // userId of the admin who granted
+  grantedBy   String? // userId of the admin who granted
 
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   pilot Pilot @relation(fields: [pilotId], references: [id], onDelete: Cascade)
@@ -369,4 +373,99 @@ model UserSession {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// ─── CPU metric rollup tables ──────────────────────────────────────────
+//
+// Phase 4 of AKpilot architecture spec v2.1. The Compare-periods sub-view
+// (and eventually Timeline + Rollout Insights) needs >29-day retention,
+// which exceeds Zabbix's trend.get / history.get retention. We mirror
+// the Zabbix CPU history into our own DB at two grains:
+//
+//   - CpuMetricDaily: one row per host per Vilnius-local day. Stores
+//     max/avg/min CPU + minutesAbove bin counters (matches what the
+//     existing `getCpuHistoryDaily` returns in-memory). 6+ month
+//     retention; ~9 MB per pilot per year.
+//
+//   - CpuMetricHourly: one row per host per hour. Stores max/avg/min
+//     CPU only (bin counters at hourly grain don't tell us much —
+//     "minutes above 70% this hour" is a sample-level concept). Drives
+//     the Compare-periods overlay chart for old dates so the daily
+//     pattern stays visible.
+//
+// Both tables are populated by `/api/internal/rollup-cpu` running daily
+// at 02:00 Vilnius. INSERT … ON CONFLICT (uniqueKey) DO UPDATE keeps the
+// ingestion idempotent — re-running the job overwrites the same date's
+// rows with the latest Zabbix view.
+
+model CpuMetricDaily {
+  id       String   @id @default(cuid())
+  pilotId  String
+  deviceId String
+  // Zabbix host id (source of truth for joining back to Zabbix queries).
+  zHostId  String
+  // Vilnius-local calendar date. The `getCpuHistoryDaily` aggregator
+  // already keys by Vilnius local date via `toLocaleDateString("en-CA",
+  // { timeZone: "Europe/Vilnius" })` so storing as @db.Date here means
+  // "midnight Vilnius" is the only sensible boundary.
+  date     DateTime @db.Date
+
+  cpuMax       Float
+  cpuAvg       Float
+  cpuMin       Float
+  /// Count of raw 1-min samples (history.get). When `source = "trend"`
+  /// no history was available and totalSamples = 0; consumer should
+  /// treat the row as low-confidence.
+  totalSamples Int
+
+  /// Per-threshold minute counters from raw samples. Match the bin
+  /// definitions in `getCpuHistoryDaily` — strict `>` (not `>=`) so
+  /// Timeline and Compare report identical numbers.
+  minutesAbove20 Int @default(0)
+  minutesAbove30 Int @default(0)
+  minutesAbove40 Int @default(0)
+  minutesAbove50 Int @default(0)
+  minutesAbove60 Int @default(0)
+  minutesAbove70 Int @default(0)
+  minutesAbove80 Int @default(0)
+  minutesAbove90 Int @default(0)
+
+  /// "history" = all from raw 1-min samples, "trend" = derived from
+  /// hourly trend aggregates (older than ~14d), "merged" = mix.
+  source     String
+  capturedAt DateTime @default(now())
+
+  pilot  Pilot  @relation(fields: [pilotId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([zHostId, date])
+  @@index([pilotId, date])
+  @@index([deviceId, date])
+  @@index([date])
+}
+
+model CpuMetricHourly {
+  id        String   @id @default(cuid())
+  pilotId   String
+  deviceId  String
+  zHostId   String
+  // Start of the hour bucket in UTC. Postgres timestamptz with second
+  // precision is enough — hourly buckets never need finer.
+  hourStart DateTime @db.Timestamptz(0)
+
+  cpuMax       Float
+  cpuAvg       Float
+  cpuMin       Float
+  totalSamples Int
+
+  source     String
+  capturedAt DateTime @default(now())
+
+  pilot  Pilot  @relation(fields: [pilotId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([zHostId, hourStart])
+  @@index([pilotId, hourStart])
+  @@index([deviceId, hourStart])
+  @@index([hourStart])
 }
