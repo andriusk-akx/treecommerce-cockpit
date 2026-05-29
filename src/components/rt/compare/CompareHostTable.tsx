@@ -412,43 +412,30 @@ const UNKNOWN_CPU_LABEL = "Unknown CPU";
  * like "SCO35\nRimi MHM Malūno" because the newline counted as whitespace
  * — using an explicit vendor allow-list closes that hole.
  */
-const CPU_VENDOR_PREFIXES = [
-  "intel", "amd", "apple", "arm", "qualcomm", "snapdragon",
-  "ryzen", "epyc", "threadripper", "xeon", "core", "pentium",
-  "celeron", "atom",
-];
-/** Mirror of resolve.ts BOGUS_VALUE_MARKERS — keep in sync. */
-const BOGUS_VALUE_MARKERS = /\b(SCO\d+|Rimi|Maxima|IKI|MHM|SHM|HM\d|Panorama|Mal[uū]no|Vilnius|Kaunas|Klaip[eė]da|Šiauliai|Panev[eė]žys|Pavilnionys|Pilait[eė]|Saul[eė]s)\b/i;
-
-function passesBasicShape(s: string): boolean {
-  if (s === "" || s === "—" || s === "-") return false;
-  if (s.length > 50) return false;
-  if (/[\r\n]/.test(s)) return false;
-  if (!/\d/.test(s)) return false;
-  const lower = s.toLowerCase();
-  return CPU_VENDOR_PREFIXES.some((p) => lower.startsWith(p));
-}
-
 /**
- * Mirror of resolve.ts `extractCleanCpuModel`. Same logic: strip polluted
- * suffixes ("Intel Celeron J3060 SCO35 ..." → "Intel Celeron J3060"),
- * return null for unrecoverable values. Server already runs this; client
- * mirror handles the case where a stale browser bundle is rendering an
- * older payload that wasn't extracted upstream.
+ * Strict CPU model allowlist — mirror of resolve.ts CPU_MODEL_PATTERNS.
+ * Real CPU models match one of these; everything else folds into the
+ * Unknown bucket regardless of how clean it looks. Keep in sync with
+ * the server side.
  */
+const CPU_MODEL_PATTERNS: Array<{ re: RegExp; canonical: (m: RegExpMatchArray) => string }> = [
+  { re: /\bi([3579])[- ]?(\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel i${m[1]}-${m[2].toUpperCase()}` },
+  { re: /\bCeleron[\s-]+([A-Z]?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Celeron ${m[1].toUpperCase()}` },
+  { re: /\bPentium[\s-]+([A-Z]?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Pentium ${m[1].toUpperCase()}` },
+  { re: /\bAtom[\s-]+([A-Z]?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Atom ${m[1].toUpperCase()}` },
+  { re: /\bXeon[\s-]+(E[35]?-?\d{3,6}[A-Z]*|\w?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Xeon ${m[1].toUpperCase()}` },
+  { re: /\bRyzen[\s-]+(\d+[\s-]+\d{3,5}[A-Z]*)\b/i, canonical: (m) => `AMD Ryzen ${m[1].replace(/\s+/g, " ")}` },
+  { re: /\bEPYC[\s-]+(\d{3,5}[A-Z]*)\b/i, canonical: (m) => `AMD EPYC ${m[1].toUpperCase()}` },
+  { re: /\bThreadripper[\s-]+(\d{3,5}[A-Z]*)\b/i, canonical: (m) => `AMD Threadripper ${m[1].toUpperCase()}` },
+];
+
 function extractCleanCpuModel(s: string | null | undefined): string | null {
   if (!s) return null;
   const trimmed = s.trim();
-  if (trimmed === "") return null;
-  if (!BOGUS_VALUE_MARKERS.test(trimmed) && passesBasicShape(trimmed)) {
-    return trimmed;
-  }
-  const match = trimmed.match(BOGUS_VALUE_MARKERS);
-  if (match && match.index != null && match.index > 0) {
-    const prefix = trimmed.substring(0, match.index).trim();
-    if (prefix && !BOGUS_VALUE_MARKERS.test(prefix) && passesBasicShape(prefix)) {
-      return prefix;
-    }
+  if (trimmed === "" || trimmed.length > 200) return null;
+  for (const { re, canonical } of CPU_MODEL_PATTERNS) {
+    const match = trimmed.match(re);
+    if (match) return canonical(match);
   }
   return null;
 }

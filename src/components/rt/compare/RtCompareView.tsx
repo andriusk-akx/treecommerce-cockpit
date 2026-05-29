@@ -229,29 +229,25 @@ export function RtCompareView({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Z
   // doesn't pollute the dropdown — those rows still aggregate into the
   // Unknown bucket in the host table.
   const cpuModelOptions = useMemo(() => {
-    const VENDOR_PREFIXES = [
-      "intel", "amd", "apple", "arm", "qualcomm", "snapdragon",
-      "ryzen", "epyc", "threadripper", "xeon", "core", "pentium",
-      "celeron", "atom",
+    // Mirror of resolve.ts CPU_MODEL_PATTERNS. Any string that contains
+    // a recognised CPU pattern matches; everything else is excluded.
+    const PATTERNS: Array<{ re: RegExp; canonical: (m: RegExpMatchArray) => string }> = [
+      { re: /\bi([3579])[- ]?(\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel i${m[1]}-${m[2].toUpperCase()}` },
+      { re: /\bCeleron[\s-]+([A-Z]?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Celeron ${m[1].toUpperCase()}` },
+      { re: /\bPentium[\s-]+([A-Z]?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Pentium ${m[1].toUpperCase()}` },
+      { re: /\bAtom[\s-]+([A-Z]?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Atom ${m[1].toUpperCase()}` },
+      { re: /\bXeon[\s-]+(E[35]?-?\d{3,6}[A-Z]*|\w?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Xeon ${m[1].toUpperCase()}` },
+      { re: /\bRyzen[\s-]+(\d+[\s-]+\d{3,5}[A-Z]*)\b/i, canonical: (m) => `AMD Ryzen ${m[1].replace(/\s+/g, " ")}` },
+      { re: /\bEPYC[\s-]+(\d{3,5}[A-Z]*)\b/i, canonical: (m) => `AMD EPYC ${m[1].toUpperCase()}` },
+      { re: /\bThreadripper[\s-]+(\d{3,5}[A-Z]*)\b/i, canonical: (m) => `AMD Threadripper ${m[1].toUpperCase()}` },
     ];
-    const BOGUS = /\b(SCO\d+|Rimi|Maxima|IKI|MHM|SHM|HM\d|Panorama|Mal[uū]no|Vilnius|Kaunas|Klaip[eė]da|Šiauliai|Panev[eė]žys|Pavilnionys|Pilait[eė]|Saul[eė]s)\b/i;
-    const passesShape = (s: string): boolean => {
-      if (s === "" || s === "—" || s === "-") return false;
-      if (s.length > 50) return false;
-      if (/[\r\n]/.test(s)) return false;
-      if (!/\d/.test(s)) return false;
-      const lower = s.toLowerCase();
-      return VENDOR_PREFIXES.some((p) => lower.startsWith(p));
-    };
     const extract = (s: string | null | undefined): string | null => {
       if (!s) return null;
       const t = s.trim();
-      if (t === "") return null;
-      if (!BOGUS.test(t) && passesShape(t)) return t;
-      const m = t.match(BOGUS);
-      if (m && m.index != null && m.index > 0) {
-        const prefix = t.substring(0, m.index).trim();
-        if (prefix && !BOGUS.test(prefix) && passesShape(prefix)) return prefix;
+      if (t === "" || t.length > 200) return null;
+      for (const { re, canonical } of PATTERNS) {
+        const m = t.match(re);
+        if (m) return canonical(m);
       }
       return null;
     };

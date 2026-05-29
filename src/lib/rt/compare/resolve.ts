@@ -23,90 +23,60 @@ interface ZHostWithInventory {
 }
 
 /**
- * Server-side heuristic for "is this string a real CPU model?". Kept here
- * (not just on the client) so the API responds with `cpuModel: null` for
- * bogus values that leaked into Zabbix inventory hardware fields. This
- * means even a client running stale JS — or a future client built against
- * a different aggregation strategy — gets clean grouping by default.
+ * Strict CPU model allowlist patterns. We've burned too many cycles on
+ * heuristics that "almost" caught polluted Zabbix inventory values.
+ * Switch to a positive whitelist: a value is a real CPU model ONLY if
+ * it matches one of these patterns exactly (after a vendor prefix and
+ * an arbitrary character run is allowed in the middle of the string for
+ * things like "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz").
  *
- * Real CPU model strings:
- *   - start with a recognised vendor / family prefix (case-insensitive)
- *   - contain at least one digit (rules out bare "Intel")
- *   - are reasonably short (≤ 80 chars; longer = pasted multi-line junk)
- *   - have no newlines in the body
- *
- * Examples that pass: "Intel i3-4330", "AMD Ryzen 5 5600X",
- *   "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz".
- * Examples that fail: "SCO35", "SCO35 Rimi MHM Maluno",
- *   "Intel i3-4330\nRimi HM Panorama", any hostname-style string.
+ * Each entry maps the full string back to a canonical CPU model name
+ * that's used as the aggregation key — so different surface forms
+ * ("Intel i3-4330" vs "Intel(R) Core(TM) i3-4330 CPU @ 3.40GHz") still
+ * group under the same row.
  */
-const VENDOR_PREFIXES = [
-  "intel", "amd", "apple", "arm", "qualcomm", "snapdragon",
-  "ryzen", "epyc", "threadripper", "xeon", "core", "pentium",
-  "celeron", "atom",
+const CPU_MODEL_PATTERNS: Array<{ re: RegExp; canonical: (m: RegExpMatchArray) => string }> = [
+  // Intel Core iN-XXXX (covers i3-4330, i5-9500E, i3-12300HL, i3-9100E, etc.)
+  { re: /\bi([3579])[- ]?(\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel i${m[1]}-${m[2].toUpperCase()}` },
+  // Intel Celeron (any model code after)
+  { re: /\bCeleron[\s-]+([A-Z]?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Celeron ${m[1].toUpperCase()}` },
+  // Intel Pentium
+  { re: /\bPentium[\s-]+([A-Z]?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Pentium ${m[1].toUpperCase()}` },
+  // Intel Atom
+  { re: /\bAtom[\s-]+([A-Z]?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Atom ${m[1].toUpperCase()}` },
+  // Intel Xeon
+  { re: /\bXeon[\s-]+(E[35]?-?\d{3,6}[A-Z]*|\w?\d{3,6}[A-Z]*)\b/i, canonical: (m) => `Intel Xeon ${m[1].toUpperCase()}` },
+  // AMD Ryzen
+  { re: /\bRyzen[\s-]+(\d+[\s-]+\d{3,5}[A-Z]*)\b/i, canonical: (m) => `AMD Ryzen ${m[1].replace(/\s+/g, " ")}` },
+  // AMD EPYC
+  { re: /\bEPYC[\s-]+(\d{3,5}[A-Z]*)\b/i, canonical: (m) => `AMD EPYC ${m[1].toUpperCase()}` },
+  // AMD Threadripper
+  { re: /\bThreadripper[\s-]+(\d{3,5}[A-Z]*)\b/i, canonical: (m) => `AMD Threadripper ${m[1].toUpperCase()}` },
 ];
-/**
- * Retail-domain markers that should NEVER appear inside a CPU model
- * string. When Zabbix inventory's `hardware` field gets polluted with
- * hostnames or store names (we've seen "Intel Celeron J3060 SCO35 Rimi
- * MHM Maluno"), the vendor prefix alone passes the heuristic — so we
- * also reject anything that mentions these. Domain-specific but the
- * cleanest way to keep bad inventory out of the comparison grouping.
- */
-const BOGUS_VALUE_MARKERS = /\b(SCO\d+|Rimi|Maxima|IKI|MHM|SHM|HM\d|Panorama|Mal[uū]no|Vilnius|Kaunas|Klaip[eė]da|Šiauliai|Panev[eė]žys|Pavilnionys|Pilait[eė]|Saul[eė]s)\b/i;
 
 /**
- * Reject upfront. Used by the extractor below — keeps the regex in one
- * place even when we accept post-extraction values.
- */
-function hasBogusMarker(s: string): boolean {
-  return BOGUS_VALUE_MARKERS.test(s);
-}
-
-function passesBasicShape(s: string): boolean {
-  if (s === "" || s === "—" || s === "-") return false;
-  if (s.length > 50) return false;
-  if (/[\r\n]/.test(s)) return false;
-  if (!/\d/.test(s)) return false;
-  const lower = s.toLowerCase();
-  return VENDOR_PREFIXES.some((p) => lower.startsWith(p));
-}
-
-/**
- * Return a clean CPU model string, or null if the input looks bogus.
- *
- * Strategy:
- *   1. If the trimmed value has no bogus markers and passes the basic
- *      shape check (vendor prefix, has digit, sane length, no newlines),
- *      return it unchanged.
- *   2. Otherwise, look for the first occurrence of a bogus marker. If
- *      there's anything before it, treat that prefix as the candidate
- *      CPU model — strip the rest and re-test. This rescues polluted
- *      values like "Intel Celeron J3060 SCO35 Rimi MHM Maluno" by
- *      extracting "Intel Celeron J3060".
- *   3. If extraction still fails, return null.
+ * Return the canonical CPU model name for an input string, or null when
+ * the string doesn't contain a recognised CPU model. Pattern matching is
+ * done against the WHOLE string (so polluted values like "Intel Celeron
+ * J3060 SCO35 Rimi MHM Maluno" still produce "Intel Celeron J3060" and
+ * "Rimi Vilnius SC035" returns null because none of the patterns match).
  */
 function extractCleanCpuModel(s: string | null | undefined): string | null {
   if (!s) return null;
   const trimmed = s.trim();
   if (trimmed === "") return null;
-  if (!hasBogusMarker(trimmed) && passesBasicShape(trimmed)) {
-    return trimmed;
-  }
-  const match = trimmed.match(BOGUS_VALUE_MARKERS);
-  if (match && match.index != null && match.index > 0) {
-    const prefix = trimmed.substring(0, match.index).trim();
-    if (prefix && !hasBogusMarker(prefix) && passesBasicShape(prefix)) {
-      return prefix;
+  // Length cap is a sanity check — strings longer than this are almost
+  // certainly multi-line junk and we don't want to pay regex time on them.
+  if (trimmed.length > 200) return null;
+  for (const { re, canonical } of CPU_MODEL_PATTERNS) {
+    const match = trimmed.match(re);
+    if (match) {
+      return canonical(match);
     }
   }
   return null;
 }
 
-/**
- * Boolean wrapper used by the client mirror. Server code uses the
- * extractor directly because it both validates AND cleans.
- */
 function isLikelyRealCpuModel(s: string | null | undefined): boolean {
   return extractCleanCpuModel(s) !== null;
 }
