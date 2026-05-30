@@ -650,12 +650,20 @@ function MatrixRowView({
                 valueColor: roomColor(row.projectedRoom),
               },
               {
-                label: "Projected time above threshold",
+                // Label says "Time above threshold" to mirror the
+                // Current CPU state column so the eye can compare the
+                // two values side-by-side at the same row offset. The
+                // "Projected" qualifier is supplied by the column
+                // header ("Projected CPU state") and reinforced by the
+                // tooltip — preserves the spec's intent of
+                // distinguishing modeled from measured without
+                // truncating the label.
+                label: "Time above threshold",
                 value: perHostMinutes(row.projectedTimeAboveMin, row.hostsWithData),
                 unit: "min",
                 bar: "used",
                 approx: true,
-                tip: "Estimated minutes per host above threshold after applying the Planned Retellect impact. Modeled value derived from the underlying per-minute distribution, not measured.",
+                tip: "Projected time above threshold — estimated minutes per host above the selected threshold after applying the Planned Retellect impact. Modeled value derived from the underlying per-minute distribution, not measured.",
                 valueColor: timeAboveColor(perHostMinutes(row.projectedTimeAboveMin, row.hostsWithData)),
               },
             ]}
@@ -823,7 +831,7 @@ function MiniStack({
   threshold: number;
 }) {
   return (
-    <div className="flex flex-col gap-1.5 min-w-[230px]">
+    <div className="flex flex-col gap-1.5 min-w-[280px]">
       {rows.map((r) => (
         <MiniBar key={r.label} {...r} threshold={threshold} />
       ))}
@@ -893,7 +901,7 @@ function MiniBar({
   return (
     <div className="flex items-center gap-2 text-[11px]">
       <span
-        className={`w-[110px] truncate font-medium ${secondary ? "text-gray-400" : "text-sky-700"} ${tip ? `cursor-help underline decoration-dotted underline-offset-2 ${secondary ? "decoration-gray-300" : "decoration-sky-300"}` : ""}`}
+        className={`w-[160px] truncate font-medium ${secondary ? "text-gray-400" : "text-sky-700"} ${tip ? `cursor-help underline decoration-dotted underline-offset-2 ${secondary ? "decoration-gray-300" : "decoration-sky-300"}` : ""}`}
         title={tip ?? label}
       >
         {label}
