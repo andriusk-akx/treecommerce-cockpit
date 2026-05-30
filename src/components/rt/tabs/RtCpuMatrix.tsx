@@ -449,16 +449,16 @@ export function RtCpuMatrix({
               : "All classes filtered out by Hide silent — no Retellect activity observed in this window."}
           </div>
         ) : (
-          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+            <table className="w-full text-sm min-w-[1200px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-left py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase w-[240px]">CPU class</th>
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[150px]">Evidence base</th>
+                  <th className="text-left py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase w-[200px]">CPU class</th>
+                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[130px]">Evidence base</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Current CPU state</th>
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[200px]">Planned Retellect impact</th>
+                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[170px]">Planned Retellect impact</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Projected CPU state</th>
-                  <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[140px]">Decision</th>
+                  <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[120px]">Decision</th>
                   <th
                     className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[100px] cursor-help"
                     title="Decision confidence for rollout, not general confidence in the underlying data."
@@ -527,7 +527,7 @@ function MatrixRowView({
         <div className="font-semibold text-gray-900">{row.model}</div>
         <div className="text-[11px] text-gray-500 mt-0.5">{row.subtitle}</div>
         <div
-          className={`inline-block mt-2 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${EVIDENCE_STYLES[row.evidence]}`}
+          className={`inline-block mt-2 px-2 py-0.5 rounded-full border text-[10px] font-semibold whitespace-nowrap ${EVIDENCE_STYLES[row.evidence]}`}
         >
           {EVIDENCE_LABEL[row.evidence]}
         </div>
@@ -848,7 +848,7 @@ function MiniStack({
   threshold: number;
 }) {
   return (
-    <div className="flex flex-col gap-1.5 min-w-[280px]">
+    <div className="flex flex-col gap-1.5 min-w-[240px]">
       {rows.map((r) => (
         <MiniBar key={r.label} {...r} threshold={threshold} />
       ))}
@@ -936,7 +936,7 @@ function MiniBar({
   return (
     <div className="flex items-center gap-2 text-[11px]">
       <span
-        className={`w-[160px] truncate font-medium ${secondary ? "text-gray-400" : "text-sky-700"} ${tip ? `cursor-help underline decoration-dotted underline-offset-2 ${secondary ? "decoration-gray-300" : "decoration-sky-300"}` : ""}`}
+        className={`w-[140px] truncate font-medium ${secondary ? "text-gray-400" : "text-sky-700"} ${tip ? `cursor-help underline decoration-dotted underline-offset-2 ${secondary ? "decoration-gray-300" : "decoration-sky-300"}` : ""}`}
         title={tip ?? label}
       >
         {label}
