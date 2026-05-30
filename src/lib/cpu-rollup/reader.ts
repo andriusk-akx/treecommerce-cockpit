@@ -210,8 +210,18 @@ export async function readCpuHistoryHybrid(opts: ReadOptions): Promise<ReaderRes
   if (newStart < toSec && itemIds.length > 0) {
     const client = getZabbixClient();
     const live = await client.getCpuHistoryForRange(itemIds, itemHostMap, newStart, toSec);
-    daily.push(...live.daily);
-    samples.push(...live.samples);
+    // Bug fix (2026-05-30): used to be `daily.push(...live.daily)` and
+    // `samples.push(...live.samples)`. The spread operator pushes each
+    // element as a separate function argument, and V8 caps argument
+    // count at ~125k. For Rimi-scale (111 hosts × up to 1440 samples
+    // per host per day across a multi-day window) `live.samples` can
+    // run into the millions, which throws "RangeError: Maximum call
+    // stack size exceeded" mid-fetch and surfaces in the cross-tab
+    // error banner as `[CPU history] Maximum call stack size exceeded`.
+    // Per-element loops avoid the spread limit at the cost of a few
+    // ms per million elements — well worth it.
+    for (const d of live.daily) daily.push(d);
+    for (const s of live.samples) samples.push(s);
     breakdown.zabbix += live.daily.length;
   }
 
