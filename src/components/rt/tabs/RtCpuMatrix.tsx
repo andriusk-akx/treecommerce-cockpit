@@ -76,6 +76,14 @@ interface CpuMatrixRow {
    *  Period dropdown doesn't change the displayed intensity for a
    *  stable workload. */
   periodDays: number;
+  /** Physical core count for this CPU model. Null when the model
+   *  string doesn't match a known SKU; row falls back to no spec line. */
+  cpuCores: number | null;
+  /** Logical thread count (cores × SMT factor). */
+  cpuThreads: number | null;
+  /** Ordinal performance rank, higher = stronger. -1 for unrecognised
+   *  models so they sort to the bottom alongside "Unknown". */
+  cpuRank: number;
 
   // ── Current state ─────────────────────────────────────────────────
   /** Median of per (host, day) daily averages — "typical CPU load". */
@@ -438,7 +446,7 @@ export function RtCpuMatrix({
             Decision matrix
           </h3>
           <span className="text-[11px] text-gray-400">
-            sorted by risk · {periodDays}-day window
+            sorted by CPU tier (weakest first) · {periodDays}-day window
           </span>
         </div>
 
@@ -525,6 +533,11 @@ function MatrixRowView({
       {/* CPU class */}
       <td className="py-4 px-4">
         <div className="font-semibold text-gray-900">{row.model}</div>
+        {row.cpuCores !== null && row.cpuThreads !== null && (
+          <div className="text-[10px] text-gray-400 mt-0.5 tabular-nums font-medium uppercase tracking-wide">
+            {row.cpuCores}C / {row.cpuThreads}T
+          </div>
+        )}
         <div className="text-[11px] text-gray-500 mt-0.5">{row.subtitle}</div>
         <div
           className={`inline-block mt-2 px-2 py-0.5 rounded-full border text-[10px] font-semibold whitespace-nowrap ${EVIDENCE_STYLES[row.evidence]}`}
@@ -1456,6 +1469,8 @@ function computeCpuMatrix(
       perHostPerDayRateForSubtitle,
     );
 
+    const spec = cpuSpec(g.model);
+
     matrix.push({
       model: g.model,
       subtitle,
@@ -1465,6 +1480,9 @@ function computeCpuMatrix(
       hostsOff: g.hostsOff.size,
       evidence,
       periodDays,
+      cpuCores: spec?.cores ?? null,
+      cpuThreads: spec?.threads ?? null,
+      cpuRank: spec?.rank ?? -1,
       typicalCpu,
       roomNow,
       timeAboveNowMin: timeAboveNowMin > 0 || hasUsableSample ? timeAboveNowMin : null,
@@ -1486,8 +1504,16 @@ function computeCpuMatrix(
   }
 
   matrix.sort((a, b) => {
+    // Unknown / unrecognised CPU models stay at the bottom.
     if (a.model === "Unknown" && b.model !== "Unknown") return 1;
     if (b.model === "Unknown" && a.model !== "Unknown") return -1;
+    if (a.cpuRank === -1 && b.cpuRank !== -1) return 1;
+    if (b.cpuRank === -1 && a.cpuRank !== -1) return -1;
+    // Primary order: weakest CPU tier first (ascending rank). Puts
+    // the most at-risk hardware at the top of the matrix, regardless
+    // of current load level.
+    if (a.cpuRank !== b.cpuRank) return a.cpuRank - b.cpuRank;
+    // Tiebreaker (same rank): riskiest decision first, then typical CPU.
     const r = DECISION_RANK[a.decision] - DECISION_RANK[b.decision];
     if (r !== 0) return r;
     return (b.typicalCpu ?? 0) - (a.typicalCpu ?? 0);
@@ -1638,6 +1664,74 @@ function median(xs: number[]): number | null {
   const sorted = [...xs].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+/** CPU specification for sorting and per-row display.
+ *
+ *  Rank is an ordinal performance score: higher = stronger. The matrix
+ *  sort uses it to place the WEAKEST CPU class at the top — the
+ *  classes most at risk from Retellect rollout — so the user reads
+ *  riskiest hardware first, regardless of whether that class currently
+ *  has high CPU load. Tier-derived from CPU generation and the
+ *  known cores/threads of common SCO/POS-grade SKUs.
+ *
+ *  Cores/threads come from the actual Intel SKU spec where the model
+ *  string is uniquely identifiable. Returns null for unrecognised
+ *  models — caller falls back to "Unknown" handling. */
+interface CpuSpec {
+  /** Ordinal performance rank, lower = weaker hardware. */
+  rank: number;
+  cores: number;
+  threads: number;
+}
+
+function cpuSpec(model: string): CpuSpec | null {
+  const m = model.toLowerCase();
+  if (!m || m === "unknown" || m === "—") return null;
+
+  // Intel Core i7 / i5 / i3 by generation.
+  // Note: i3 12th gen is 4P+0E in most SKUs (no E-cores in i3), so 4C/8T.
+  if (/i7-1[2-9]\d{3}/.test(m)) return { rank: 100, cores: 8, threads: 16 };
+  if (/i5-1[2-9]\d{3}/.test(m)) return { rank: 95, cores: 6, threads: 12 };
+  if (/i3-1[2-9]\d{3}/.test(m)) return { rank: 90, cores: 4, threads: 8 };
+
+  if (/i7-(10|11)\d{3}/.test(m)) return { rank: 85, cores: 8, threads: 16 };
+  if (/i5-(10|11)\d{3}/.test(m)) return { rank: 80, cores: 6, threads: 12 };
+  if (/i3-(10|11)\d{3}/.test(m)) return { rank: 75, cores: 4, threads: 8 };
+
+  if (/i7-9\d{3}/.test(m)) return { rank: 72, cores: 8, threads: 16 };
+  if (/i5-9\d{3}/.test(m)) return { rank: 68, cores: 6, threads: 6 };
+  if (/i3-9\d{3}/.test(m)) return { rank: 60, cores: 4, threads: 4 };
+
+  if (/i7-8\d{3}/.test(m)) return { rank: 67, cores: 6, threads: 12 };
+  if (/i5-8\d{3}/.test(m)) return { rank: 62, cores: 6, threads: 6 };
+  if (/i3-8\d{3}/.test(m)) return { rank: 58, cores: 4, threads: 4 };
+
+  if (/i7-7\d{3}/.test(m)) return { rank: 55, cores: 4, threads: 8 };
+  if (/i5-7\d{3}/.test(m)) return { rank: 52, cores: 4, threads: 4 };
+  if (/i3-7\d{3}/.test(m)) return { rank: 50, cores: 2, threads: 4 };
+
+  if (/i7-6\d{3}/.test(m)) return { rank: 47, cores: 4, threads: 8 };
+  if (/i5-6\d{3}/.test(m)) return { rank: 44, cores: 4, threads: 4 };
+  if (/i3-6\d{3}/.test(m)) return { rank: 42, cores: 2, threads: 4 };
+
+  if (/i3-[45]\d{3}/.test(m)) return { rank: 35, cores: 2, threads: 4 };
+
+  // Pentium G-series desktop (Skylake/Kaby Lake, 2C/2T).
+  if (/pentium/.test(m)) return { rank: 25, cores: 2, threads: 2 };
+
+  // Celeron J3160 — Braswell 4C/4T (uncommon but exists in some SCO HW).
+  if (/j316\d/.test(m)) return { rank: 14, cores: 4, threads: 4 };
+  // Celeron J3060 — Apollo Lake 2C/2T (very low-power 6W TDP).
+  if (/j30[6-9]\d/.test(m)) return { rank: 8, cores: 2, threads: 2 };
+  // Other low-power J-series Celeron / Atom mobile chips.
+  if (/j\d{4}/.test(m)) return { rank: 10, cores: 2, threads: 2 };
+  // Celeron G-series desktop (Skylake, 2C/2T).
+  if (/celeron.*g\d/.test(m)) return { rank: 22, cores: 2, threads: 2 };
+  if (/celeron/.test(m)) return { rank: 15, cores: 2, threads: 2 };
+  if (/atom/.test(m)) return { rank: 5, cores: 2, threads: 2 };
+
+  return null;
 }
 
 /** Conservative impact scenario when no measured ON evidence exists.
