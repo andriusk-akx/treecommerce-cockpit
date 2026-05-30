@@ -22,7 +22,7 @@
  * detail; this page collapses each CPU class to one decision row.
  */
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
 import { useRtFilters } from "../RtFiltersContext";
@@ -208,10 +208,17 @@ export function RtCpuMatrix({
   const cpuCountFrom = "tracked" as const;
 
   // Period selector mirrors RtTimeline / RtRolloutInsights — URL-driven
-  // so a deep link keeps the same window.
+  // so a deep link keeps the same window. Period changes trigger a
+  // SERVER-side refetch (the page server component reads ?period= and
+  // rebuilds cpuTrends / rolloutPerHost for the new window), which can
+  // take several seconds on a 90d window. useTransition exposes a
+  // pending flag while the navigation is in flight so we can show the
+  // Updating... badge below — without it, the user clicks 90d and
+  // perceives the page as frozen until the new data lands.
   const router = useRouter();
   const pathname = usePathname();
   const urlSearchParams = useSearchParams();
+  const [isPeriodPending, startPeriodTransition] = useTransition();
   useEffect(() => {
     const urlPeriod = urlSearchParams.get("period");
     if (urlPeriod && urlPeriod !== filters.period) {
@@ -224,7 +231,9 @@ export function RtCpuMatrix({
     const live = typeof window !== "undefined" ? window.location.search : `?${urlSearchParams.toString()}`;
     const params = new URLSearchParams(live);
     params.set("period", v);
-    router.push(`${pathname}?${params.toString()}`);
+    startPeriodTransition(() => {
+      router.push(`${pathname}?${params.toString()}`);
+    });
   };
 
   // Hide silent — class-level filter that collapses rows with no ACTIVE
@@ -246,6 +255,7 @@ export function RtCpuMatrix({
   const deferredStore = useDeferredValue(storeFilter);
   const deferredCountFrom = useDeferredValue(cpuCountFrom);
   const isRefreshing =
+    isPeriodPending ||
     deferredThreshold !== threshold ||
     deferredStore !== storeFilter ||
     deferredCountFrom !== cpuCountFrom;
