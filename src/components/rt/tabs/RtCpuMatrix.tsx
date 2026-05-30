@@ -410,25 +410,10 @@ export function RtCpuMatrix({
             <span className={`w-1.5 h-1.5 rounded-full ${hideSilent ? "bg-amber-500" : "bg-gray-300"}`} />
             Hide silent
           </button>
-          {isRefreshing && (
-            <span
-              className="inline-flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1"
-              role="status"
-              aria-live="polite"
-            >
-              <svg
-                className="animate-spin w-3 h-3"
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
-                <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-              </svg>
-              Updating…
-            </span>
-          )}
+          {/* The "Updating window…" pill lives as a centered overlay on
+              the matrix itself (further down) — same visual treatment
+              as CPU Timeline so the two tabs feel identical during a
+              period change. */}
         </FilterRow>
       </FilterBar>
 
@@ -467,7 +452,58 @@ export function RtCpuMatrix({
               : "All classes filtered out by Hide silent — no Retellect activity observed in this window."}
           </div>
         ) : (
-          <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+          <div className="relative bg-white rounded-lg border border-gray-200 overflow-x-auto">
+            {/* Centered overlay updating pill — same visual treatment as
+                CPU Timeline so the user sees identical feedback when
+                changing the Period dropdown on either tab. Positioned
+                near the top of the table, opacity:2 counteracts the
+                parent's opacity-60 dim so the pill stays fully visible. */}
+            {isRefreshing && (
+              <div
+                role="status"
+                aria-live="polite"
+                style={{
+                  position: "absolute",
+                  top: 60,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  opacity: 2,
+                  pointerEvents: "none",
+                  zIndex: 10,
+                }}
+              >
+                <span
+                  title="Recomputing the matrix for the new window — typically 30–60 s on a cold cache."
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 12,
+                    color: "#1d4ed8",
+                    background: "#eff6ff",
+                    border: "1px solid #bfdbfe",
+                    borderRadius: 999,
+                    padding: "6px 14px",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+                    fontWeight: 500,
+                  }}
+                >
+                  <svg
+                    className="animate-spin"
+                    width={14}
+                    height={14}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
+                    <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                  </svg>
+                  Updating window…
+                </span>
+              </div>
+            )}
             <table className="w-full text-sm min-w-[1120px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
