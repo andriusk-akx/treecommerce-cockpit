@@ -71,6 +71,11 @@ interface CpuMatrixRow {
   hostsOn: number;
   hostsOff: number;
   evidence: Evidence;
+  /** Length of the sampling window in days — used to normalise
+   *  time-above-threshold counts to a per-day RATE so changing the
+   *  Period dropdown doesn't change the displayed intensity for a
+   *  stable workload. */
+  periodDays: number;
 
   // ── Current state ─────────────────────────────────────────────────
   /** Median of per (host, day) daily averages — "typical CPU load". */
@@ -568,11 +573,13 @@ function MatrixRowView({
             },
             {
               label: "Time above threshold",
-              value: perHostMinutes(row.timeAboveNowMin, row.hostsWithData),
-              unit: "min",
+              value: perHostPerDay(row.timeAboveNowMin, row.hostsWithData, row.periodDays),
+              unit: "min/d",
               bar: "used",
-              tip: "Average minutes per host above the selected CPU threshold during the selected period. Reflects the current/baseline measured state — not split by Retellect ON/OFF.",
-              valueColor: timeAboveColor(perHostMinutes(row.timeAboveNowMin, row.hostsWithData)),
+              tip: "Average minutes per host per day above the selected CPU threshold, normalised over the selected period. Period-invariant for stable workloads — choosing 7d vs 30d vs 90d changes the sampling-window confidence, not the displayed intensity.",
+              valueColor: timeAboveColor(
+                perHostPerDay(row.timeAboveNowMin, row.hostsWithData, row.periodDays),
+              ),
             },
             {
               label: "Max CPU",
@@ -659,12 +666,22 @@ function MatrixRowView({
                 // distinguishing modeled from measured without
                 // truncating the label.
                 label: "Time above threshold",
-                value: perHostMinutes(row.projectedTimeAboveMin, row.hostsWithData),
-                unit: "min",
+                value: perHostPerDay(
+                  row.projectedTimeAboveMin,
+                  row.hostsWithData,
+                  row.periodDays,
+                ),
+                unit: "min/d",
                 bar: "used",
                 approx: true,
-                tip: "Projected time above threshold — estimated minutes per host above the selected threshold after applying the Planned Retellect impact. Modeled value derived from the underlying per-minute distribution, not measured.",
-                valueColor: timeAboveColor(perHostMinutes(row.projectedTimeAboveMin, row.hostsWithData)),
+                tip: "Projected time above threshold — estimated minutes per host per day above the threshold after applying the Planned Retellect impact. Modeled value derived from the underlying per-minute distribution. Period-invariant: changing the Period dropdown adjusts the sampling-window confidence, not the displayed rate, when the workload is stable.",
+                valueColor: timeAboveColor(
+                  perHostPerDay(
+                    row.projectedTimeAboveMin,
+                    row.hostsWithData,
+                    row.periodDays,
+                  ),
+                ),
               },
             ]}
             threshold={threshold}
@@ -818,7 +835,7 @@ function MiniStack({
   rows: {
     label: string;
     value: number | null;
-    unit: "%" | "pp" | "min";
+    unit: "%" | "pp" | "min" | "min/d";
     bar: BarVariant;
     approx?: boolean;
     tip?: string;
@@ -852,7 +869,7 @@ function MiniBar({
 }: {
   label: string;
   value: number | null;
-  unit: "%" | "pp" | "min";
+  unit: "%" | "pp" | "min" | "min/d";
   bar: BarVariant;
   approx?: boolean;
   threshold: number;
@@ -874,7 +891,12 @@ function MiniBar({
     if (value === null) return 0;
     if (unit === "%") return Math.max(0, Math.min(100, value));
     if (unit === "pp") return Math.max(0, Math.min(100, (value / Math.max(1, threshold)) * 100));
-    // min unit — saturate at 4 h (240 min)
+    if (unit === "min/d") {
+      // Saturate at 60 min/host/day — anything ≥ 1 h daily saturation
+      // fills the bar. Matches the red-band cut-off in timeAboveColor.
+      return Math.max(0, Math.min(100, (value / 60) * 100));
+    }
+    // min unit — saturate at 4 h (240 min) total
     return Math.max(0, Math.min(100, (value / 240) * 100));
   })();
 
@@ -890,6 +912,19 @@ function MiniBar({
     if (value === null) return "—";
     if (unit === "%") return `${Math.round(value)}%`;
     if (unit === "pp") return `${Math.round(value)} pp`;
+    if (unit === "min/d") {
+      // Tiered precision so small rates stay readable:
+      //   < 0.1  → "<0.1 min/d" (avoid "0.0 min/d" implying perfect zero)
+      //   < 10   → one decimal ("1.4 min/d")
+      //   < 60   → integer ("12 min/d")
+      //   ≥ 60   → hours per day ("1.5 h/d")
+      if (value === 0) return "0 min/d";
+      if (value < 0.1) return "<0.1 min/d";
+      if (value < 10) return `${value.toFixed(1)} min/d`;
+      if (value < 60) return `${Math.round(value)} min/d`;
+      const h = value / 60;
+      return h >= 10 ? `${Math.round(h)} h/d` : `${h.toFixed(1)} h/d`;
+    }
     if (unit === "min") {
       if (value < 60) return `${Math.round(value)} min`;
       const h = value / 60;
@@ -1361,6 +1396,7 @@ function computeCpuMatrix(
               : g.minutesAboveByBucketTracked,
           hostsWithData: g.hostsWithData,
           evidence,
+          periodDays,
         },
         impactPp,
         threshold,
@@ -1405,11 +1441,11 @@ function computeCpuMatrix(
     const isSilent = g.hostsOn.size > 0 && onActiveMin === 0;
 
     // Subtitle — one-liner that complements the decision. Pass the
-    // per-host time-above so the subtitle can flag the
-    // "calm typical / hot peaks" mismatch (see subtitleFor doc).
-    const perHostTimeAbove =
+    // per-host-per-day rate so the subtitle uses the same yardstick
+    // as the displayed Time-above-threshold cell.
+    const perHostPerDayRateForSubtitle =
       timeAboveNowMin > 0 || hasUsableSample
-        ? timeAboveNowMin / Math.max(1, g.hostsWithData)
+        ? perHostPerDay(timeAboveNowMin, g.hostsWithData, periodDays)
         : null;
     const subtitle = subtitleFor(
       decision,
@@ -1417,7 +1453,7 @@ function computeCpuMatrix(
       typicalCpu,
       maxCpu,
       threshold,
-      perHostTimeAbove,
+      perHostPerDayRateForSubtitle,
     );
 
     matrix.push({
@@ -1428,6 +1464,7 @@ function computeCpuMatrix(
       hostsOn: g.hostsOn.size,
       hostsOff: g.hostsOff.size,
       evidence,
+      periodDays,
       typicalCpu,
       roomNow,
       timeAboveNowMin: timeAboveNowMin > 0 || hasUsableSample ? timeAboveNowMin : null,
@@ -1471,7 +1508,7 @@ function computeCpuMatrix(
  */
 function applyImpact(
   row: Pick<CpuMatrixRow,
-    "typicalCpu" | "timeAboveNowMin" | "minutesAboveByBucket" | "hostsWithData" | "evidence"
+    "typicalCpu" | "timeAboveNowMin" | "minutesAboveByBucket" | "hostsWithData" | "evidence" | "periodDays"
   >,
   impactPp: number,
   threshold: number,
@@ -1489,14 +1526,28 @@ function applyImpact(
     impactPp,
   );
 
-  const hostsForNorm = Math.max(1, row.hostsWithData);
-  const perHostProjectedTimeAbove =
-    projectedTimeAboveMin === null ? null : projectedTimeAboveMin / hostsForNorm;
+  // Decision uses the per-host-per-day RATE, not the absolute period
+  // total. Without this, choosing a longer Period (e.g. 30d instead of
+  // 14d) made every stable-workload row look "worse" — more total
+  // minutes above threshold — and flipped Safe rows to Validate solely
+  // because of sampling-window size, not actual CPU intensity. The
+  // rate stays stable across periods when the workload is stable, so
+  // the decision becomes a property of the CPU pattern instead of the
+  // user's period choice.
+  const perHostPerDayRate = perHostPerDay(
+    projectedTimeAboveMin,
+    row.hostsWithData,
+    row.periodDays,
+  );
 
   let decision: Decision;
   if (row.evidence === "insufficient" || projectedRoom === null) {
     decision = "insufficient";
-  } else if (projectedRoom >= 20 && (perHostProjectedTimeAbove ?? 0) < 60) {
+  } else if (projectedRoom >= 20 && (perHostPerDayRate ?? 0) < 5) {
+    // < 5 min/host/day above threshold = ~one peak burst per day,
+    // safe-budget-wise. Matches the previous absolute 60 min total
+    // when period was ~14 days (5 × 14 ≈ 70) but is now genuinely
+    // period-invariant for any window.
     decision = "safe";
   } else if (projectedRoom >= 10) {
     decision = "validate";
@@ -1519,9 +1570,19 @@ function applyImpact(
 // "wait, why is room comfortable but time-above huge?" reaction the
 // user flagged.
 
-function perHostMinutes(total: number | null, hostsWithData: number): number | null {
+/** Per-host-per-day rate from a class-wide minute total. The displayed
+ *  Time-above-threshold value uses this so the number stays roughly
+ *  constant across Period choices when the underlying workload is
+ *  stable. Lets the user compare 7d vs 30d vs 90d as different
+ *  sampling-window confidence levels, not as different "amount of
+ *  problem". */
+function perHostPerDay(
+  total: number | null,
+  hostsWithData: number,
+  periodDays: number,
+): number | null {
   if (total === null) return null;
-  const denom = Math.max(1, hostsWithData);
+  const denom = Math.max(1, hostsWithData * Math.max(1, periodDays));
   return total / denom;
 }
 
@@ -1545,13 +1606,17 @@ function roomColor(value: number | null): string | undefined {
   return "text-emerald-700";
 }
 
-/** Colour the Time above threshold value (per host minutes).
- *  Anchored to "one busy hour per host across the period" as the
- *  amber/red split — matches the decision logic's < 60 min cut-off. */
+/** Colour the Time above threshold value (per-host-per-day rate, in
+ *  min/host/day). Aligned with the decision rule's < 5 min/host/day
+ *  Safe cut-off:
+ *    0          → emerald (never spiked above threshold)
+ *    > 0 to <5  → gray    (occasional spikes, within Safe budget)
+ *    5 to <30   → amber   (daily saturation, decision-relevant)
+ *    ≥ 30       → red     (substantial daily time above threshold) */
 function timeAboveColor(value: number | null): string | undefined {
   if (value === null) return undefined;
-  if (value >= 120) return "text-red-600";
-  if (value >= 30) return "text-amber-700";
+  if (value >= 30) return "text-red-600";
+  if (value >= 5) return "text-amber-700";
   if (value > 0) return "text-gray-700";
   return "text-emerald-700";
 }
@@ -1667,18 +1732,17 @@ function subtitleFor(
   typical: number | null,
   max: number | null,
   threshold: number,
-  perHostTimeAboveMin: number | null,
+  perHostPerDayRate: number | null,
 ): string {
   if (evidence === "insufficient") return "Not enough samples to score";
 
   // Peak-vs-typical mismatch detector. A row can decide "safe" off the
-  // median while real peaks already cross the threshold (i3-6100 case
-  // flagged 2026-05-29: typical 20%, room 60 pp, but max 99% and
-  // 14 min/host above 80%). The subtitle must not contradict the data
-  // by claiming "best headroom" when peaks are clearly saturating.
+  // median while real peaks already cross the threshold. Rate of >= 2
+  // min/host/day above threshold counts as "meaningful" — that's
+  // roughly one peak burst per day, period-invariant signal.
   const peakNearSaturation = max !== null && max >= 90;
   const meaningfulTimeAbove =
-    perHostTimeAboveMin !== null && perHostTimeAboveMin >= 10;
+    perHostPerDayRate !== null && perHostPerDayRate >= 2;
 
   if (decision === "safe") {
     if (peakNearSaturation && meaningfulTimeAbove) {
