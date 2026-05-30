@@ -458,7 +458,7 @@ export function RtCpuMatrix({
           </div>
         ) : (
           <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-            <table className="w-full text-sm min-w-[1200px]">
+            <table className="w-full text-sm min-w-[1120px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase w-[200px]">CPU class</th>
@@ -466,12 +466,11 @@ export function RtCpuMatrix({
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Current CPU state</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[170px]">Planned Retellect impact</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Projected CPU state</th>
-                  <th className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[120px]">Decision</th>
                   <th
-                    className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[100px] cursor-help"
-                    title="Decision confidence for rollout, not general confidence in the underlying data."
+                    className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[150px] cursor-help"
+                    title="Rollout decision and its confidence level. Confidence reflects decision confidence for rollout — not general data quality."
                   >
-                    Confidence
+                    Decision
                   </th>
                 </tr>
               </thead>
@@ -702,24 +701,25 @@ function MatrixRowView({
         )}
       </td>
 
-      {/* Decision */}
+      {/* Decision + Confidence (merged into one column to save space).
+          Decision pill stays prominent; confidence reads as a small
+          coloured label underneath. Width tuned so both fit on one
+          line without wrapping. */}
       <td className="py-4 px-3 text-center">
-        <span
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-semibold ${DECISION_STYLES[row.decision]}`}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${DECISION_DOT[row.decision]}`} />
-          {DECISION_LABEL[row.decision]}
-        </span>
-      </td>
-
-      {/* Confidence */}
-      <td className="py-4 px-3 text-center">
-        <span
-          className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${CONFIDENCE_STYLES[row.confidence]}`}
-          title="Decision confidence for rollout, not general confidence in the underlying data."
-        >
-          {row.confidence}
-        </span>
+        <div className="flex flex-col items-center gap-1.5">
+          <span
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-semibold whitespace-nowrap ${DECISION_STYLES[row.decision]}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${DECISION_DOT[row.decision]}`} />
+            {DECISION_LABEL[row.decision]}
+          </span>
+          <span
+            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${CONFIDENCE_STYLES[row.confidence]}`}
+            title="Decision confidence for rollout, not general confidence in the underlying data."
+          >
+            {row.confidence} confidence
+          </span>
+        </div>
       </td>
     </tr>
   );
