@@ -32,10 +32,8 @@ const PUBLIC_PREFIXES = [
   // route, same rationale as warm-cache: the secret IS the auth boundary,
   // session cookies don't apply because operators hit this from curl.
   "/api/internal/seed-testlab-cores",
-  // LT fleet inventory expand — same WARM_CACHE_SECRET gate in the route.
-  // One-shot importer for the 411-host Lithuanian SCO estate that lives
-  // in the StrongPoint admin's CPU LT_infrastructure spreadsheet.
-  "/api/internal/expand-lt-fleet",
+  // (expand-lt-fleet was a one-shot import on 2026-06-01; route removed
+  // post-execution per its own commit's "lifecycle" note.)
   "/_next",
   "/favicon.ico",
 ];
