@@ -455,14 +455,13 @@ export function RtCpuMatrix({
           <button
             type="button"
             onClick={() => setHideSilent((s) => !s)}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium transition ${
+            className={`inline-flex items-center px-3 py-1.5 rounded border text-[11px] font-medium transition ${
               hideSilent
                 ? "bg-amber-50 text-amber-800 border-amber-300"
-                : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"
+                : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
             }`}
             title="Hide CPU classes with no Retellect activity observed in the period"
           >
-            <span className={`w-1.5 h-1.5 rounded-full ${hideSilent ? "bg-amber-500" : "bg-gray-300"}`} />
             Hide silent
           </button>
           {/* The "Updating window…" pill lives as a centered overlay on
@@ -472,9 +471,9 @@ export function RtCpuMatrix({
         </FilterRow>
       </FilterBar>
 
-      <p className="text-[11px] text-gray-400 mb-4 leading-relaxed">
-        Threshold drives <strong className="text-gray-600 font-medium">time above</strong> and{" "}
-        <strong className="text-gray-600 font-medium">room to threshold</strong>. Classes without ON evidence use a scenario impact;
+      <p className="text-[11px] text-gray-500 mb-6 leading-relaxed">
+        Threshold drives <strong className="text-gray-700 font-medium">time above</strong> and{" "}
+        <strong className="text-gray-700 font-medium">room to threshold</strong>. Classes without ON evidence use a scenario impact;
         calculations include all minutes in the period.
       </p>
 
@@ -533,12 +532,12 @@ export function RtCpuMatrix({
                     alignItems: "center",
                     gap: 6,
                     fontSize: 12,
-                    color: "#1d4ed8",
-                    background: "#eff6ff",
-                    border: "1px solid #bfdbfe",
+                    color: "#0369a1",
+                    background: "#f0f9ff",
+                    border: "1px solid #bae6fd",
                     borderRadius: 999,
                     padding: "6px 14px",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+                    boxShadow: "none",
                     fontWeight: 500,
                   }}
                 >
@@ -560,17 +559,17 @@ export function RtCpuMatrix({
             )}
             <table className="w-full text-sm min-w-[1060px]">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-left py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase w-[200px]">CPU class</th>
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Current state</th>
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[150px]">Planned impact</th>
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Projected state</th>
+                <tr className="bg-gray-50/60 border-b border-gray-200">
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[200px]">CPU class</th>
+                  <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest">Current state</th>
+                  <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[150px]">Planned impact</th>
+                  <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest">Projected state</th>
                   {/* Evidence sits immediately before Decision so the
                       reader's eye picks up the supporting sample size
                       right before the verdict it backs. */}
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[120px]">Evidence</th>
+                  <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[120px]">Evidence</th>
                   <th
-                    className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[200px] cursor-help"
+                    className="text-center py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[200px] cursor-help"
                     title="Rollout verdict + how confident we are."
                   >
                     Decision
@@ -803,21 +802,26 @@ function MatrixRowView({
           disabled={row.evidence === "insufficient"}
           onChange={onImpactChange}
         />
-        <div className="text-[10px] text-gray-500 mt-2 leading-snug">
-          {row.hasManualOverride
-            ? "Manual"
-            : // Bug fix (2026-05-29): only show measured Reference evidence
-              // when the row's evidence column also says "Measured A/B".
-              // Otherwise we'd contradict the evidence tag — a row labelled
-              // "No ON data" can still have a non-null avgRetellectOn when
-              // exactly one host contributed python.cpu (the ≥2/≥2
-              // measured-on-off rule failed). The label below would then
-              // claim measured evidence the column says we don't have.
-              row.evidence === "measured-on-off" &&
-                  row.measuredRetellectCpuOn !== null &&
-                  row.measuredRetellectCpuOn > 0.05
-                ? `Direct CPU ref: ${row.measuredRetellectCpuOn.toFixed(1)}%`
-                : "Scenario default"}
+        <div className="text-[11px] mt-3 leading-snug">
+          {row.hasManualOverride ? (
+            <span className="text-amber-700 font-medium">Manual override</span>
+          ) : row.evidence === "measured-on-off" &&
+              row.measuredRetellectCpuOn !== null &&
+              row.measuredRetellectCpuOn > 0.05 ? (
+            // Bug fix (2026-05-29): only show measured Reference
+            // evidence when the row's evidence column also says
+            // "Measured A/B". Otherwise we'd contradict the evidence
+            // tag — a row labelled "No ON data" can still have a
+            // non-null avgRetellectOn when exactly one host
+            // contributed python.cpu (the ≥2/≥2 measured-on-off rule
+            // failed). The label below would then claim measured
+            // evidence the column says we don't have.
+            <span className="text-emerald-700 font-medium">
+              Measured: {row.measuredRetellectCpuOn.toFixed(1)}%
+            </span>
+          ) : (
+            <span className="text-gray-400">Scenario default</span>
+          )}
         </div>
       </td>
 
@@ -897,9 +901,9 @@ function MatrixRowView({
             {row.hostCount === 1 ? "host" : "hosts"}
           </span>
         </div>
-        <div className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
-          <span
-            className={coverageGap > 0 ? "text-amber-700 font-medium" : ""}
+        <div className="text-[11px] mt-1.5 leading-relaxed space-y-0.5">
+          <div
+            className={coverageGap > 0 ? "text-amber-600" : "text-gray-500"}
             title={
               coverageGap > 0
                 ? `${row.hostsWithData} of ${row.hostCount} hosts report telemetry. ${coverageGap} have no Zabbix data — either unmonitored or with broken agents.`
@@ -908,11 +912,13 @@ function MatrixRowView({
           >
             {row.hostsWithData} reporting
             {coverageGap > 0 && ` · ${coverageGap} no data`}
-          </span>
-          <br />
-          <span title="Hosts classified as ON (Retellect active in window) vs OFF (Retellect inactive). Drives the measured A/B impact when both sides have enough samples.">
+          </div>
+          <div
+            className="text-gray-700 font-medium"
+            title="Hosts classified as ON (Retellect active in window) vs OFF (Retellect inactive). Drives the measured A/B impact when both sides have enough samples."
+          >
             {row.hostsOn} ON · {row.hostsOff} OFF
-          </span>
+          </div>
         </div>
       </td>
 
@@ -927,7 +933,7 @@ function MatrixRowView({
               up the tier in scan reading without needing a separate
               badge. */}
       <td className="py-4 px-3 text-center align-top">
-        <div className="flex flex-col items-center gap-1.5 mx-auto max-w-[180px]">
+        <div className="flex flex-col items-center gap-2.5 mx-auto max-w-[180px]">
           <span
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-semibold whitespace-nowrap ${DECISION_STYLES[row.decision]}`}
           >
@@ -1063,12 +1069,12 @@ function ImpactInput({
               (e.currentTarget as HTMLInputElement).blur();
             }
           }}
-          className={`w-14 text-xs px-1.5 py-1 border rounded text-center bg-white tabular-nums focus:outline-none focus:border-blue-400 ${
+          className={`w-14 text-xs px-1.5 py-1 border rounded text-center bg-white tabular-nums focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-300/40 ${
             disabled
               ? "border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed"
               : hasManualOverride
                 ? "border-amber-300 text-amber-800 font-semibold"
-                : "border-gray-200 text-gray-800"
+                : "border-gray-300 text-gray-800"
           }`}
           aria-label={`Planned Retellect impact for ${model}, percentage points`}
           aria-disabled={disabled || undefined}
@@ -1213,7 +1219,7 @@ function MiniBar({
   return (
     <div className="flex items-center gap-2 text-[11px]">
       <span
-        className={`w-[88px] shrink-0 font-medium ${secondary ? "text-gray-400" : "text-sky-700"} ${tip ? `cursor-help underline decoration-dotted underline-offset-2 ${secondary ? "decoration-gray-300" : "decoration-sky-300"}` : ""}`}
+        className={`w-[88px] shrink-0 font-medium ${secondary ? "text-gray-500" : "text-gray-700"} ${tip ? "cursor-help underline decoration-dotted underline-offset-2 decoration-gray-300" : ""}`}
         title={tip ?? label}
       >
         {shortLabel}
@@ -1380,8 +1386,8 @@ function ConfidenceLimitsCard({ matrix }: { matrix: CpuMatrixRow[] }) {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
-      <h4 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">
+    <div className="bg-white rounded-md border border-gray-200 p-5">
+      <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-widest mb-3">
         {title}
       </h4>
       {children}
@@ -1391,9 +1397,11 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 
 function EvidenceBox({ title, body }: { title: string; body: string }) {
   return (
-    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-      <div className="text-[11px] font-semibold text-gray-700 mb-1">{title}</div>
-      <div className="text-[11px] text-gray-500 leading-relaxed">{body}</div>
+    <div className="bg-white border border-gray-200 rounded-md p-4">
+      <div className="text-xs font-semibold text-gray-700 uppercase tracking-widest mb-2">
+        {title}
+      </div>
+      <div className="text-[12px] text-gray-600 leading-relaxed">{body}</div>
     </div>
   );
 }
@@ -1482,7 +1490,7 @@ function CpuDrilldownWorkspace({
   return (
     <div className="bg-white rounded-lg border border-gray-200 mb-6">
       {/* ── Header / breadcrumb ──────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 px-5 py-3 border-b border-gray-100">
+      <div className="flex items-start justify-between gap-6 px-5 py-4 border-b border-gray-200">
         <div className="min-w-0">
           {/* Breadcrumb: model > host (when in State 2). The model link
               clears the host selection so the user falls back to the
@@ -1640,9 +1648,9 @@ function HostInventoryView({
   // but not active. Both fit in the same width so headers don't shift
   // when the active column changes.
   const sortIndicator = (col: SortCol) => {
-    if (sortCol !== col) return <span className="text-gray-300 ml-1" aria-hidden="true">·</span>;
+    if (sortCol !== col) return <span className="text-gray-400 ml-1" aria-hidden="true">·</span>;
     return (
-      <span className="text-gray-700 ml-1" aria-hidden="true">
+      <span className="text-gray-700 ml-1 font-medium" aria-hidden="true">
         {sortDir === "desc" ? "↓" : "↑"}
       </span>
     );
@@ -1656,10 +1664,10 @@ function HostInventoryView({
             key={t.id}
             type="button"
             onClick={() => setTabAndResetSort(t.id)}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-[11px] font-medium border transition-colors ${
               tab === t.id
-                ? "bg-blue-50 text-blue-700 border-blue-200"
-                : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"
+                ? "bg-sky-50 text-sky-700 border-sky-200"
+                : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
             }`}
           >
             {t.label}
@@ -1678,7 +1686,7 @@ function HostInventoryView({
         <div className="overflow-x-auto">
           <table className="w-full text-[12px]">
             <thead>
-              <tr className="text-left text-[10px] uppercase tracking-wide text-gray-400 border-b border-gray-100">
+              <tr className="text-left text-[10px] uppercase tracking-widest text-gray-600 border-b border-gray-200">
                 <th className="py-2 px-2 font-semibold">Host</th>
                 <th className="py-2 px-2 font-semibold">Store</th>
                 {/* Native <th> role is "columnheader" which supports
@@ -1747,7 +1755,7 @@ function HostInventoryView({
                     // + idx so duplicates stay distinct without losing
                     // identity-based reconciliation for monitored hosts.
                     key={`${h.hostId ?? h.hostName}::${h.storeName}::${idx}`}
-                    className={`border-b border-gray-50 transition-colors focus:outline-none focus:bg-blue-50/30 ${
+                    className={`border-t border-gray-100 transition-colors focus:outline-none focus:bg-blue-50/30 ${
                       h.monitored
                         ? "hover:bg-gray-50 cursor-pointer"
                         : "opacity-60 cursor-not-allowed"
@@ -1770,15 +1778,15 @@ function HostInventoryView({
                         : "Unmonitored — no Zabbix data on this host yet."
                     }
                   >
-                    <td className="py-2 px-2 font-medium text-gray-900">{h.hostName}</td>
-                    <td className="py-2 px-2 text-gray-600">{h.storeName}</td>
-                    <td className="py-2 px-2 text-right tabular-nums font-semibold">
+                    <td className="py-3 px-3 font-medium text-gray-900">{h.hostName}</td>
+                    <td className="py-3 px-3 text-gray-600">{h.storeName}</td>
+                    <td className="py-3 px-3 text-right tabular-nums font-semibold text-gray-900">
                       {h.peakCpu === null ? "—" : `${Math.round(h.peakCpu)}%`}
                     </td>
-                    <td className="py-2 px-2 text-right tabular-nums text-gray-500">
+                    <td className="py-3 px-3 text-right tabular-nums text-gray-500">
                       {h.typicalCpu === null ? "—" : `${Math.round(h.typicalCpu)}%`}
                     </td>
-                    <td className="py-2 px-2 text-right tabular-nums">
+                    <td className="py-3 px-3 text-right tabular-nums text-gray-700">
                       {h.minutesAbovePerDay === null
                         ? "—"
                         : h.minutesAbovePerDay < 0.1
@@ -1787,7 +1795,7 @@ function HostInventoryView({
                             ? h.minutesAbovePerDay.toFixed(1)
                             : Math.round(h.minutesAbovePerDay).toString()}
                     </td>
-                    <td className="py-2 px-2 text-right">
+                    <td className="py-3 px-3 text-right">
                       {flagged && <span className="text-amber-600" title="High peak or sustained time above threshold">⚠</span>}
                     </td>
                   </tr>
