@@ -1805,6 +1805,16 @@ function HostEvidenceView({
   pilot: RtPilotData;
   onBack: () => void;
 }) {
+  // Level 3 selection: which episode the operator clicked, or null for
+  // the list view. Cleared whenever host / threshold / period change so
+  // the user doesn't see a stale process breakdown attached to the wrong
+  // host context.
+  const [selectedEpisode, setSelectedEpisode] = useState<HostEpisode | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedEpisode(null);
+  }, [host.hostId, threshold, periodDays]);
+
   return (
     <div className="p-5">
       <button
@@ -1845,8 +1855,32 @@ function HostEvidenceView({
         </div>
       </div>
 
+      {/* Level 3 / 4 drilldown — only meaningful for Zabbix-monitored
+          hosts. Unmonitored coverage rows skip this whole block. */}
+      {host.hostId && (
+        <div className="mt-6">
+          {selectedEpisode ? (
+            <HostMinuteBreakdown
+              hostId={host.hostId}
+              hostName={host.hostName}
+              episode={selectedEpisode}
+              threshold={threshold}
+              onBack={() => setSelectedEpisode(null)}
+            />
+          ) : (
+            <HostEpisodesList
+              hostId={host.hostId}
+              hostName={host.hostName}
+              threshold={threshold}
+              periodDays={periodDays}
+              onSelectEpisode={setSelectedEpisode}
+            />
+          )}
+        </div>
+      )}
+
       <div className="mt-4 flex items-center gap-2 text-[11px] text-gray-500">
-        <span>For minute-level inspection of this host:</span>
+        <span>For full hour-level / day-level inspection:</span>
         <a
           href={`/retellect/${pilot.id}?tab=timeline&host=${host.hostId ?? ""}`}
           className="text-blue-600 hover:underline"
@@ -1856,6 +1890,429 @@ function HostEvidenceView({
       </div>
     </div>
   );
+}
+
+/** Episode returned by /api/rt/host-episodes. */
+interface HostEpisode {
+  startSec: number;
+  endSec: number;
+  durationMin: number;
+  peakCpu: number;
+  peakSec: number;
+}
+
+/** Level 3 — list of threshold-crossing bursts for the selected host.
+ *  Lazy-fetched on mount (and on host / threshold / period change);
+ *  endpoint response is server-side clustered, so the list is at most
+ *  ~100 episodes regardless of how busy the host is. */
+function HostEpisodesList({
+  hostId,
+  hostName,
+  threshold,
+  periodDays,
+  onSelectEpisode,
+}: {
+  hostId: string;
+  hostName: string;
+  threshold: number;
+  periodDays: number;
+  onSelectEpisode: (e: HostEpisode) => void;
+}) {
+  const [episodes, setEpisodes] = useState<HostEpisode[] | null>(null);
+  const [truncated, setTruncated] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Standard fetch-on-deps pattern: resetting state inside the
+    // effect *is* the correct lifecycle here — we want stale data
+    // visually cleared the moment the operator picks a different
+    // host. The lint rule targets a different anti-pattern.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEpisodes(null);
+    setTruncated(false);
+    setError(null);
+    setLoading(true);
+    const url = `/api/rt/host-episodes?hostId=${encodeURIComponent(hostId)}&periodDays=${periodDays}&threshold=${threshold}`;
+    fetch(url)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.error) {
+          setError(String(data.error));
+        } else {
+          setEpisodes(Array.isArray(data.episodes) ? data.episodes : []);
+          setTruncated(!!data.truncated);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Unknown error");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hostId, threshold, periodDays]);
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-3">
+        <div className="text-[11px] font-semibold text-gray-600 uppercase tracking-widest">
+          Threshold breaches above {threshold}%
+        </div>
+        <span className="text-[10px] text-gray-400">
+          {hostName} · Europe/Vilnius · {periodDays} d
+        </span>
+      </div>
+
+      {loading ? (
+        <div className="text-[12px] text-gray-500 inline-flex items-center gap-2 py-2">
+          <svg
+            className="animate-spin"
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
+            <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+          </svg>
+          Loading bursts…
+        </div>
+      ) : error ? (
+        <div className="text-[12px] text-red-600">Failed to load: {error}</div>
+      ) : episodes === null || episodes.length === 0 ? (
+        <div className="text-[12px] text-gray-400 italic py-2">
+          No bursts above {threshold}% in the {periodDays}-day window.
+        </div>
+      ) : (
+        <>
+          <div className="overflow-x-auto border border-gray-200 rounded-md">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="bg-gray-50/60 text-left text-[10px] uppercase tracking-widest text-gray-600 border-b border-gray-200">
+                  <th className="py-2 px-3 font-semibold">Date</th>
+                  <th className="py-2 px-3 font-semibold">Time</th>
+                  <th className="py-2 px-3 font-semibold text-right">Duration</th>
+                  <th className="py-2 px-3 font-semibold text-right">Peak</th>
+                  <th className="py-2 px-3 font-semibold w-[24px]" />
+                </tr>
+              </thead>
+              <tbody>
+                {episodes.map((ep) => (
+                  <tr
+                    key={ep.startSec}
+                    className="border-t border-gray-100 hover:bg-sky-50/40 cursor-pointer focus:outline-none focus:bg-sky-50/40 transition-colors"
+                    onClick={() => onSelectEpisode(ep)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSelectEpisode(ep);
+                      }
+                    }}
+                    tabIndex={0}
+                    title="Open per-minute process breakdown at the burst peak"
+                  >
+                    <td className="py-2 px-3 text-gray-700 tabular-nums">
+                      {fmtVilniusDate(ep.startSec)}
+                    </td>
+                    <td className="py-2 px-3 text-gray-700 tabular-nums">
+                      {fmtVilniusTime(ep.startSec)}–{fmtVilniusTime(ep.endSec)}
+                    </td>
+                    <td className="py-2 px-3 text-right tabular-nums text-gray-700">
+                      {ep.durationMin} min
+                    </td>
+                    <td
+                      className={`py-2 px-3 text-right tabular-nums font-semibold ${
+                        ep.peakCpu >= 95
+                          ? "text-red-600"
+                          : ep.peakCpu >= 85
+                            ? "text-amber-700"
+                            : "text-gray-800"
+                      }`}
+                    >
+                      {Math.round(ep.peakCpu)}%
+                    </td>
+                    <td className="py-2 px-3 text-right text-gray-300">▸</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {truncated && (
+            <div className="text-[11px] text-amber-700 mt-2">
+              Showing the 100 most recent bursts — host has more in the window.
+              Narrow the Period filter to see older bursts.
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Level 4 — per-process CPU breakdown at the burst peak minute.
+ *  Reuses the existing /api/rt/process-history endpoint with
+ *  granularity=1 (per-minute slots), pulls the date that contains the
+ *  episode peak, and renders the slot whose timestamp matches peakSec.
+ *  No new backend code path. */
+interface ProcessHistorySlot {
+  slot: number;
+  hourKey: string;
+  hour: number;
+  minute: number;
+  label: string;
+  hostCpu: number;
+  hostCpuMax: number | null;
+  categories: {
+    retellect?: number;
+    scoApp?: number;
+    db?: number;
+    system?: number;
+    hwAvailability?: number;
+    other?: number;
+  };
+}
+
+const CATEGORY_LABEL: Record<string, string> = {
+  retellect: "Retellect",
+  scoApp: "SCO App (sp.sss)",
+  db: "Database (SQL)",
+  system: "System (VMWare)",
+  hwAvailability: "Hardware",
+  other: "Other",
+};
+const CATEGORY_COLOR: Record<string, string> = {
+  retellect: "#0ea5e9",
+  scoApp: "#6366f1",
+  db: "#a855f7",
+  system: "#64748b",
+  hwAvailability: "#94a3b8",
+  other: "#cbd5e1",
+};
+const CATEGORY_ORDER = ["retellect", "scoApp", "db", "system", "hwAvailability", "other"];
+
+function HostMinuteBreakdown({
+  hostId,
+  hostName,
+  episode,
+  threshold,
+  onBack,
+}: {
+  hostId: string;
+  hostName: string;
+  episode: HostEpisode;
+  threshold: number;
+  onBack: () => void;
+}) {
+  const [slot, setSlot] = useState<ProcessHistorySlot | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Resolve the Vilnius-local date of the peak so the endpoint scopes
+  // its day-window correctly. Peak hour/minute are then used to find
+  // the matching slot client-side.
+  const peakDate = useMemo(
+    () => new Date(episode.peakSec * 1000).toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" }),
+    [episode.peakSec],
+  );
+  const peakLabel = useMemo(
+    () => fmtVilniusDateTime(episode.peakSec),
+    [episode.peakSec],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    // Reset stale UI before the new fetch lands. See the matching
+    // comment in HostEpisodesList for the lint-rule rationale.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSlot(null);
+    setError(null);
+    setLoading(true);
+    const url = `/api/rt/process-history?hostId=${encodeURIComponent(hostId)}&date=${peakDate}&granularity=1`;
+    fetch(url)
+      .then((r) => r.json())
+      .then((data: { slots?: ProcessHistorySlot[]; error?: string }) => {
+        if (cancelled) return;
+        if (data.error) {
+          setError(String(data.error));
+          return;
+        }
+        const slots = data.slots ?? [];
+        // Find the slot whose timestamp matches the peak minute. The
+        // endpoint returns slot times in Vilnius-local h:m strings via
+        // hour/minute fields; we recompute the peak's hour/minute the
+        // same way for an apples-to-apples match.
+        const peakHmm = vilniusHourMinute(episode.peakSec);
+        const match =
+          slots.find((s) => s.hour === peakHmm.hour && s.minute === peakHmm.minute) ??
+          null;
+        setSlot(match);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Unknown error");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hostId, peakDate, episode.peakSec]);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-[11px] text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
+        >
+          ◂ Back to burst list
+        </button>
+        <span className="text-[10px] text-gray-400">{hostName}</span>
+      </div>
+      <div className="text-[11px] font-semibold text-gray-600 uppercase tracking-widest mb-2">
+        Process breakdown at burst peak
+      </div>
+      <div className="text-[12px] text-gray-500 mb-3">
+        {peakLabel} · Peak host CPU{" "}
+        <span className="font-semibold text-gray-800">{Math.round(episode.peakCpu)}%</span>
+        {" "}(threshold {threshold}%)
+      </div>
+
+      {loading ? (
+        <div className="text-[12px] text-gray-500 inline-flex items-center gap-2 py-2">
+          <svg
+            className="animate-spin"
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
+            <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+          </svg>
+          Loading process breakdown…
+        </div>
+      ) : error ? (
+        <div className="text-[12px] text-red-600">Failed to load: {error}</div>
+      ) : slot === null ? (
+        <div className="text-[12px] text-gray-400 italic py-2">
+          No process telemetry for this minute — proc.cpu items may have been
+          ZBX_NOTSUPPORTED at the time of the burst.
+        </div>
+      ) : (
+        <ProcessStackedBar slot={slot} />
+      )}
+    </div>
+  );
+}
+
+/** Stacked-bar rendering of a per-minute process breakdown. Mirrors the
+ *  visual treatment from the CPU Timeline drilldown so operators see the
+ *  same chart shape across tabs. */
+function ProcessStackedBar({ slot }: { slot: ProcessHistorySlot }) {
+  const rows = useMemo(() => {
+    const out: { key: string; label: string; value: number; color: string }[] = [];
+    for (const key of CATEGORY_ORDER) {
+      const v = (slot.categories as Record<string, number | undefined>)[key];
+      if (typeof v === "number" && v > 0.05) {
+        out.push({ key, label: CATEGORY_LABEL[key], value: v, color: CATEGORY_COLOR[key] });
+      }
+    }
+    // Sort descending so the biggest contributor leads the bar.
+    out.sort((a, b) => b.value - a.value);
+    return out;
+  }, [slot]);
+  const totalNamed = rows.reduce((s, r) => s + r.value, 0);
+  const hostCpu = slot.hostCpu;
+  const free = Math.max(0, 100 - hostCpu);
+
+  return (
+    <div className="space-y-3">
+      {/* Stacked bar */}
+      <div className="flex h-3 w-full overflow-hidden rounded-md border border-gray-200 bg-gray-50">
+        {rows.map((r) => (
+          <div
+            key={r.key}
+            style={{
+              width: `${Math.min(100, (r.value / 100) * 100)}%`,
+              background: r.color,
+            }}
+            title={`${r.label}: ${r.value.toFixed(1)}%`}
+          />
+        ))}
+        <div
+          style={{ width: `${free}%`, background: "#f8fafc" }}
+          title={`Free: ${free.toFixed(1)}%`}
+        />
+      </div>
+
+      {/* Legend / numeric table */}
+      <ul className="text-[12px] text-gray-700 space-y-1">
+        {rows.map((r) => (
+          <li key={r.key} className="flex items-center gap-2">
+            <span
+              className="inline-block w-2.5 h-2.5 rounded-sm shrink-0"
+              style={{ background: r.color }}
+            />
+            <span className="flex-1">{r.label}</span>
+            <span className="tabular-nums font-semibold">{r.value.toFixed(1)}%</span>
+          </li>
+        ))}
+        {totalNamed < hostCpu - 1 && (
+          <li className="flex items-center gap-2 text-gray-400 italic">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0 bg-gray-200" />
+            <span className="flex-1">Unattributed (named categories sum &lt; host total)</span>
+            <span className="tabular-nums">{Math.max(0, hostCpu - totalNamed).toFixed(1)}%</span>
+          </li>
+        )}
+        <li className="flex items-center gap-2 pt-1 mt-1 border-t border-gray-100">
+          <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0 bg-gray-100 border border-gray-200" />
+          <span className="flex-1 font-medium text-gray-600">Total host CPU</span>
+          <span className="tabular-nums font-semibold text-gray-900">{hostCpu.toFixed(1)}%</span>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+/** Format a Unix-seconds instant as a Vilnius date string (yyyy-MM-dd). */
+function fmtVilniusDate(sec: number): string {
+  return new Date(sec * 1000).toLocaleDateString("en-CA", {
+    timeZone: "Europe/Vilnius",
+  });
+}
+function fmtVilniusTime(sec: number): string {
+  return new Date(sec * 1000).toLocaleTimeString("lt-LT", {
+    timeZone: "Europe/Vilnius",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+function fmtVilniusDateTime(sec: number): string {
+  return `${fmtVilniusDate(sec)} · ${fmtVilniusTime(sec)}`;
+}
+/** Vilnius hour + minute for a Unix-seconds instant — used to align an
+ *  episode's peak second with a granularity=1 slot returned by the
+ *  process-history endpoint (which keys slots by Vilnius h/m). */
+function vilniusHourMinute(sec: number): { hour: number; minute: number } {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Vilnius",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(sec * 1000));
+  const get = (t: string) => parseInt(parts.find((p) => p.type === t)?.value ?? "0", 10);
+  // Intl returns "24" at midnight on some engines — normalise.
+  const rawH = get("hour");
+  return { hour: rawH === 24 ? 0 : rawH, minute: get("minute") };
 }
 
 function EvidenceRow({ label, value }: { label: string; value: string }) {
