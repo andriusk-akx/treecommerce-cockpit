@@ -347,6 +347,41 @@ export function RtCpuMatrix({
     return matrix.filter((r) => !r.isSilent);
   }, [matrix, hideSilent]);
 
+  // ── Sequential drilldown selection ────────────────────────────────
+  //
+  // Two-level state machine for the bottom workspace:
+  //   selectedModel === null  → fleet-level summary cards (drivers /
+  //                             actions / limits) visible.
+  //   selectedModel set        → drilldown workspace visible, replaces
+  //                             the fleet cards. State 1 = host list.
+  //   + selectedHostId set     → drilldown is in State 2 (per-host
+  //                             evidence summary). Cleared whenever
+  //                             selectedModel changes so a CPU swap
+  //                             always returns the user to the host
+  //                             list, not to a stale host detail.
+  //
+  // Click the same matrix row twice to collapse — explicit escape hatch
+  // for users who selected by accident.
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
+  const onMatrixRowSelect = (model: string) => {
+    setSelectedModel((cur) => (cur === model ? null : model));
+    setSelectedHostId(null);
+  };
+  // If the active filters pruned the selected model out of view, drop
+  // the selection so the workspace doesn't dangle.
+  useEffect(() => {
+    if (selectedModel === null) return;
+    const stillVisible = filteredMatrix.some((r) => r.model === selectedModel);
+    if (!stillVisible) {
+      setSelectedModel(null);
+      setSelectedHostId(null);
+    }
+  }, [filteredMatrix, selectedModel]);
+  const selectedRow = selectedModel
+    ? matrix.find((r) => r.model === selectedModel) ?? null
+    : null;
+
   return (
     <>
       {/* ── Filter bar ──────────────────────────────────────────────── */}
@@ -527,6 +562,8 @@ export function RtCpuMatrix({
                     row={row}
                     threshold={threshold}
                     onImpactChange={setImpactFor}
+                    isSelected={row.model === selectedModel}
+                    onSelect={onMatrixRowSelect}
                   />
                 ))}
               </tbody>
@@ -535,12 +572,34 @@ export function RtCpuMatrix({
         )}
       </section>
 
-      {/* ── Lower split: drivers / actions / limitations ────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <BottleneckDriversCard matrix={matrix} threshold={threshold} />
-        <RecommendedActionsCard matrix={matrix} />
-        <ConfidenceLimitsCard matrix={matrix} />
-      </div>
+      {/* ── Drilldown OR fleet cards ───────────────────────────────────
+          Sequential drilldown takes over the bottom workspace when a
+          CPU class is selected. Fleet-level summary cards (drivers /
+          actions / limits) are the default when nothing is selected —
+          they're still useful at-a-glance answers when the user is just
+          scanning the matrix. The swap (not a stack) keeps the page
+          focused on one investigation level at a time, per the IA spec. */}
+      {selectedRow ? (
+        <CpuDrilldownWorkspace
+          row={selectedRow}
+          threshold={threshold}
+          periodDays={periodDays}
+          pilot={pilot}
+          zabbix={zabbix}
+          selectedHostId={selectedHostId}
+          onSelectHost={setSelectedHostId}
+          onClose={() => {
+            setSelectedModel(null);
+            setSelectedHostId(null);
+          }}
+        />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+          <BottleneckDriversCard matrix={matrix} threshold={threshold} />
+          <RecommendedActionsCard matrix={matrix} />
+          <ConfidenceLimitsCard matrix={matrix} />
+        </div>
+      )}
 
       {/* ── Evidence cards ──────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -568,15 +627,32 @@ function MatrixRowView({
   row,
   threshold,
   onImpactChange,
+  isSelected,
+  onSelect,
 }: {
   row: CpuMatrixRow;
   threshold: number;
   onImpactChange: (model: string, value: number | null) => void;
+  isSelected: boolean;
+  onSelect: (model: string) => void;
 }) {
+  // Compute rollout-priority signal — surfaces "what to do with this
+  // class strategically?" beyond the decision colour. Subtle, not loud:
+  // small grey/coloured label under the evidence badge, only when the
+  // class actually merits a priority tag. Most rows show nothing.
+  const priority = computePriority(row);
   return (
-    <tr className="border-t border-gray-100 align-top">
+    <tr
+      className={`border-t border-gray-100 align-top cursor-pointer transition-colors ${
+        isSelected
+          ? "bg-blue-50/60"
+          : "hover:bg-gray-50/60"
+      }`}
+      onClick={() => onSelect(row.model)}
+      aria-selected={isSelected}
+    >
       {/* CPU class */}
-      <td className="py-4 px-4">
+      <td className={`py-4 px-4 relative ${isSelected ? "border-l-4 border-l-blue-500 pl-3" : ""}`}>
         <div className="font-semibold text-gray-900">{row.model}</div>
         {row.cpuCores !== null && row.cpuThreads !== null && (
           <div className="text-[10px] text-gray-400 mt-0.5 tabular-nums font-medium uppercase tracking-wide">
@@ -589,6 +665,14 @@ function MatrixRowView({
         >
           {EVIDENCE_LABEL[row.evidence]}
         </div>
+        {priority && (
+          <div
+            className={`mt-1.5 text-[10px] font-medium ${priority.tone}`}
+            title={priority.tip}
+          >
+            {priority.label}
+          </div>
+        )}
       </td>
 
       {/* Evidence base — factual numbers only. The "No Retellect ON data yet"
@@ -660,7 +744,10 @@ function MatrixRowView({
           a vanity control: it would accept input, persist it, but
           change nothing visible because applyImpact pins the decision
           to "insufficient" whenever typicalCpu is null. */}
-      <td className="py-4 px-3">
+      {/* stopPropagation on this cell keeps the editable controls
+          self-contained — a click inside the impact input or the Reset
+          link must not bubble up to the row-level onSelect handler. */}
+      <td className="py-4 px-3" onClick={(e) => e.stopPropagation()}>
         <ImpactInput
           model={row.model}
           value={row.impactPp}
@@ -1190,6 +1277,473 @@ function EvidenceBox({ title, body }: { title: string; body: string }) {
       <div className="text-[11px] text-gray-500 leading-relaxed">{body}</div>
     </div>
   );
+}
+
+// ─── Drilldown workspace ────────────────────────────────────────────
+//
+// Sequential drilldown that takes over the bottom area when a matrix
+// row is selected. Two states managed by selectedHostId:
+//
+//   State 1 — host inventory   (selectedHostId === null)
+//   State 2 — per-host evidence (selectedHostId !== null)
+//
+// State 3 (minute detail) is deliberately out of scope here. Minute-
+// level inspection lives on the CPU Timeline tab and the bridge from
+// State 2 is a deep link to that tab with the host preselected.
+//
+// IA discipline: only ONE primary investigation block is visible at a
+// time. We do NOT stack the host list and the evidence card side-by-
+// side — the breadcrumb at the top + the "Back to host list" link
+// is the path the user takes between them.
+
+interface DrilldownHost {
+  /** Zabbix hostId, or null when the device has no monitoring link. */
+  hostId: string | null;
+  hostName: string;
+  storeName: string;
+  monitored: boolean;
+  peakCpu: number | null;
+  typicalCpu: number | null;
+  /** Minutes-above-threshold across the whole period for this host. */
+  minutesAbove: number | null;
+  /** Same, normalised per day so different period lengths compare. */
+  minutesAbovePerDay: number | null;
+  /** Composite risk used for sorting in "Risky first". Higher = worse. */
+  riskScore: number;
+}
+
+function CpuDrilldownWorkspace({
+  row,
+  threshold,
+  periodDays,
+  pilot,
+  zabbix,
+  selectedHostId,
+  onSelectHost,
+  onClose,
+}: {
+  row: CpuMatrixRow;
+  threshold: number;
+  periodDays: number;
+  pilot: RtPilotData;
+  zabbix: ZabbixData;
+  selectedHostId: string | null;
+  onSelectHost: (hostId: string | null) => void;
+  onClose: () => void;
+}) {
+  // Build the per-host inventory once per (row, threshold, periodDays).
+  // Pure derivation — no fetch, all data already lives in props.
+  const hosts = useMemo(
+    () => buildDrilldownHosts(row.model, pilot, zabbix, threshold, periodDays),
+    [row.model, pilot, zabbix, threshold, periodDays],
+  );
+
+  // Fleet-share signal in the header — "this CPU class is N% of the
+  // pilot fleet". Surfaces priority context that the matrix row alone
+  // can't communicate (40 hosts means more if the total is 80 than if
+  // the total is 400).
+  const fleetSize = pilot.devices.length;
+  const storesInClass = new Set(hosts.map((h) => h.storeName)).size;
+  const fleetSharePct =
+    fleetSize > 0 ? Math.round((row.hostCount / fleetSize) * 100) : 0;
+
+  // Recover the selected-host record when we're in State 2. If the
+  // hostId no longer matches anything (host filtered out, refresh
+  // changed the inventory), drop back to State 1.
+  const selectedHost = selectedHostId
+    ? hosts.find((h) => h.hostId === selectedHostId) ?? null
+    : null;
+  useEffect(() => {
+    if (selectedHostId !== null && selectedHost === null) {
+      onSelectHost(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedHostId, selectedHost]);
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 mb-6">
+      {/* ── Header / breadcrumb ──────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-4 px-5 py-3 border-b border-gray-100">
+        <div className="min-w-0">
+          {/* Breadcrumb: model > host (when in State 2). The model link
+              clears the host selection so the user falls back to the
+              inventory list — explicit IA path, no browser-back surprise. */}
+          <div className="flex items-center gap-1.5 text-[12px] text-gray-500 font-medium">
+            <button
+              type="button"
+              onClick={() => onSelectHost(null)}
+              className={`hover:text-gray-900 transition-colors ${
+                selectedHost ? "cursor-pointer underline decoration-dotted underline-offset-2" : "cursor-default"
+              }`}
+              disabled={!selectedHost}
+            >
+              {row.model}
+            </button>
+            {selectedHost && (
+              <>
+                <span className="text-gray-300">/</span>
+                <span className="text-gray-900">{selectedHost.hostName}</span>
+              </>
+            )}
+          </div>
+          <div className="text-[11px] text-gray-500 mt-0.5">
+            {row.hostCount} hosts · {storesInClass} {storesInClass === 1 ? "store" : "stores"}
+            {fleetSize > 0 && ` · ${fleetSharePct}% of fleet`}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-[11px] text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+          title="Close drilldown and return to fleet-level summary"
+        >
+          ✕ Close
+        </button>
+      </div>
+
+      {/* ── State-dependent body ─────────────────────────────────── */}
+      {selectedHost ? (
+        <HostEvidenceView
+          host={selectedHost}
+          row={row}
+          threshold={threshold}
+          periodDays={periodDays}
+          pilot={pilot}
+          onBack={() => onSelectHost(null)}
+        />
+      ) : (
+        <HostInventoryView
+          hosts={hosts}
+          threshold={threshold}
+          onSelectHost={onSelectHost}
+        />
+      )}
+    </div>
+  );
+}
+
+/** State 1 — host inventory for the selected CPU class.
+ *
+ *  Default sort is risk-first (composite score on peak CPU + minutes
+ *  above threshold). The tab set lets the user pivot quickly:
+ *    Risky first  → monitored hosts, sorted by riskScore desc
+ *    All          → every host, monitored sorted by risk, unmonitored at end
+ *    Monitored    → only monitored, alphabetical
+ *    Unmonitored  → only unmonitored — pure inventory-coverage view
+ *
+ *  Important: unmonitored hosts never contribute to a risk score; they
+ *  appear in the list only as coverage gaps, never mixed into measured
+ *  metric computations. Mixing the two would silently lower fleet-level
+ *  "minutes above" rates because we'd be dividing by a denominator that
+ *  includes hosts we can't actually see. */
+function HostInventoryView({
+  hosts,
+  threshold,
+  onSelectHost,
+}: {
+  hosts: DrilldownHost[];
+  threshold: number;
+  onSelectHost: (hostId: string) => void;
+}) {
+  type Tab = "risky" | "all" | "monitored" | "unmonitored";
+  const [tab, setTab] = useState<Tab>("risky");
+
+  const filtered = useMemo(() => {
+    if (tab === "risky") {
+      return hosts.filter((h) => h.monitored).sort((a, b) => b.riskScore - a.riskScore);
+    }
+    if (tab === "monitored") {
+      return hosts.filter((h) => h.monitored).sort((a, b) => a.hostName.localeCompare(b.hostName));
+    }
+    if (tab === "unmonitored") {
+      return hosts.filter((h) => !h.monitored).sort((a, b) => a.hostName.localeCompare(b.hostName));
+    }
+    // "all" — risky monitored first, then unmonitored at the bottom.
+    const mon = hosts.filter((h) => h.monitored).sort((a, b) => b.riskScore - a.riskScore);
+    const unmon = hosts.filter((h) => !h.monitored).sort((a, b) => a.hostName.localeCompare(b.hostName));
+    return [...mon, ...unmon];
+  }, [hosts, tab]);
+
+  const tabs: { id: Tab; label: string; count: number }[] = [
+    { id: "risky", label: "Risky first", count: hosts.filter((h) => h.monitored).length },
+    { id: "all", label: "All", count: hosts.length },
+    { id: "monitored", label: "Monitored", count: hosts.filter((h) => h.monitored).length },
+    { id: "unmonitored", label: "Unmonitored", count: hosts.filter((h) => !h.monitored).length },
+  ];
+
+  return (
+    <div className="p-5">
+      <div className="flex items-center gap-1 mb-4 flex-wrap">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+              tab === t.id
+                ? "bg-blue-50 text-blue-700 border-blue-200"
+                : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"
+            }`}
+          >
+            {t.label}
+            <span className="text-[10px] text-gray-400 tabular-nums">{t.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="py-8 text-center text-[12px] text-gray-400">
+          {tab === "unmonitored"
+            ? "All hosts in this CPU class are monitored — no coverage gaps."
+            : "No hosts to show."}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                <th className="py-2 px-2 font-semibold">Host</th>
+                <th className="py-2 px-2 font-semibold">Store</th>
+                <th className="py-2 px-2 font-semibold text-right">Peak CPU</th>
+                <th className="py-2 px-2 font-semibold text-right">Typical</th>
+                <th className="py-2 px-2 font-semibold text-right">Min above {threshold}%/d</th>
+                <th className="py-2 px-2 font-semibold w-[24px]" />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((h) => {
+                const flagged =
+                  h.monitored &&
+                  ((h.peakCpu !== null && h.peakCpu >= 95) ||
+                    (h.minutesAbovePerDay !== null && h.minutesAbovePerDay >= 30));
+                return (
+                  <tr
+                    key={`${h.hostId ?? h.hostName}`}
+                    className={`border-b border-gray-50 transition-colors ${
+                      h.monitored
+                        ? "hover:bg-gray-50 cursor-pointer"
+                        : "opacity-60 cursor-not-allowed"
+                    }`}
+                    onClick={() => {
+                      if (h.monitored && h.hostId) onSelectHost(h.hostId);
+                    }}
+                    title={
+                      h.monitored
+                        ? "Open per-host evidence summary"
+                        : "Unmonitored — no Zabbix data on this host yet."
+                    }
+                  >
+                    <td className="py-2 px-2 font-medium text-gray-900">{h.hostName}</td>
+                    <td className="py-2 px-2 text-gray-600">{h.storeName}</td>
+                    <td className="py-2 px-2 text-right tabular-nums font-semibold">
+                      {h.peakCpu === null ? "—" : `${Math.round(h.peakCpu)}%`}
+                    </td>
+                    <td className="py-2 px-2 text-right tabular-nums text-gray-500">
+                      {h.typicalCpu === null ? "—" : `${Math.round(h.typicalCpu)}%`}
+                    </td>
+                    <td className="py-2 px-2 text-right tabular-nums">
+                      {h.minutesAbovePerDay === null
+                        ? "—"
+                        : h.minutesAbovePerDay < 0.1
+                          ? "<0.1"
+                          : h.minutesAbovePerDay < 10
+                            ? h.minutesAbovePerDay.toFixed(1)
+                            : Math.round(h.minutesAbovePerDay).toString()}
+                    </td>
+                    <td className="py-2 px-2 text-right">
+                      {flagged && <span className="text-amber-600" title="High peak or sustained time above threshold">⚠</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** State 2 — focused evidence summary for one host.
+ *
+ *  This is NOT a minute timeline (that lives on the CPU Timeline tab).
+ *  It's an "evidence card" — the user has picked a host, this view
+ *  proves why it landed where it did in the risk ordering. The bucket
+ *  distribution at the bottom gives a sense of HOW the minutes-above
+ *  are spread across severity bands, which a single "34 min/d" number
+ *  can't communicate. */
+function HostEvidenceView({
+  host,
+  row,
+  threshold,
+  periodDays,
+  pilot,
+  onBack,
+}: {
+  host: DrilldownHost;
+  row: CpuMatrixRow;
+  threshold: number;
+  periodDays: number;
+  pilot: RtPilotData;
+  onBack: () => void;
+}) {
+  return (
+    <div className="p-5">
+      <button
+        type="button"
+        onClick={onBack}
+        className="text-[11px] text-blue-600 hover:text-blue-800 mb-3 inline-flex items-center gap-1"
+      >
+        ◂ Back to host list
+      </button>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Evidence headline numbers */}
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+          <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-3">
+            Evidence summary
+          </div>
+          <dl className="space-y-2 text-[12px]">
+            <EvidenceRow label={`Minutes above ${threshold}%`} value={fmtMinutesPerDay(host.minutesAbovePerDay)} />
+            <EvidenceRow label="Total in period" value={host.minutesAbove === null ? "—" : `${Math.round(host.minutesAbove)} min over ${periodDays} d`} />
+            <EvidenceRow label="Peak CPU in period" value={host.peakCpu === null ? "—" : `${Math.round(host.peakCpu)}%`} />
+            <EvidenceRow label="Typical (median daily avg)" value={host.typicalCpu === null ? "—" : `${Math.round(host.typicalCpu)}%`} />
+            <EvidenceRow label="Store" value={host.storeName} />
+          </dl>
+        </div>
+
+        {/* Class context — answers "is this host an outlier within its class?" */}
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+          <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-3">
+            Compared to {row.model} class
+          </div>
+          <dl className="space-y-2 text-[12px]">
+            <EvidenceRow label="Class peak" value={row.maxCpu === null ? "—" : `${Math.round(row.maxCpu)}%`} />
+            <EvidenceRow label="Class typical (median)" value={row.typicalCpu === null ? "—" : `${Math.round(row.typicalCpu)}%`} />
+            <EvidenceRow label="Class decision" value={DECISION_LABEL[row.decision]} />
+            <EvidenceRow label="Evidence base" value={EVIDENCE_LABEL[row.evidence]} />
+            <EvidenceRow label="Planned impact" value={`+${row.impactPp.toFixed(1)} pp`} />
+          </dl>
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center gap-2 text-[11px] text-gray-500">
+        <span>For minute-level inspection of this host:</span>
+        <a
+          href={`/retellect/${pilot.id}?tab=timeline&host=${host.hostId ?? ""}`}
+          className="text-blue-600 hover:underline"
+        >
+          Open in CPU Timeline ↗
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function EvidenceRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <dt className="text-gray-500">{label}</dt>
+      <dd className="font-semibold text-gray-900 tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
+function fmtMinutesPerDay(value: number | null): string {
+  if (value === null) return "—";
+  if (value === 0) return "0 min / day";
+  if (value < 0.1) return "<0.1 min / day";
+  if (value < 10) return `${value.toFixed(1)} min / day`;
+  if (value < 60) return `${Math.round(value)} min / day`;
+  const h = value / 60;
+  return h >= 10 ? `${Math.round(h)} h / day` : `${h.toFixed(1)} h / day`;
+}
+
+/** Derive a per-host risk view for one CPU class. Pure — same data the
+ *  matrix already received from the server. */
+function buildDrilldownHosts(
+  modelMatch: string,
+  pilot: RtPilotData,
+  zabbix: ZabbixData,
+  threshold: number,
+  periodDays: number,
+): DrilldownHost[] {
+  const zabbixByName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
+  const trendsByHost = new Map<string, ZabbixCpuTrend[]>();
+  for (const t of zabbix.cpuTrends ?? []) {
+    if (!trendsByHost.has(t.hostId)) trendsByHost.set(t.hostId, []);
+    trendsByHost.get(t.hostId)!.push(t);
+  }
+  const thKey: ActiveAboveBucket =
+    threshold >= 90 ? 90 :
+    threshold >= 80 ? 80 :
+    threshold >= 70 ? 70 :
+    threshold >= 60 ? 60 :
+    threshold >= 50 ? 50 :
+    threshold >= 40 ? 40 :
+    threshold >= 30 ? 30 : 20;
+
+  const out: DrilldownHost[] = [];
+  for (const d of pilot.devices) {
+    const matched = zabbixByName.get(d.sourceHostKey || "") || zabbixByName.get(d.name);
+    const model = resolveCpuModel(d.cpuModel, matched?.inventory?.cpuModel ?? null, "Unknown");
+    if (model !== modelMatch) continue;
+
+    if (!matched) {
+      // Unmonitored — render as inventory coverage row, never feed
+      // into measured metric calculations elsewhere.
+      out.push({
+        hostId: null,
+        hostName: d.name,
+        storeName: d.storeName,
+        monitored: false,
+        peakCpu: null,
+        typicalCpu: null,
+        minutesAbove: null,
+        minutesAbovePerDay: null,
+        riskScore: -1,
+      });
+      continue;
+    }
+
+    const trends = trendsByHost.get(matched.hostId) || [];
+    let peakCpu: number | null = null;
+    const dailyAvgs: number[] = [];
+    let minutesAbove = 0;
+    let sawAnyData = false;
+    for (const t of trends) {
+      if (Number.isFinite(t.avg)) {
+        sawAnyData = true;
+        if (t.avg > 0) dailyAvgs.push(t.avg);
+      }
+      if (Number.isFinite(t.max) && t.max > 0) {
+        peakCpu = peakCpu === null ? t.max : Math.max(peakCpu, t.max);
+      }
+      if (t.minutesAbove) minutesAbove += t.minutesAbove[thKey] || 0;
+    }
+    const typicalCpu = dailyAvgs.length > 0 ? median(dailyAvgs) : null;
+    const minutesAbovePerDay =
+      sawAnyData && periodDays > 0 ? minutesAbove / periodDays : null;
+
+    // Composite risk for sorting. Peak gets the heaviest weight because
+    // a single high peak is what makes a host "interesting" for rollout
+    // risk; sustained minutes-above is the supporting signal.
+    const riskScore =
+      (peakCpu ?? 0) + (minutesAbovePerDay ?? 0) * 0.5;
+
+    out.push({
+      hostId: matched.hostId,
+      hostName: matched.hostName,
+      storeName: d.storeName,
+      monitored: true,
+      peakCpu,
+      typicalCpu,
+      minutesAbove: sawAnyData ? minutesAbove : null,
+      minutesAbovePerDay,
+      riskScore,
+    });
+  }
+  return out;
 }
 
 // ─── Compute layer ──────────────────────────────────────────────────
@@ -1795,6 +2349,54 @@ function cpuSpec(model: string): CpuSpec | null {
   if (/celeron/.test(m)) return { rank: 15, cores: 2, threads: 2 };
   if (/atom/.test(m)) return { rank: 5, cores: 2, threads: 2 };
 
+  return null;
+}
+
+/** Rollout-priority signal — small secondary badge under evidence.
+ *
+ *  Decision colour alone tells the user "is this CPU class risky?"
+ *  but says nothing about how much of the fleet that class covers, or
+ *  whether it's a good place to START the rollout. Priority answers
+ *  that compact question in one short label:
+ *
+ *    "Best start candidate"  — Safe + High confidence + ≥3 hosts
+ *    "Large risky segment"   — Optimize / Do not roll out, ≥10 hosts
+ *    "Small fragile cohort"  — Optimize / Do not roll out, <3 hosts
+ *    (no label)              — every other case, kept visually quiet
+ *
+ *  Returns null when no signal is warranted — the cell renders nothing.
+ *  Spec rule: do not make this visually loud. Tones are muted text-only
+ *  (no pill / background) so they read as supporting metadata, not as
+ *  a third decision dimension competing with the main pill. */
+function computePriority(row: CpuMatrixRow): { label: string; tone: string; tip: string } | null {
+  if (row.decision === "safe" && row.confidence === "high" && row.hostCount >= 3) {
+    return {
+      label: "Best start candidate",
+      tone: "text-emerald-700",
+      tip: "Safe rollout decision with high confidence on a meaningful fleet slice — good place to begin.",
+    };
+  }
+  if (
+    (row.decision === "optimize" || row.decision === "do-not-roll-out") &&
+    row.hostCount >= 10
+  ) {
+    return {
+      label: "Large risky segment",
+      tone: "text-amber-700",
+      tip: "Risky rollout decision on a large share of the fleet — high blast radius if rolled out blindly.",
+    };
+  }
+  if (
+    (row.decision === "optimize" || row.decision === "do-not-roll-out") &&
+    row.hostCount > 0 &&
+    row.hostCount < 3
+  ) {
+    return {
+      label: "Small fragile cohort",
+      tone: "text-gray-600",
+      tip: "Risky decision on a tiny fleet slice — easy to defer, low priority to chase.",
+    };
+  }
   return null;
 }
 
