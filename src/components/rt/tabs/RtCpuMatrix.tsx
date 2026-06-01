@@ -230,8 +230,15 @@ export function RtCpuMatrix({
   const [isPeriodPending, startPeriodTransition] = useTransition();
   useEffect(() => {
     const urlPeriod = urlSearchParams.get("period");
-    if (urlPeriod && urlPeriod !== filters.period) {
-      setFilter("period", urlPeriod);
+    if (!urlPeriod) return;
+    // Bug fix (2026-06-01): an old bookmark with ?period=90d would
+    // restore "90d" into filter state — display'd then collapse to
+    // 30d via the FilterSegmented `value=` remap, while the actual
+    // server fetch kept using 90d. Normalise on read so URL + state
+    // + UI all agree.
+    const normalised = urlPeriod === "90d" ? "30d" : urlPeriod;
+    if (normalised !== filters.period) {
+      setFilter("period", normalised);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlSearchParams]);
@@ -676,12 +683,26 @@ function MatrixRowView({
   const coverageGap = Math.max(0, row.hostCount - row.hostsWithData);
   return (
     <tr
-      className={`border-t border-gray-100 align-top cursor-pointer transition-colors ${
+      className={`border-t border-gray-100 align-top cursor-pointer transition-colors focus:outline-none focus:bg-blue-50/40 ${
         isSelected
           ? "bg-blue-50/60"
           : "hover:bg-gray-50/60"
       }`}
       onClick={() => onSelect(row.model)}
+      // Bug fix (2026-06-01): clickable rows had no keyboard affordance.
+      // Tab focus + Enter/Space now mirrors the mouse interaction so
+      // keyboard-only operators (and screen readers) can drive the
+      // drilldown. role=button signals the semantic.
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(row.model);
+        }
+      }}
+      tabIndex={0}
+      // Native <tr role> is "row" inside a <table>, which supports
+      // aria-selected. Explicit role="button" was breaking that;
+      // dropped it. Keyboard / click handlers still drive selection.
       aria-selected={isSelected}
       title={
         isSelected
@@ -999,6 +1020,13 @@ function ImpactInput({
       onChange(model, snapped);
     }
   };
+  // Bug fix (2026-06-01): no escape hatch for an in-flight edit. If the
+  // user typed "20" but wanted to abandon the change, the only way to
+  // restore the live value was to click outside, which also commits.
+  // Escape now reverts the draft to the committed value and blurs.
+  const cancelDraft = () => {
+    setDraft(value.toFixed(1));
+  };
 
   return (
     <div className="flex flex-col gap-1">
@@ -1028,6 +1056,10 @@ function ImpactInput({
             if (e.key === "Enter") {
               e.preventDefault();
               commit();
+              (e.currentTarget as HTMLInputElement).blur();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancelDraft();
               (e.currentTarget as HTMLInputElement).blur();
             }
           }}
@@ -1483,8 +1515,9 @@ function CpuDrilldownWorkspace({
           onClick={onClose}
           className="text-[11px] text-gray-400 hover:text-gray-700 transition-colors shrink-0"
           title="Close drilldown and return to fleet-level summary"
+          aria-label="Close drilldown"
         >
-          ✕ Close
+          <span aria-hidden="true">✕</span> Close
         </button>
       </div>
 
@@ -1582,10 +1615,15 @@ function HostInventoryView({
         const bv = get(b);
         // Nulls always sink to the end regardless of direction — there's
         // nothing useful to compare against.
-        if (av === null && bv === null) return 0;
+        if (av === null && bv === null) return a.hostName.localeCompare(b.hostName);
         if (av === null) return 1;
         if (bv === null) return -1;
-        return sortDir === "desc" ? bv - av : av - bv;
+        const diff = sortDir === "desc" ? bv - av : av - bv;
+        // Bug fix (2026-06-01): when two hosts have identical values
+        // (e.g. both at peak 99%), their order would flip across
+        // re-renders / re-sorts. Use hostName as a stable tiebreaker
+        // so the list never visually jumps on a no-op sort.
+        return diff !== 0 ? diff : a.hostName.localeCompare(b.hostName);
       });
     }
     return items;
@@ -1602,8 +1640,12 @@ function HostInventoryView({
   // but not active. Both fit in the same width so headers don't shift
   // when the active column changes.
   const sortIndicator = (col: SortCol) => {
-    if (sortCol !== col) return <span className="text-gray-300 ml-1">·</span>;
-    return <span className="text-gray-700 ml-1">{sortDir === "desc" ? "↓" : "↑"}</span>;
+    if (sortCol !== col) return <span className="text-gray-300 ml-1" aria-hidden="true">·</span>;
+    return (
+      <span className="text-gray-700 ml-1" aria-hidden="true">
+        {sortDir === "desc" ? "↓" : "↑"}
+      </span>
+    );
   };
 
   return (
@@ -1639,16 +1681,35 @@ function HostInventoryView({
               <tr className="text-left text-[10px] uppercase tracking-wide text-gray-400 border-b border-gray-100">
                 <th className="py-2 px-2 font-semibold">Host</th>
                 <th className="py-2 px-2 font-semibold">Store</th>
+                {/* Native <th> role is "columnheader" which supports
+                    aria-sort; explicit role="button" was overriding
+                    that. Removed — keyboard/click handlers still work. */}
                 <th
                   className="py-2 px-2 font-semibold text-right cursor-pointer select-none hover:text-gray-700"
                   onClick={() => onHeaderClick("peak")}
-                  title="Sort by Peak CPU"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onHeaderClick("peak");
+                    }
+                  }}
+                  tabIndex={0}
+                  aria-sort={sortCol === "peak" ? (sortDir === "desc" ? "descending" : "ascending") : "none"}
+                  title="Sort by peak CPU"
                 >
                   Peak CPU{sortIndicator("peak")}
                 </th>
                 <th
                   className="py-2 px-2 font-semibold text-right cursor-pointer select-none hover:text-gray-700"
                   onClick={() => onHeaderClick("typical")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onHeaderClick("typical");
+                    }
+                  }}
+                  tabIndex={0}
+                  aria-sort={sortCol === "typical" ? (sortDir === "desc" ? "descending" : "ascending") : "none"}
                   title="Sort by typical (median daily avg) CPU"
                 >
                   Typical{sortIndicator("typical")}
@@ -1656,6 +1717,14 @@ function HostInventoryView({
                 <th
                   className="py-2 px-2 font-semibold text-right cursor-pointer select-none hover:text-gray-700"
                   onClick={() => onHeaderClick("minAbove")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onHeaderClick("minAbove");
+                    }
+                  }}
+                  tabIndex={0}
+                  aria-sort={sortCol === "minAbove" ? (sortDir === "desc" ? "descending" : "ascending") : "none"}
                   title={`Sort by minutes per day above ${threshold}%`}
                 >
                   Min above {threshold}%/d{sortIndicator("minAbove")}
@@ -1664,15 +1733,21 @@ function HostInventoryView({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((h) => {
+              {filtered.map((h, idx) => {
                 const flagged =
                   h.monitored &&
                   ((h.peakCpu !== null && h.peakCpu >= 95) ||
                     (h.minutesAbovePerDay !== null && h.minutesAbovePerDay >= 30));
                 return (
                   <tr
-                    key={`${h.hostId ?? h.hostName}`}
-                    className={`border-b border-gray-50 transition-colors ${
+                    // Bug fix (2026-06-01): two unmonitored hosts with
+                    // identical device.name would collide on the React key
+                    // (`hostId ?? hostName` falls back to a non-unique
+                    // hostName). Compose key from hostId/hostName + store
+                    // + idx so duplicates stay distinct without losing
+                    // identity-based reconciliation for monitored hosts.
+                    key={`${h.hostId ?? h.hostName}::${h.storeName}::${idx}`}
+                    className={`border-b border-gray-50 transition-colors focus:outline-none focus:bg-blue-50/30 ${
                       h.monitored
                         ? "hover:bg-gray-50 cursor-pointer"
                         : "opacity-60 cursor-not-allowed"
@@ -1680,6 +1755,15 @@ function HostInventoryView({
                     onClick={() => {
                       if (h.monitored && h.hostId) onSelectHost(h.hostId);
                     }}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === " ") && h.monitored && h.hostId) {
+                        e.preventDefault();
+                        onSelectHost(h.hostId);
+                      }
+                    }}
+                    role={h.monitored ? "button" : undefined}
+                    tabIndex={h.monitored ? 0 : undefined}
+                    aria-disabled={!h.monitored || undefined}
                     title={
                       h.monitored
                         ? "Open per-host evidence summary"
@@ -1768,7 +1852,7 @@ function HostEvidenceView({
         {/* Class context — answers "is this host an outlier within its class?" */}
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
           <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            Compared to {row.model} class
+            {row.model === "Unknown" ? "Class context" : `Compared to ${row.model}`}
           </div>
           <dl className="space-y-2 text-[12px]">
             <EvidenceRow label="Class peak" value={row.maxCpu === null ? "—" : `${Math.round(row.maxCpu)}%`} />
@@ -1804,7 +1888,11 @@ function EvidenceRow({ label, value }: { label: string; value: string }) {
 
 function fmtMinutesPerDay(value: number | null): string {
   if (value === null) return "—";
-  if (value === 0) return "0 min / day";
+  // Bug fix (2026-06-01): a literal "0 min / day" reads as if the
+  // threshold was the operative number; "never above threshold" maps
+  // directly to the user's mental model and is more honest about what
+  // a zero rate means.
+  if (value === 0) return "Never above threshold";
   if (value < 0.1) return "<0.1 min / day";
   if (value < 10) return `${value.toFixed(1)} min / day`;
   if (value < 60) return `${Math.round(value)} min / day`;
@@ -1838,7 +1926,14 @@ function buildDrilldownHosts(
 
   const out: DrilldownHost[] = [];
   for (const d of pilot.devices) {
-    const matched = zabbixByName.get(d.sourceHostKey || "") || zabbixByName.get(d.name);
+    // Bug fix (2026-06-01): `d.sourceHostKey || ""` falls through to
+    // `Map.get("")`, which would match an actual zabbix host literally
+    // named "" (unlikely in prod but possible in seed/fixture data).
+    // Skip the lookup entirely when the key is empty, falling straight
+    // through to the d.name match path.
+    const matched =
+      (d.sourceHostKey ? zabbixByName.get(d.sourceHostKey) : undefined) ||
+      zabbixByName.get(d.name);
     const model = resolveCpuModel(d.cpuModel, matched?.inventory?.cpuModel ?? null, "Unknown");
     if (model !== modelMatch) continue;
 
@@ -2030,8 +2125,11 @@ function computeCpuMatrix(
 
   for (const d of pilot.devices) {
     if (storeFilter !== "all" && d.storeName !== storeFilter) continue;
+    // Bug fix (2026-06-01): see buildDrilldownHosts — empty
+    // sourceHostKey must not fall through to Map.get("").
     const matchedHost =
-      zabbixByName.get(d.sourceHostKey || "") || zabbixByName.get(d.name);
+      (d.sourceHostKey ? zabbixByName.get(d.sourceHostKey) : undefined) ||
+      zabbixByName.get(d.name);
     const model = resolveCpuModel(d.cpuModel, matchedHost?.inventory?.cpuModel ?? null, "Unknown");
 
     let g = groups.get(model);
