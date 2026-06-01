@@ -468,16 +468,16 @@ export function RtCpuMatrix({
               </span>
             </div>
           )}
-          <table className="w-full text-sm min-w-[1060px]">
+          <table className="w-full text-sm min-w-[900px]">
             <thead>
               <tr className="bg-gray-50/60 border-b border-gray-200">
-                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[200px]">CPU class</th>
-                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest">Current state</th>
-                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[150px]">Planned impact</th>
-                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest">Projected state</th>
-                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[120px]">Evidence</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[170px]">CPU class</th>
+                <th className="text-left py-3 px-2 text-xs font-semibold text-gray-600 uppercase tracking-widest">Current</th>
+                <th className="text-left py-3 px-2 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[130px] leading-snug">Projected impact</th>
+                <th className="text-left py-3 px-2 text-xs font-semibold text-gray-600 uppercase tracking-widest">Projected</th>
+                <th className="text-left py-3 px-2 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[100px]">Evidence</th>
                 <th
-                  className="text-center py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[200px] cursor-help"
+                  className="text-left py-3 px-2 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[170px] cursor-help"
                   title="Rollout verdict + how confident we are."
                 >
                   Decision
@@ -620,14 +620,7 @@ export function RtCpuMatrix({
           }
         />
       ) : (
-        <>
-          <div className="mb-6">{matrixSection}</div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-            <BottleneckDriversCard matrix={matrix} threshold={threshold} />
-            <RecommendedActionsCard matrix={matrix} />
-            <ConfidenceLimitsCard matrix={matrix} />
-          </div>
-        </>
+        <div className="mb-6">{matrixSection}</div>
       )}
 
       {/* ── Evidence cards ──────────────────────────────────────────── */}
@@ -1124,7 +1117,7 @@ function MiniStack({
   threshold: number;
 }) {
   return (
-    <div className="flex flex-col gap-1.5 min-w-[190px]">
+    <div className="flex flex-col gap-1.5 min-w-[160px]">
       {rows.map((r) => (
         <MiniBar key={r.label} {...r} threshold={threshold} />
       ))}
@@ -1224,7 +1217,7 @@ function MiniBar({
   return (
     <div className="flex items-center gap-2 text-[11px]">
       <span
-        className={`w-[88px] shrink-0 font-medium ${secondary ? "text-gray-500" : "text-gray-700"} ${tip ? "cursor-help underline decoration-dotted underline-offset-2 decoration-gray-300" : ""}`}
+        className={`w-[68px] shrink-0 font-medium ${secondary ? "text-gray-500" : "text-gray-700"} ${tip ? "cursor-help underline decoration-dotted underline-offset-2 decoration-gray-300" : ""}`}
         title={tip ?? label}
       >
         {shortLabel}
@@ -1243,7 +1236,7 @@ function MiniBar({
           <div className={`h-full ${barClass} rounded-full`} style={{ width: `${widthPct}%` }} />
         )}
       </div>
-      <span className={`w-[54px] shrink-0 text-right font-semibold tabular-nums ${valueColor ?? "text-gray-800"}`}>
+      <span className={`w-[46px] shrink-0 text-right font-semibold tabular-nums ${valueColor ?? "text-gray-800"}`}>
         {approx && value !== null ? `~${fmtValue}` : fmtValue}
       </span>
     </div>
@@ -1251,154 +1244,11 @@ function MiniBar({
 }
 
 // ─── Lower cards ────────────────────────────────────────────────────
-
-function BottleneckDriversCard({ matrix, threshold }: { matrix: CpuMatrixRow[]; threshold: number }) {
-  // Surface 2–3 honest, decision-supporting one-liners derived from the
-  // matrix. Deliberately short — the analytical decomposition lives on
-  // the legacy Heatmap sub-view, this card is here to anchor the row
-  // numbers in context.
-  const lines: string[] = [];
-  const measured = matrix.filter((r) => r.evidence === "measured-on-off");
-  if (measured.length > 0) {
-    const avgImpact =
-      measured.reduce((s, r) => s + r.impactPp, 0) / measured.length;
-    lines.push(
-      `Measured Retellect impact on ON hosts averages +${avgImpact.toFixed(1)} pp across ${measured.length} ${measured.length === 1 ? "class" : "classes"}.`,
-    );
-  }
-  const tightRoom = matrix.filter(
-    (r) => r.roomNow !== null && r.roomNow < 20 && r.evidence !== "insufficient",
-  );
-  if (tightRoom.length > 0) {
-    lines.push(
-      `${tightRoom.length} ${tightRoom.length === 1 ? "class is" : "classes are"} already within 20 pp of the ${threshold}% threshold without Retellect.`,
-    );
-  }
-  const hotClasses = matrix.filter(
-    (r) => r.timeAboveNowMin !== null && r.timeAboveNowMin > 60,
-  );
-  if (hotClasses.length > 0) {
-    lines.push(
-      `${hotClasses.length} ${hotClasses.length === 1 ? "class spends" : "classes spend"} more than an hour per host above ${threshold}% already.`,
-    );
-  }
-  if (lines.length === 0) {
-    lines.push("No CPU classes show meaningful pressure at the current threshold.");
-  }
-  return (
-    <Card title="Main bottleneck drivers">
-      <ul className="space-y-1.5 text-[12px] text-gray-700 leading-snug">
-        {lines.map((l, i) => (
-          <li key={i} className="flex items-start gap-2">
-            <span className="text-gray-300 mt-0.5">·</span>
-            <span>{l}</span>
-          </li>
-        ))}
-      </ul>
-    </Card>
-  );
-}
-
-function RecommendedActionsCard({ matrix }: { matrix: CpuMatrixRow[] }) {
-  const safe = matrix.filter((r) => r.decision === "safe").map((r) => r.model);
-  const validate = matrix.filter((r) => r.decision === "validate").map((r) => r.model);
-  const optimize = matrix.filter((r) => r.decision === "optimize").map((r) => r.model);
-  const block = matrix.filter((r) => r.decision === "do-not-roll-out").map((r) => r.model);
-  const unknown = matrix.filter((r) => r.decision === "insufficient").map((r) => r.model);
-
-  const actions: { priority: "high" | "medium" | "low"; text: string }[] = [];
-  if (safe.length > 0) {
-    actions.push({ priority: "high", text: `Roll out first on ${formatList(safe)}.` });
-  }
-  if (validate.length > 0) {
-    actions.push({ priority: "medium", text: `Validate ${formatList(validate)} under live peak load.` });
-  }
-  if (optimize.length > 0) {
-    actions.push({ priority: "medium", text: `Optimize background load before rollout on ${formatList(optimize)}.` });
-  }
-  if (block.length > 0) {
-    actions.push({ priority: "high", text: `Hold rollout on ${formatList(block)} until hardware tier is upgraded.` });
-  }
-  if (unknown.length > 0) {
-    actions.push({ priority: "low", text: `Pilot Retellect on one host of each: ${formatList(unknown)}.` });
-  }
-  const top = actions.slice(0, 4);
-  return (
-    <Card title="Recommended next actions">
-      {top.length === 0 ? (
-        <div className="text-[12px] text-gray-400">No actions ranked yet — matrix is empty.</div>
-      ) : (
-        <ul className="space-y-1.5 text-[12px] text-gray-700 leading-snug">
-          {top.map((a, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <span
-                className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                  a.priority === "high"
-                    ? "bg-red-500"
-                    : a.priority === "medium"
-                      ? "bg-amber-500"
-                      : "bg-blue-500"
-                }`}
-              />
-              <span>{a.text}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
-  );
-}
-
-function ConfidenceLimitsCard({ matrix }: { matrix: CpuMatrixRow[] }) {
-  const lines: string[] = [];
-  const lowConf = matrix.filter((r) => r.confidence === "low");
-  if (lowConf.length > 0) {
-    lines.push(
-      `${lowConf.length} ${lowConf.length === 1 ? "class has" : "classes have"} low-confidence samples — directional only.`,
-    );
-  }
-  const projectedOnly = matrix.filter(
-    (r) => r.evidence === "no-on-data" && r.decision !== "insufficient",
-  );
-  if (projectedOnly.length > 0) {
-    lines.push(
-      `${projectedOnly.length} ${projectedOnly.length === 1 ? "class relies" : "classes rely"} on a conservative impact scenario, not measured ON data.`,
-    );
-  }
-  const insufficient = matrix.filter((r) => r.decision === "insufficient");
-  if (insufficient.length > 0) {
-    lines.push(
-      `${insufficient.length} ${insufficient.length === 1 ? "class has" : "classes have"} insufficient evidence to decide either way.`,
-    );
-  }
-  if (lines.length === 0) {
-    lines.push("All visible classes have at least baseline-level evidence.");
-  }
-  lines.push("Unknown CPU metadata is excluded from primary decisions.");
-  return (
-    <Card title="Where confidence is limited">
-      <ul className="space-y-1.5 text-[12px] text-gray-700 leading-snug">
-        {lines.map((l, i) => (
-          <li key={i} className="flex items-start gap-2">
-            <span className="text-gray-300 mt-0.5">·</span>
-            <span>{l}</span>
-          </li>
-        ))}
-      </ul>
-    </Card>
-  );
-}
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-md border border-gray-200 p-5">
-      <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-widest mb-3">
-        {title}
-      </h4>
-      {children}
-    </div>
-  );
-}
+//
+// (BottleneckDriversCard, RecommendedActionsCard, ConfidenceLimitsCard
+// and the shared Card wrapper were removed 2026-06-01 — the matrix +
+// drilldown carries the same information per-row and the fleet-level
+// summary was redundant.)
 
 function EvidenceBox({ title, body }: { title: string; body: string }) {
   return (
@@ -2946,9 +2796,4 @@ function subtitleFor(
   return "";
 }
 
-function formatList(items: string[]): string {
-  if (items.length === 0) return "";
-  if (items.length === 1) return items[0];
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-}
+// (formatList was only used by the removed RecommendedActionsCard; removed 2026-06-01.)
