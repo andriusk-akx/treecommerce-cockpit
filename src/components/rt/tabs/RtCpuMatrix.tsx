@@ -539,16 +539,19 @@ export function RtCpuMatrix({
                 </span>
               </div>
             )}
-            <table className="w-full text-sm min-w-[1000px]">
+            <table className="w-full text-sm min-w-[1060px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase w-[200px]">CPU class</th>
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[130px]">Evidence base</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Current CPU state</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[170px]">Planned Retellect impact</th>
                   <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Projected CPU state</th>
+                  {/* Evidence base sits immediately before Decision so the
+                      reader's eye picks up the supporting sample size
+                      right before the verdict it backs. */}
+                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[120px]">Evidence base</th>
                   <th
-                    className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[150px] cursor-help"
+                    className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[200px] cursor-help"
                     title="Rollout decision and its confidence level. Confidence reflects decision confidence for rollout — not general data quality."
                   >
                     Decision
@@ -669,7 +672,11 @@ function MatrixRowView({
       onClick={() => onSelect(row.model)}
       aria-selected={isSelected}
     >
-      {/* CPU class */}
+      {/* CPU class — now strictly identity: model, cores/threads, and the
+          fleet-share chip. The interpretation signals (subtitle, evidence
+          badge, priority badge) moved into the Decision cell where they
+          read alongside the decision they qualify, instead of cluttering
+          the inventory identity. */}
       <td className={`py-4 px-4 relative ${isSelected ? "border-l-4 border-l-blue-500 pl-3" : ""}`}>
         <div className="font-semibold text-gray-900">{row.model}</div>
         {row.cpuCores !== null && row.cpuThreads !== null && (
@@ -686,61 +693,16 @@ function MatrixRowView({
             {sharePct}% of fleet
           </div>
         )}
-        <div className="text-[11px] text-gray-500 mt-1.5">{row.subtitle}</div>
-        <div
-          className={`inline-block mt-2 px-2 py-0.5 rounded-full border text-[10px] font-semibold whitespace-nowrap ${EVIDENCE_STYLES[row.evidence]}`}
-        >
-          {EVIDENCE_LABEL[row.evidence]}
-        </div>
-        {priority && (
-          <div
-            className={`mt-1.5 text-[10px] font-medium ${priority.tone}`}
-            title={priority.tip}
-          >
-            {priority.label}
-          </div>
-        )}
-      </td>
-
-      {/* Evidence base — how solid is the per-class sample? Three lines,
-          each answering a distinct question:
-            (1) class size                 — how big is this segment?
-            (2) coverage                   — how much of it can we see?
-            (3) Retellect ON/OFF split     — how strong is the A/B?
-          The big number is the absolute host count; the share-of-fleet
-          version of the same lives in the CPU class cell, so the two
-          columns don't repeat the same figure in two formats. */}
-      <td className="py-4 px-3">
-        <div className="text-xl font-bold text-gray-900 leading-none">
-          {row.hostCount}{" "}
-          <span className="text-xs font-normal text-gray-500">
-            {row.hostCount === 1 ? "host" : "hosts"}
-          </span>
-        </div>
-        <div className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
-          <span
-            className={coverageGap > 0 ? "text-amber-700 font-medium" : ""}
-            title={
-              coverageGap > 0
-                ? `${row.hostsWithData} of ${row.hostCount} hosts report telemetry. ${coverageGap} have no Zabbix data — either unmonitored or with broken agents.`
-                : "All hosts in this class report telemetry."
-            }
-          >
-            {row.hostsWithData} reporting
-            {coverageGap > 0 && ` · ${coverageGap} no data`}
-          </span>
-          <br />
-          <span title="Hosts classified as ON (Retellect active in window) vs OFF (Retellect inactive). Drives the measured A/B impact when both sides have enough samples.">
-            {row.hostsOn} ON · {row.hostsOff} OFF
-          </span>
-        </div>
       </td>
 
       {/* Current state — note time-above is shown PER HOST (averaged
           across the hosts in this class) so it matches the user's
           natural reading. The internal decision logic already
           normalises per-host (perHostProjectedTimeAbove < 60 min) so
-          the displayed value now matches the decision logic. */}
+          the displayed value now matches the decision logic.
+          Evidence base used to sit before this column but moved to
+          just before Decision so the supporting sample size reads
+          alongside the verdict it backs. */}
       <td className="py-4 px-3">
         <MiniStack
           rows={[
@@ -881,11 +843,56 @@ function MatrixRowView({
         )}
       </td>
 
-      {/* Decision + Confidence (merged into one column to save space).
-          Decision pill stays prominent; confidence reads as a small
-          coloured label underneath. Width tuned so both fit on one
-          line without wrapping. */}
-      <td className="py-4 px-3 text-center">
+      {/* Evidence base — how solid is the per-class sample?
+          Three lines, each answering a distinct question:
+            (1) class size              — how big is this segment?
+            (2) coverage                — how much of it can we see?
+            (3) Retellect ON/OFF split  — how strong is the A/B?
+          The big number is the absolute host count; the share-of-fleet
+          version of the same lives in the CPU class cell, so the two
+          columns don't repeat the same figure in two formats. Sits
+          immediately before Decision so sample size reads as setup
+          for the verdict, not as an early stat the eye has to hold. */}
+      <td className="py-4 px-3 align-top">
+        <div className="text-xl font-bold text-gray-900 leading-none">
+          {row.hostCount}{" "}
+          <span className="text-xs font-normal text-gray-500">
+            {row.hostCount === 1 ? "host" : "hosts"}
+          </span>
+        </div>
+        <div className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
+          <span
+            className={coverageGap > 0 ? "text-amber-700 font-medium" : ""}
+            title={
+              coverageGap > 0
+                ? `${row.hostsWithData} of ${row.hostCount} hosts report telemetry. ${coverageGap} have no Zabbix data — either unmonitored or with broken agents.`
+                : "All hosts in this class report telemetry."
+            }
+          >
+            {row.hostsWithData} reporting
+            {coverageGap > 0 && ` · ${coverageGap} no data`}
+          </span>
+          <br />
+          <span title="Hosts classified as ON (Retellect active in window) vs OFF (Retellect inactive). Drives the measured A/B impact when both sides have enough samples.">
+            {row.hostsOn} ON · {row.hostsOff} OFF
+          </span>
+        </div>
+      </td>
+
+      {/* Decision + Confidence + qualifiers.
+          The decision pill stays the visual anchor. Below it sit the
+          three signals that qualify *the decision* (not the inventory):
+            • confidence  — how sure are we?
+            • subtitle    — short interpretation (e.g. "Borderline —
+                            validate under load") — moved here from the
+                            CPU class cell so the analyst reads it
+                            alongside the verdict, not next to the SKU.
+            • evidence    — what data backs the verdict?
+            • priority    — strategic note (best start / large risky /
+                            small fragile), only when warranted.
+          All centred so the column reads as one stack the eye can
+          scan top-to-bottom. */}
+      <td className="py-4 px-3 text-center align-top">
         <div className="flex flex-col items-center gap-1.5">
           <span
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-semibold whitespace-nowrap ${DECISION_STYLES[row.decision]}`}
@@ -899,6 +906,25 @@ function MatrixRowView({
           >
             {row.confidence} confidence
           </span>
+          {row.subtitle && (
+            <div className="text-[11px] text-gray-500 leading-snug px-1 max-w-[180px]">
+              {row.subtitle}
+            </div>
+          )}
+          <span
+            className={`inline-block px-2 py-0.5 rounded-full border text-[10px] font-semibold whitespace-nowrap ${EVIDENCE_STYLES[row.evidence]}`}
+            title="Evidence type backing this decision: 'Measured ON/OFF' = direct A/B, 'No Retellect ON data yet' = scenario-based, 'Insufficient evidence' = too few hosts."
+          >
+            {EVIDENCE_LABEL[row.evidence]}
+          </span>
+          {priority && (
+            <div
+              className={`text-[10px] font-medium ${priority.tone}`}
+              title={priority.tip}
+            >
+              {priority.label}
+            </div>
+          )}
         </div>
       </td>
     </tr>
