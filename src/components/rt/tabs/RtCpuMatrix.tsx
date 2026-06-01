@@ -504,7 +504,7 @@ export function RtCpuMatrix({
                 </span>
               </div>
             )}
-            <table className="w-full text-sm min-w-[1120px]">
+            <table className="w-full text-sm min-w-[1000px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase w-[200px]">CPU class</th>
@@ -907,7 +907,7 @@ function MiniStack({
   threshold: number;
 }) {
   return (
-    <div className="flex flex-col gap-1.5 min-w-[240px]">
+    <div className="flex flex-col gap-1.5 min-w-[190px]">
       {rows.map((r) => (
         <MiniBar key={r.label} {...r} threshold={threshold} />
       ))}
@@ -992,15 +992,27 @@ function MiniBar({
     return String(value);
   })();
 
+  // Short label for the bar row — column headers ("Current CPU state",
+  // "Projected CPU state") already supply the context, so the per-row
+  // label can drop the redundant "CPU"/"to threshold"/"above threshold"
+  // suffixes. Full description still surfaces via the tooltip.
+  const shortLabel = (() => {
+    if (label === "Typical CPU load") return "Typical";
+    if (label === "Room to threshold") return "Room";
+    if (label === "Time above threshold") return "Time above";
+    if (label === "Max CPU") return "Max";
+    return label;
+  })();
+
   return (
     <div className="flex items-center gap-2 text-[11px]">
       <span
-        className={`w-[140px] truncate font-medium ${secondary ? "text-gray-400" : "text-sky-700"} ${tip ? `cursor-help underline decoration-dotted underline-offset-2 ${secondary ? "decoration-gray-300" : "decoration-sky-300"}` : ""}`}
+        className={`w-[88px] shrink-0 font-medium ${secondary ? "text-gray-400" : "text-sky-700"} ${tip ? `cursor-help underline decoration-dotted underline-offset-2 ${secondary ? "decoration-gray-300" : "decoration-sky-300"}` : ""}`}
         title={tip ?? label}
       >
-        {label}
+        {shortLabel}
       </span>
-      <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden min-w-[40px]">
+      <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden min-w-[32px]">
         {value === null ? (
           <div
             className="h-full"
@@ -1014,7 +1026,7 @@ function MiniBar({
           <div className={`h-full ${barClass} rounded-full`} style={{ width: `${widthPct}%` }} />
         )}
       </div>
-      <span className={`w-[55px] text-right font-semibold tabular-nums ${valueColor ?? "text-gray-800"}`}>
+      <span className={`w-[54px] shrink-0 text-right font-semibold tabular-nums ${valueColor ?? "text-gray-800"}`}>
         {approx && value !== null ? `~${fmtValue}` : fmtValue}
       </span>
     </div>
