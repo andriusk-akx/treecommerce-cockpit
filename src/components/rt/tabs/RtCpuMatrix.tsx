@@ -22,7 +22,7 @@
  * detail; this page collapses each CPU class to one decision row.
  */
 
-import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
 import { useRtFilters } from "../RtFiltersContext";
@@ -398,6 +398,111 @@ export function RtCpuMatrix({
     ? matrix.find((r) => r.model === selectedModel) ?? null
     : null;
 
+  // Factor the Decision-matrix `<section>` out so the same JSX can sit
+  // both inside the MatrixSplitPane (when a row is selected) and
+  // inline above the fleet-summary cards (when nothing is selected).
+  // Closes over the same component-level state (filteredMatrix,
+  // periodDays, isRefreshing, etc.), so capturing it once keeps the
+  // two render paths in lock-step.
+  const matrixSection = (
+    <section>
+      <div className="flex items-baseline justify-between mb-2">
+        <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+          Decision matrix
+        </h3>
+        <span className="text-[11px] text-gray-400">
+          sorted by CPU tier (weakest first) · {periodDays}-day window
+        </span>
+      </div>
+      {filteredMatrix.length === 0 ? (
+        <div className="bg-white rounded-lg border border-gray-200 px-5 py-10 text-center text-sm text-gray-400">
+          {matrix.length === 0
+            ? "Not enough CPU history to score rollout. Check Data Health."
+            : "All classes filtered out by Hide silent — no Retellect activity observed in this window."}
+        </div>
+      ) : (
+        <div className="relative bg-white rounded-lg border border-gray-200 overflow-x-auto">
+          {isRefreshing && (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                position: "absolute",
+                top: 60,
+                left: "50%",
+                transform: "translateX(-50%)",
+                opacity: 2,
+                pointerEvents: "none",
+                zIndex: 10,
+              }}
+            >
+              <span
+                title="Recomputing the matrix for the new window — typically 30–60 s on a cold cache."
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 12,
+                  color: "#0369a1",
+                  background: "#f0f9ff",
+                  border: "1px solid #bae6fd",
+                  borderRadius: 999,
+                  padding: "6px 14px",
+                  boxShadow: "none",
+                  fontWeight: 500,
+                }}
+              >
+                <svg
+                  className="animate-spin"
+                  width={14}
+                  height={14}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
+                  <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                </svg>
+                Updating window…
+              </span>
+            </div>
+          )}
+          <table className="w-full text-sm min-w-[1060px]">
+            <thead>
+              <tr className="bg-gray-50/60 border-b border-gray-200">
+                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[200px]">CPU class</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest">Current state</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[150px]">Planned impact</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest">Projected state</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[120px]">Evidence</th>
+                <th
+                  className="text-center py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[200px] cursor-help"
+                  title="Rollout verdict + how confident we are."
+                >
+                  Decision
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredMatrix.map((row) => (
+                <MatrixRowView
+                  key={row.model}
+                  row={row}
+                  threshold={threshold}
+                  fleetTotal={fleetTotal}
+                  onImpactChange={setImpactFor}
+                  isSelected={row.model === selectedModel}
+                  onSelect={onMatrixRowSelect}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+
   return (
     <>
       {/* ── Filter bar ──────────────────────────────────────────────── */}
@@ -487,140 +592,42 @@ export function RtCpuMatrix({
         aria-busy={isRefreshing || undefined}
       >
 
-      {/* ── Decision matrix ─────────────────────────────────────────── */}
-      <section className="mb-6">
-        <div className="flex items-baseline justify-between mb-2">
-          <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-            Decision matrix
-          </h3>
-          <span className="text-[11px] text-gray-400">
-            sorted by CPU tier (weakest first) · {periodDays}-day window
-          </span>
-        </div>
-
-        {filteredMatrix.length === 0 ? (
-          <div className="bg-white rounded-lg border border-gray-200 px-5 py-10 text-center text-sm text-gray-400">
-            {matrix.length === 0
-              ? "Not enough CPU history to score rollout. Check Data Health."
-              : "All classes filtered out by Hide silent — no Retellect activity observed in this window."}
-          </div>
-        ) : (
-          <div className="relative bg-white rounded-lg border border-gray-200 overflow-x-auto">
-            {/* Centered overlay updating pill — same visual treatment as
-                CPU Timeline so the user sees identical feedback when
-                changing the Period dropdown on either tab. Positioned
-                near the top of the table, opacity:2 counteracts the
-                parent's opacity-60 dim so the pill stays fully visible. */}
-            {isRefreshing && (
-              <div
-                role="status"
-                aria-live="polite"
-                style={{
-                  position: "absolute",
-                  top: 60,
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  opacity: 2,
-                  pointerEvents: "none",
-                  zIndex: 10,
-                }}
-              >
-                <span
-                  title="Recomputing the matrix for the new window — typically 30–60 s on a cold cache."
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: 12,
-                    color: "#0369a1",
-                    background: "#f0f9ff",
-                    border: "1px solid #bae6fd",
-                    borderRadius: 999,
-                    padding: "6px 14px",
-                    boxShadow: "none",
-                    fontWeight: 500,
-                  }}
-                >
-                  <svg
-                    className="animate-spin"
-                    width={14}
-                    height={14}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    aria-hidden="true"
-                  >
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
-                    <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-                  </svg>
-                  Updating window…
-                </span>
-              </div>
-            )}
-            <table className="w-full text-sm min-w-[1060px]">
-              <thead>
-                <tr className="bg-gray-50/60 border-b border-gray-200">
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[200px]">CPU class</th>
-                  <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest">Current state</th>
-                  <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[150px]">Planned impact</th>
-                  <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest">Projected state</th>
-                  {/* Evidence sits immediately before Decision so the
-                      reader's eye picks up the supporting sample size
-                      right before the verdict it backs. */}
-                  <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[120px]">Evidence</th>
-                  <th
-                    className="text-center py-3 px-3 text-xs font-semibold text-gray-600 uppercase tracking-widest w-[200px] cursor-help"
-                    title="Rollout verdict + how confident we are."
-                  >
-                    Decision
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMatrix.map((row) => (
-                  <MatrixRowView
-                    key={row.model}
-                    row={row}
-                    threshold={threshold}
-                    fleetTotal={fleetTotal}
-                    onImpactChange={setImpactFor}
-                    isSelected={row.model === selectedModel}
-                    onSelect={onMatrixRowSelect}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* ── Drilldown OR fleet cards ───────────────────────────────────
-          Sequential drilldown takes over the bottom workspace when a
-          CPU class is selected. Fleet-level summary cards (drivers /
-          actions / limits) are the default when nothing is selected —
-          they're still useful at-a-glance answers when the user is just
-          scanning the matrix. The swap (not a stack) keeps the page
-          focused on one investigation level at a time, per the IA spec. */}
+      {/* ── Decision matrix + bottom workspace ──────────────────────────
+          When a row is selected the matrix table and the drilldown sit
+          inside a vertical splitter so the operator can drag the bar
+          between them up or down (handle is the small gray pill, also
+          keyboard-accessible via Tab + Arrow keys). When nothing is
+          selected, the matrix renders at natural height with the
+          fleet-summary cards stacked below it. */}
       {selectedRow ? (
-        <CpuDrilldownWorkspace
-          row={selectedRow}
-          threshold={threshold}
-          periodDays={periodDays}
-          pilot={pilot}
-          zabbix={zabbix}
-          selectedHostId={selectedHostId}
-          onSelectHost={setSelectedHostId}
-          onClose={() => {
-            setSelectedModel(null);
-            setSelectedHostId(null);
-          }}
+        <MatrixSplitPane
+          storageKey={`rtMatrixSplit:${pilot.id}`}
+          top={matrixSection}
+          bottom={
+            <CpuDrilldownWorkspace
+              row={selectedRow}
+              threshold={threshold}
+              periodDays={periodDays}
+              pilot={pilot}
+              zabbix={zabbix}
+              selectedHostId={selectedHostId}
+              onSelectHost={setSelectedHostId}
+              onClose={() => {
+                setSelectedModel(null);
+                setSelectedHostId(null);
+              }}
+            />
+          }
         />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-          <BottleneckDriversCard matrix={matrix} threshold={threshold} />
-          <RecommendedActionsCard matrix={matrix} />
-          <ConfidenceLimitsCard matrix={matrix} />
-        </div>
+        <>
+          <div className="mb-6">{matrixSection}</div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+            <BottleneckDriversCard matrix={matrix} threshold={threshold} />
+            <RecommendedActionsCard matrix={matrix} />
+            <ConfidenceLimitsCard matrix={matrix} />
+          </div>
+        </>
       )}
 
       {/* ── Evidence cards ──────────────────────────────────────────── */}
@@ -1400,6 +1407,124 @@ function EvidenceBox({ title, body }: { title: string; body: string }) {
         {title}
       </div>
       <div className="text-[12px] text-gray-600 leading-relaxed">{body}</div>
+    </div>
+  );
+}
+
+/** Vertical split-pane wrapping the matrix table (top) and the drilldown
+ *  workspace (bottom). The operator drags the horizontal handle to give
+ *  either pane more height; ratio is persisted per pilot in localStorage
+ *  so the layout stays where they put it last.
+ *
+ *  Constraints:
+ *   • Each pane has a 180 px minimum so neither collapses entirely.
+ *   • The pane container is sized to (100vh − header chrome) with a
+ *     500 px floor — keeps the split useful on small viewports without
+ *     locking the page below the viewport.
+ *   • Keyboard: tab to the handle, ArrowUp / ArrowDown nudge the ratio
+ *     5 % at a time. role="separator" with aria-valuenow announces the
+ *     current split to screen readers. */
+function MatrixSplitPane({
+  storageKey,
+  top,
+  bottom,
+}: {
+  storageKey: string;
+  top: React.ReactNode;
+  bottom: React.ReactNode;
+}) {
+  const [ratio, setRatio] = useState<number>(() => {
+    if (typeof window === "undefined") return 0.45;
+    try {
+      const s = window.localStorage.getItem(storageKey);
+      if (s) {
+        const n = parseFloat(s);
+        if (Number.isFinite(n) && n >= 0.15 && n <= 0.85) return n;
+      }
+    } catch {
+      // ignore
+    }
+    return 0.45;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(storageKey, String(ratio));
+    } catch {
+      // quota / privacy mode — silent
+    }
+  }, [ratio, storageKey]);
+
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    draggingRef.current = true;
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect || rect.height < 300) return;
+    const y = e.clientY - rect.top;
+    const min = 180 / rect.height;
+    const max = 1 - 180 / rect.height;
+    setRatio(Math.max(min, Math.min(max, y / rect.height)));
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    draggingRef.current = false;
+    try {
+      (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // already released
+    }
+  };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setRatio((r) => Math.max(0.15, r - 0.05));
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setRatio((r) => Math.min(0.85, r + 0.05));
+    }
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      className="flex flex-col mb-6"
+      style={{ height: "calc(100vh - 240px)", minHeight: 520 }}
+    >
+      <div
+        className="overflow-auto"
+        style={{ flexBasis: `${ratio * 100}%`, minHeight: 0 }}
+      >
+        {top}
+      </div>
+      <div
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onKeyDown={onKeyDown}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-valuemin={15}
+        aria-valuemax={85}
+        aria-valuenow={Math.round(ratio * 100)}
+        aria-label="Resize matrix / drilldown split"
+        tabIndex={0}
+        title="Drag to resize · arrow keys to nudge"
+        className="group h-2.5 my-1 cursor-row-resize select-none flex items-center justify-center bg-gray-50 hover:bg-sky-50 focus:bg-sky-50 focus:outline-none transition-colors rounded"
+      >
+        <div className="w-12 h-0.5 rounded-full bg-gray-300 group-hover:bg-sky-400 group-focus:bg-sky-400 transition-colors" />
+      </div>
+      <div
+        className="overflow-auto"
+        style={{ flexBasis: `${(1 - ratio) * 100}%`, minHeight: 0 }}
+      >
+        {bottom}
+      </div>
     </div>
   );
 }
