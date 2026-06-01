@@ -38,6 +38,10 @@ const PUBLIC_PREFIXES = [
   // know via the LT inventory spreadsheet — same idempotency-state
   // gate. One-shot, removed after run.
   "/api/internal/backfill-cpu-from-lt-fleet",
+  // Merge duplicate SCO records created when expand-lt-fleet imported
+  // POS 31..N+30 alongside the existing Zabbix SCO1..N for the same
+  // physical machines. One-shot, removed after run.
+  "/api/internal/merge-sco-naming-duplicates",
   "/_next",
   "/favicon.ico",
 ];
