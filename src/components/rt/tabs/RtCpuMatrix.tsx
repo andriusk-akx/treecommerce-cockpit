@@ -2134,15 +2134,17 @@ function HostMinuteBreakdown({
     setSlot(null);
     setError(null);
     setLoading(true);
-    // Granularity=15 — minute-level (granularity=1) returns 1440 slots
-    // per day which is needlessly heavy when we're going to pick a
-    // single matching slot anyway. 15-minute buckets align well with
-    // burst lengths (most are 5–30 min) and shrink the payload by 15×.
-    // Bug fix (2026-06-01): the earlier draft used granularity=1 and
-    // got "Failed to load" on production for some hosts — Zabbix can
-    // take long enough fetching 1440 slot's worth of per-process items
-    // that the Next route times out at the platform layer.
-    const url = `/api/rt/process-history?hostId=${encodeURIComponent(hostId)}&date=${peakDate}&granularity=15`;
+    // Granularity=5 — 5-minute buckets are the right resolution:
+    //   • Per-minute (granularity=1) returns 1440 slots and gets the
+    //     Next route close to a platform timeout on heavy hosts.
+    //   • 15-minute buckets over-average — the peak minute's process
+    //     mix gets diluted across 14 quiet minutes, so the legend
+    //     numbers don't visibly add up to the burst peak the operator
+    //     was reading two lines above.
+    //   • 5-min buckets keep payload small (288 slots/day, ~1 s fetch)
+    //     while staying close enough to the peak that the legend
+    //     sums to a recognisable share of the burst.
+    const url = `/api/rt/process-history?hostId=${encodeURIComponent(hostId)}&date=${peakDate}&granularity=5`;
     fetch(url, { credentials: "same-origin" })
       .then(async (r) => {
         if (!r.ok) {
@@ -2166,7 +2168,7 @@ function HostMinuteBreakdown({
         // minute to the nearest 15 (0, 15, 30, 45) for an apples-to-
         // apples match.
         const peakHmm = vilniusHourMinute(episode.peakSec);
-        const peakBucket = Math.floor(peakHmm.minute / 15) * 15;
+        const peakBucket = Math.floor(peakHmm.minute / 5) * 5;
         const match =
           slots.find((s) => s.hour === peakHmm.hour && s.minute === peakBucket) ??
           null;
@@ -2198,10 +2200,20 @@ function HostMinuteBreakdown({
       <div className="text-[11px] font-semibold text-gray-600 uppercase tracking-widest mb-2">
         Process breakdown around burst peak
       </div>
+      {/* Two figures, deliberately separated:
+            • Burst peak — single-minute maximum (matches the row in
+              the episode list above).
+            • 5-min window avg — what the process breakdown numbers
+              below actually average over.
+          Without surfacing both, the legend looks like it doesn't
+          add up to the peak (because it doesn't — different
+          aggregation, different window). */}
       <div className="text-[12px] text-gray-500 mb-3">
-        {peakLabel} · Peak host CPU{" "}
-        <span className="font-semibold text-gray-800">{Math.round(episode.peakCpu)}%</span>
-        {" "}(threshold {threshold}%) · 15-min window
+        {peakLabel} · burst peak{" "}
+        <span className="font-semibold text-gray-800">
+          {Math.round(episode.peakCpu)}%
+        </span>
+        {" "}(threshold {threshold}%) · 5-min window for process breakdown
       </div>
 
       {loading ? (
@@ -2310,7 +2322,8 @@ function ProcessStackedBar({ slot }: { slot: ProcessHistorySlot }) {
         <li className="flex items-center gap-2 pt-1 mt-1 border-t border-gray-100">
           <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0 bg-gray-100 border border-gray-200" />
           <span className="flex-1 font-medium text-gray-600">
-            Total host CPU{slot.hostCpu === null ? " (estimated)" : ""}
+            Avg host CPU (5-min window)
+            {slot.hostCpu === null ? " — estimated from named categories" : ""}
           </span>
           <span className="tabular-nums font-semibold text-gray-900">
             {hostCpu.toFixed(1)}%
