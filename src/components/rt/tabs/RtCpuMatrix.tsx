@@ -261,7 +261,7 @@ export function RtCpuMatrix({
     deferredCountFrom !== cpuCountFrom;
 
   // Build decision matrix from the deferred inputs.
-  const { matrix: baselineMatrix, periodDays } = useMemo(
+  const { matrix: baselineMatrix, periodDays, fleetTotal } = useMemo(
     () => computeCpuMatrix(pilot, zabbix, deferredThreshold, deferredStore, deferredCountFrom),
     [pilot, zabbix, deferredThreshold, deferredStore, deferredCountFrom],
   );
@@ -561,6 +561,7 @@ export function RtCpuMatrix({
                     key={row.model}
                     row={row}
                     threshold={threshold}
+                    fleetTotal={fleetTotal}
                     onImpactChange={setImpactFor}
                     isSelected={row.model === selectedModel}
                     onSelect={onMatrixRowSelect}
@@ -626,12 +627,17 @@ export function RtCpuMatrix({
 function MatrixRowView({
   row,
   threshold,
+  fleetTotal,
   onImpactChange,
   isSelected,
   onSelect,
 }: {
   row: CpuMatrixRow;
   threshold: number;
+  /** Total devices in the (store-filtered) pilot — denominator for the
+   *  per-class "% of fleet" line. Includes unmonitored hosts on purpose
+   *  so the share reflects physical inventory, not monitoring coverage. */
+  fleetTotal: number;
   onImpactChange: (model: string, value: number | null) => void;
   isSelected: boolean;
   onSelect: (model: string) => void;
@@ -641,6 +647,12 @@ function MatrixRowView({
   // small grey/coloured label under the evidence badge, only when the
   // class actually merits a priority tag. Most rows show nothing.
   const priority = computePriority(row);
+  // Class share of fleet. Rendered as one compact secondary line under
+  // the model name; tightly bound to cores/threads when both exist so
+  // the row stays vertically compact.
+  const sharePct =
+    fleetTotal > 0 ? Math.round((row.hostCount / fleetTotal) * 100) : 0;
+  const shareLabel = `${sharePct}% of fleet · ${row.hostCount} / ${fleetTotal}`;
   return (
     <tr
       className={`border-t border-gray-100 align-top cursor-pointer transition-colors ${
@@ -654,9 +666,15 @@ function MatrixRowView({
       {/* CPU class */}
       <td className={`py-4 px-4 relative ${isSelected ? "border-l-4 border-l-blue-500 pl-3" : ""}`}>
         <div className="font-semibold text-gray-900">{row.model}</div>
-        {row.cpuCores !== null && row.cpuThreads !== null && (
+        {row.cpuCores !== null && row.cpuThreads !== null ? (
           <div className="text-[10px] text-gray-400 mt-0.5 tabular-nums font-medium uppercase tracking-wide">
             {row.cpuCores}C / {row.cpuThreads}T
+            <span className="text-gray-300 mx-1">·</span>
+            <span className="normal-case tracking-normal font-medium">{shareLabel}</span>
+          </div>
+        ) : (
+          <div className="text-[10px] text-gray-400 mt-0.5 tabular-nums font-medium">
+            {shareLabel}
           </div>
         )}
         <div className="text-[11px] text-gray-500 mt-0.5">{row.subtitle}</div>
@@ -1785,7 +1803,18 @@ function computeCpuMatrix(
   threshold: number,
   storeFilter: string,
   cpuCountFrom: "tracked" | "active",
-): { matrix: CpuMatrixRow[]; periodDays: number } {
+): { matrix: CpuMatrixRow[]; periodDays: number; fleetTotal: number } {
+  // Fleet denominator for the per-row "% of fleet" badge. Includes
+  // every pilot device under the current store filter — even hosts
+  // without a Zabbix link or with no agent installed at all. The
+  // share is a strategic-importance signal, not a measurement signal,
+  // so the count must reflect physical inventory, not monitoring
+  // coverage. (Coverage gaps are surfaced separately in the drilldown
+  // "Unmonitored" tab.)
+  const fleetTotal =
+    storeFilter === "all"
+      ? pilot.devices.length
+      : pilot.devices.filter((d) => d.storeName === storeFilter).length;
   const periodDays = (() => {
     const fromAggregate = zabbix.rolloutPerHost?.periodDays;
     if (fromAggregate && fromAggregate > 0) return fromAggregate;
@@ -2137,7 +2166,7 @@ function computeCpuMatrix(
     return (b.typicalCpu ?? 0) - (a.typicalCpu ?? 0);
   });
 
-  return { matrix, periodDays };
+  return { matrix, periodDays, fleetTotal };
 }
 
 // ─── Compute helpers ────────────────────────────────────────────────
