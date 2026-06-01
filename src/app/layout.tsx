@@ -54,11 +54,23 @@ export default async function RootLayout({
           <header className="bg-white border-b border-gray-200 px-6 py-3">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <a href="/" className="flex items-center text-gray-900 hover:opacity-80 transition-opacity" aria-label="storex home">
+                <a
+                  href="/"
+                  className="flex flex-col items-start text-gray-900 hover:opacity-80 transition-opacity leading-none"
+                  aria-label="storex home"
+                  title={`build ${COMMIT}${DIRTY ? "+dirty" : ""} · deployed ${new Date(BUILD_TIME).toLocaleString("sv-SE", { timeZone: "Europe/Vilnius", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`}
+                >
                   {/* Wordmark stands alone in the header — the previous
                       'Pilot management system' subtitle was redundant
-                      noise next to the brand mark (removed 2026-05-25). */}
+                      noise next to the brand mark (removed 2026-05-25).
+                      Version is now displayed minimalistically directly
+                      under the logo — `v0.1.x` only. Commit SHA + build
+                      time are preserved in the title attribute for ops
+                      verification and remain available via /api/version. */}
                   <LogoX size={22} />
+                  <span className="text-[9px] text-gray-400 tabular-nums mt-0.5 tracking-wide">
+                    v{VERSION}
+                  </span>
                 </a>
                 {activePilots.length > 0 && (
                   <div className="flex items-center gap-1.5 ml-2 pl-3 border-l border-gray-200">
@@ -91,20 +103,11 @@ export default async function RootLayout({
           {children}
         </main>
         <footer className="border-t border-gray-200 px-6 py-3 text-center text-[10px] text-gray-400">
+          {/* Version string moved into the header under the logo
+              (2026-06-01). Footer now only carries the tagline. */}
           <span className="inline-flex items-center gap-1.5 align-middle">
             <LogoX size={12} mono />
             <span>Checkout Efficiency Consultant&rsquo;s toolbox</span>
-          </span>
-          <span className="mx-2 text-gray-300">·</span>
-          {/* Version string is concatenated server-side so it ends up as a
-              single text node in the DOM (no React comment markers between
-              "v" and the number) — easier to grep, easier to read.
-              Build time is rendered in Europe/Vilnius (operator timezone)
-              with minute precision — the seconds didn't add information and
-              made the footer look noisy. sv-SE locale gives ISO-ish output
-              (`YYYY-MM-DD HH:MM`) without locale-specific separators. */}
-          <span title={`build ${COMMIT}${DIRTY ? "+dirty" : ""} · deployed ${BUILD_TIME}`}>
-            {`v${VERSION} (${COMMIT}${DIRTY ? "+" : ""}) · ${new Date(BUILD_TIME).toLocaleString("sv-SE", { timeZone: "Europe/Vilnius", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`}
           </span>
         </footer>
       </body>
