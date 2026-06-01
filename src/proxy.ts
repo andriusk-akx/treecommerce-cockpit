@@ -32,16 +32,9 @@ const PUBLIC_PREFIXES = [
   // route, same rationale as warm-cache: the secret IS the auth boundary,
   // session cookies don't apply because operators hit this from curl.
   "/api/internal/seed-testlab-cores",
-  // (expand-lt-fleet was a one-shot import on 2026-06-01; route removed
-  // post-execution per its own commit's "lifecycle" note.)
-  // Backfill cpuModel for Zabbix-monitored devices whose CPU we now
-  // know via the LT inventory spreadsheet — same idempotency-state
-  // gate. One-shot, removed after run.
-  "/api/internal/backfill-cpu-from-lt-fleet",
-  // Merge duplicate SCO records created when expand-lt-fleet imported
-  // POS 31..N+30 alongside the existing Zabbix SCO1..N for the same
-  // physical machines. One-shot, removed after run.
-  "/api/internal/merge-sco-naming-duplicates",
+  // (expand-lt-fleet, backfill-cpu-from-lt-fleet, and
+  // merge-sco-naming-duplicates were one-shot imports on 2026-06-01;
+  // routes removed post-execution per their own lifecycle notes.)
   "/_next",
   "/favicon.ico",
 ];
