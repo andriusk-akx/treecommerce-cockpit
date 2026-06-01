@@ -161,22 +161,31 @@ const DECISION_DOT: Record<Decision, string> = {
   insufficient: "bg-gray-400",
 };
 
-const CONFIDENCE_STYLES: Record<Confidence, string> = {
-  high: "text-emerald-700 bg-emerald-50",
-  medium: "text-amber-700 bg-amber-50",
-  low: "text-gray-600 bg-gray-100",
-};
-
 const EVIDENCE_LABEL: Record<Evidence, string> = {
-  "measured-on-off": "Measured ON/OFF",
-  "no-on-data": "No Retellect ON data yet",
-  insufficient: "Insufficient evidence",
+  "measured-on-off": "Measured A/B",
+  "no-on-data": "No ON data",
+  insufficient: "Too few hosts",
 };
 
-const EVIDENCE_STYLES: Record<Evidence, string> = {
-  "measured-on-off": "bg-emerald-50 text-emerald-700 border-emerald-200",
-  "no-on-data": "bg-blue-50 text-blue-700 border-blue-200",
-  insufficient: "bg-gray-100 text-gray-500 border-gray-200",
+const EVIDENCE_TIP: Record<Evidence, string> = {
+  "measured-on-off":
+    "Direct A/B: ≥2 hosts ON and ≥2 hosts OFF contributed active-minute samples, so the impact figure is observed, not modelled.",
+  "no-on-data":
+    "Conservative tier scenario. No Retellect ON evidence in this class yet — projection uses the per-tier default impact value.",
+  insufficient:
+    "Sample too small to score this class. Need more hosts with telemetry before a rollout decision is defensible.",
+};
+
+const CONFIDENCE_TONE: Record<Confidence, string> = {
+  high: "text-emerald-700",
+  medium: "text-amber-700",
+  low: "text-gray-500",
+};
+
+const CONFIDENCE_TIP: Record<Confidence, string> = {
+  high: "High confidence — ≥10 hosts with data, or Measured A/B with ≥5 each side.",
+  medium: "Medium confidence — 3–9 hosts contributing.",
+  low: "Low confidence — fewer than 3 hosts. Treat as directional.",
 };
 
 /** Sort priority — riskiest decisions first, then strongest evidence. */
@@ -403,14 +412,18 @@ export function RtCpuMatrix({
             onChange={(v) => setFilter("store", v)}
           />
           <FilterDivider />
+          {/* 90d removed (2026-06-01) — Zabbix trend.get retention only
+              reliably covers ~29 days, so a 90d window mostly returned
+              empty later periods and made the matrix look like it was
+              missing data. Keep the three windows that map to actual
+              retention. */}
           <FilterSegmented<string>
             label="Period"
-            value={filters.period}
+            value={filters.period === "90d" ? "30d" : filters.period}
             options={[
               { v: "7d", l: "7d" },
               { v: "14d", l: "14d" },
               { v: "30d", l: "30d" },
-              { v: "90d", l: "90d" },
             ]}
             onChange={setPeriod}
           />
@@ -452,11 +465,10 @@ export function RtCpuMatrix({
         </FilterRow>
       </FilterBar>
 
-      <p className="text-[11px] text-gray-500 mb-4 leading-relaxed">
-        Threshold is used for two things: <strong>time above threshold</strong> and{" "}
-        <strong>room to threshold</strong>. Where Retellect ON data is unavailable, the rollout
-        status is based on the measured baseline plus scenario-based impact modeling. Current
-        effective calculation uses <strong>all minutes</strong> in the selected period.
+      <p className="text-[11px] text-gray-400 mb-4 leading-relaxed">
+        Threshold drives <strong className="text-gray-600 font-medium">time above</strong> and{" "}
+        <strong className="text-gray-600 font-medium">room to threshold</strong>. Classes without ON evidence use a scenario impact;
+        calculations include all minutes in the period.
       </p>
 
       {/* Single dimmer wraps the matrix + cards + evidence boxes so the
@@ -543,16 +555,16 @@ export function RtCpuMatrix({
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left py-3 px-4 text-[11px] font-semibold text-gray-500 uppercase w-[200px]">CPU class</th>
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Current CPU state</th>
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[170px]">Planned Retellect impact</th>
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Projected CPU state</th>
-                  {/* Evidence base sits immediately before Decision so the
+                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Current state</th>
+                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[150px]">Planned impact</th>
+                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase">Projected state</th>
+                  {/* Evidence sits immediately before Decision so the
                       reader's eye picks up the supporting sample size
                       right before the verdict it backs. */}
-                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[120px]">Evidence base</th>
+                  <th className="text-left py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[120px]">Evidence</th>
                   <th
                     className="text-center py-3 px-3 text-[11px] font-semibold text-gray-500 uppercase w-[200px] cursor-help"
-                    title="Rollout decision and its confidence level. Confidence reflects decision confidence for rollout — not general data quality."
+                    title="Rollout verdict + how confident we are."
                   >
                     Decision
                   </th>
@@ -671,6 +683,11 @@ function MatrixRowView({
       }`}
       onClick={() => onSelect(row.model)}
       aria-selected={isSelected}
+      title={
+        isSelected
+          ? "Click again to close the drilldown."
+          : "Click to open hosts in this CPU class."
+      }
     >
       {/* CPU class — now strictly identity: model, cores/threads, and the
           fleet-share chip. The interpretation signals (subtitle, evidence
@@ -767,20 +784,19 @@ function MatrixRowView({
         />
         <div className="text-[10px] text-gray-500 mt-2 leading-snug">
           {row.hasManualOverride
-            ? "Manual input for projection"
+            ? "Manual"
             : // Bug fix (2026-05-29): only show measured Reference evidence
-              // when the row's evidence column also says "Measured ON/OFF".
+              // when the row's evidence column also says "Measured A/B".
               // Otherwise we'd contradict the evidence tag — a row labelled
-              // "No Retellect ON data yet" can still have a non-null
-              // avgRetellectOn when exactly one host contributed python.cpu
-              // (the ≥2/≥2 measured-on-off rule failed). The label below
-              // would then claim measured evidence the column says we
-              // don't have.
+              // "No ON data" can still have a non-null avgRetellectOn when
+              // exactly one host contributed python.cpu (the ≥2/≥2
+              // measured-on-off rule failed). The label below would then
+              // claim measured evidence the column says we don't have.
               row.evidence === "measured-on-off" &&
                   row.measuredRetellectCpuOn !== null &&
                   row.measuredRetellectCpuOn > 0.05
-                ? `Reference evidence: ${row.measuredRetellectCpuOn.toFixed(1)}% avg direct CPU`
-                : "No measured ON data yet"}
+                ? `Direct CPU ref: ${row.measuredRetellectCpuOn.toFixed(1)}%`
+                : "Scenario default"}
         </div>
       </td>
 
@@ -879,51 +895,48 @@ function MatrixRowView({
         </div>
       </td>
 
-      {/* Decision + Confidence + qualifiers.
-          The decision pill stays the visual anchor. Below it sit the
-          three signals that qualify *the decision* (not the inventory):
-            • confidence  — how sure are we?
-            • subtitle    — short interpretation (e.g. "Borderline —
-                            validate under load") — moved here from the
-                            CPU class cell so the analyst reads it
-                            alongside the verdict, not next to the SKU.
-            • evidence    — what data backs the verdict?
-            • priority    — strategic note (best start / large risky /
-                            small fragile), only when warranted.
-          All centred so the column reads as one stack the eye can
-          scan top-to-bottom. */}
+      {/* Decision cell — minimalist hierarchy.
+            • One coloured pill (the verdict) anchors the cell.
+            • Subtitle, qualifier line, and priority all sit as plain
+              gray typography underneath. No competing pills, no
+              uppercase tracking blocks — type weight + colour do the
+              hierarchy work, not bordered chips.
+            • Confidence is conveyed by a subtle text-colour shift on
+              the word itself (emerald / amber / gray), so the eye picks
+              up the tier in scan reading without needing a separate
+              badge. */}
       <td className="py-4 px-3 text-center align-top">
-        <div className="flex flex-col items-center gap-1.5">
+        <div className="flex flex-col items-center gap-1.5 mx-auto max-w-[180px]">
           <span
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-semibold whitespace-nowrap ${DECISION_STYLES[row.decision]}`}
           >
             <span className={`w-1.5 h-1.5 rounded-full ${DECISION_DOT[row.decision]}`} />
             {DECISION_LABEL[row.decision]}
           </span>
-          <span
-            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${CONFIDENCE_STYLES[row.confidence]}`}
-            title="Decision confidence for rollout, not general confidence in the underlying data."
-          >
-            {row.confidence} confidence
-          </span>
           {row.subtitle && (
-            <div className="text-[11px] text-gray-500 leading-snug px-1 max-w-[180px]">
+            <p className="text-[11px] text-gray-500 leading-snug">
               {row.subtitle}
-            </div>
+            </p>
           )}
-          <span
-            className={`inline-block px-2 py-0.5 rounded-full border text-[10px] font-semibold whitespace-nowrap ${EVIDENCE_STYLES[row.evidence]}`}
-            title="Evidence type backing this decision: 'Measured ON/OFF' = direct A/B, 'No Retellect ON data yet' = scenario-based, 'Insufficient evidence' = too few hosts."
-          >
-            {EVIDENCE_LABEL[row.evidence]}
-          </span>
+          <p className="text-[10px] text-gray-400 leading-snug">
+            <span
+              className={`cursor-help font-medium ${CONFIDENCE_TONE[row.confidence]}`}
+              title={CONFIDENCE_TIP[row.confidence]}
+            >
+              {capitalize(row.confidence)} confidence
+            </span>
+            <span className="mx-1.5 text-gray-300">·</span>
+            <span className="cursor-help" title={EVIDENCE_TIP[row.evidence]}>
+              {EVIDENCE_LABEL[row.evidence]}
+            </span>
+          </p>
           {priority && (
-            <div
+            <p
               className={`text-[10px] font-medium ${priority.tone}`}
               title={priority.tip}
             >
               {priority.label}
-            </div>
+            </p>
           )}
         </div>
       </td>
@@ -997,7 +1010,8 @@ function ImpactInput({
             : "Manual CPU impact input used for rollout projection."
         }
       >
-        <span>Planned impact</span>
+        {/* "Planned impact" prefix removed — the column header already
+            says "Planned impact". Inline label now just '+ N pp'. */}
         <span className="text-gray-400">+</span>
         <input
           type="number"
@@ -1519,23 +1533,63 @@ function HostInventoryView({
   onSelectHost: (hostId: string) => void;
 }) {
   type Tab = "risky" | "all" | "monitored" | "unmonitored";
+  type SortCol = "peak" | "typical" | "minAbove";
   const [tab, setTab] = useState<Tab>("risky");
+  // Column sort overrides the tab's natural ordering. Null = tab default
+  // applies. Switching tabs clears the override so each tab's invariant
+  // stays predictable (Risky-first really is risk-first, Monitored really
+  // is alphabetical).
+  const [sortCol, setSortCol] = useState<SortCol | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const setTabAndResetSort = (next: Tab) => {
+    setTab(next);
+    setSortCol(null);
+    setSortDir("desc");
+  };
+  const onHeaderClick = (col: SortCol) => {
+    if (sortCol === col) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortCol(col);
+      setSortDir("desc");
+    }
+  };
 
   const filtered = useMemo(() => {
+    // First, apply the tab's filter + natural ordering.
+    let items: DrilldownHost[];
     if (tab === "risky") {
-      return hosts.filter((h) => h.monitored).sort((a, b) => b.riskScore - a.riskScore);
+      items = hosts.filter((h) => h.monitored).sort((a, b) => b.riskScore - a.riskScore);
+    } else if (tab === "monitored") {
+      items = hosts.filter((h) => h.monitored).sort((a, b) => a.hostName.localeCompare(b.hostName));
+    } else if (tab === "unmonitored") {
+      items = hosts.filter((h) => !h.monitored).sort((a, b) => a.hostName.localeCompare(b.hostName));
+    } else {
+      const mon = hosts.filter((h) => h.monitored).sort((a, b) => b.riskScore - a.riskScore);
+      const unmon = hosts.filter((h) => !h.monitored).sort((a, b) => a.hostName.localeCompare(b.hostName));
+      items = [...mon, ...unmon];
     }
-    if (tab === "monitored") {
-      return hosts.filter((h) => h.monitored).sort((a, b) => a.hostName.localeCompare(b.hostName));
+    // Then, if a column sort is active, override.
+    if (sortCol !== null) {
+      const get = (h: DrilldownHost): number | null => {
+        if (sortCol === "peak") return h.peakCpu;
+        if (sortCol === "typical") return h.typicalCpu;
+        return h.minutesAbovePerDay;
+      };
+      items = [...items].sort((a, b) => {
+        const av = get(a);
+        const bv = get(b);
+        // Nulls always sink to the end regardless of direction — there's
+        // nothing useful to compare against.
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        return sortDir === "desc" ? bv - av : av - bv;
+      });
     }
-    if (tab === "unmonitored") {
-      return hosts.filter((h) => !h.monitored).sort((a, b) => a.hostName.localeCompare(b.hostName));
-    }
-    // "all" — risky monitored first, then unmonitored at the bottom.
-    const mon = hosts.filter((h) => h.monitored).sort((a, b) => b.riskScore - a.riskScore);
-    const unmon = hosts.filter((h) => !h.monitored).sort((a, b) => a.hostName.localeCompare(b.hostName));
-    return [...mon, ...unmon];
-  }, [hosts, tab]);
+    return items;
+  }, [hosts, tab, sortCol, sortDir]);
 
   const tabs: { id: Tab; label: string; count: number }[] = [
     { id: "risky", label: "Risky first", count: hosts.filter((h) => h.monitored).length },
@@ -1544,6 +1598,14 @@ function HostInventoryView({
     { id: "unmonitored", label: "Unmonitored", count: hosts.filter((h) => !h.monitored).length },
   ];
 
+  // Compact sort indicator: ↑ / ↓ when active, faint dot when sortable
+  // but not active. Both fit in the same width so headers don't shift
+  // when the active column changes.
+  const sortIndicator = (col: SortCol) => {
+    if (sortCol !== col) return <span className="text-gray-300 ml-1">·</span>;
+    return <span className="text-gray-700 ml-1">{sortDir === "desc" ? "↓" : "↑"}</span>;
+  };
+
   return (
     <div className="p-5">
       <div className="flex items-center gap-1 mb-4 flex-wrap">
@@ -1551,7 +1613,7 @@ function HostInventoryView({
           <button
             key={t.id}
             type="button"
-            onClick={() => setTab(t.id)}
+            onClick={() => setTabAndResetSort(t.id)}
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
               tab === t.id
                 ? "bg-blue-50 text-blue-700 border-blue-200"
@@ -1577,9 +1639,27 @@ function HostInventoryView({
               <tr className="text-left text-[10px] uppercase tracking-wide text-gray-400 border-b border-gray-100">
                 <th className="py-2 px-2 font-semibold">Host</th>
                 <th className="py-2 px-2 font-semibold">Store</th>
-                <th className="py-2 px-2 font-semibold text-right">Peak CPU</th>
-                <th className="py-2 px-2 font-semibold text-right">Typical</th>
-                <th className="py-2 px-2 font-semibold text-right">Min above {threshold}%/d</th>
+                <th
+                  className="py-2 px-2 font-semibold text-right cursor-pointer select-none hover:text-gray-700"
+                  onClick={() => onHeaderClick("peak")}
+                  title="Sort by Peak CPU"
+                >
+                  Peak CPU{sortIndicator("peak")}
+                </th>
+                <th
+                  className="py-2 px-2 font-semibold text-right cursor-pointer select-none hover:text-gray-700"
+                  onClick={() => onHeaderClick("typical")}
+                  title="Sort by typical (median daily avg) CPU"
+                >
+                  Typical{sortIndicator("typical")}
+                </th>
+                <th
+                  className="py-2 px-2 font-semibold text-right cursor-pointer select-none hover:text-gray-700"
+                  onClick={() => onHeaderClick("minAbove")}
+                  title={`Sort by minutes per day above ${threshold}%`}
+                >
+                  Min above {threshold}%/d{sortIndicator("minAbove")}
+                </th>
                 <th className="py-2 px-2 font-semibold w-[24px]" />
               </tr>
             </thead>
@@ -2360,6 +2440,12 @@ function maxCpuColor(value: number | null): string | undefined {
   return "text-gray-500";
 }
 
+/** Capitalise the first letter of a single word. */
+function capitalize(word: string): string {
+  if (!word) return word;
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
 /** Median of a numeric pool. Returns null on empty input. */
 function median(xs: number[]): number | null {
   if (xs.length === 0) return null;
@@ -2610,23 +2696,23 @@ function subtitleFor(
 
   if (decision === "safe") {
     if (peakNearSaturation && meaningfulTimeAbove) {
-      return "Typical load is calm — but peaks already cross the threshold";
+      return "Calm baseline, peaks cross threshold";
     }
-    if (peakNearSaturation) return "Typical load is calm — but peaks reach the threshold";
-    if (meaningfulTimeAbove) return "Mostly calm — some time already above threshold";
-    return "Cool baseline, ample headroom";
+    if (peakNearSaturation) return "Calm baseline, peaks near threshold";
+    if (meaningfulTimeAbove) return "Mostly calm, occasional spikes";
+    return "Ample headroom";
   }
-  if (decision === "validate") return "Borderline — validate under load";
-  if (decision === "optimize") return "Tight margin — reduce background load first";
+  if (decision === "validate") return "Validate under live load";
+  if (decision === "optimize") return "Tight margin, reduce background load";
   if (decision === "do-not-roll-out") {
-    if (max !== null && max >= 95) return "Already saturated at peak — hardware tier needs upgrade";
-    return "Repeated high-load days, structurally constrained";
+    if (max !== null && max >= 95) return "Saturated peaks, upgrade tier";
+    return "Structurally constrained";
   }
   if (typical !== null) {
     const gap = threshold - typical;
-    if (gap >= 30) return "Cool baseline, ample headroom";
-    if (gap >= 10) return "Workable headroom under normal load";
-    return "Limited headroom — watch closely";
+    if (gap >= 30) return "Ample headroom";
+    if (gap >= 10) return "Workable headroom";
+    return "Limited headroom";
   }
   return "";
 }
