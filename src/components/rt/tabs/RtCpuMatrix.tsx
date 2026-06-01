@@ -1802,14 +1802,14 @@ function HostEvidenceView({
   pilot: RtPilotData;
   onBack: () => void;
 }) {
-  // Level 3 selection: which episode the operator clicked, or null for
-  // the list view. Cleared whenever host / threshold / period change so
-  // the user doesn't see a stale process breakdown attached to the wrong
-  // host context.
-  const [selectedEpisode, setSelectedEpisode] = useState<HostEpisode | null>(null);
+  // Level 3 selection: which minute the operator clicked, or null for
+  // the list view. Cleared whenever host / threshold / period change
+  // so the user doesn't see a stale process breakdown attached to the
+  // wrong host context.
+  const [selectedMinute, setSelectedMinute] = useState<MinuteSample | null>(null);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedEpisode(null);
+    setSelectedMinute(null);
   }, [host.hostId, threshold, periodDays]);
 
   return (
@@ -1835,21 +1835,21 @@ function HostEvidenceView({
           hosts. Unmonitored coverage rows skip this whole block. */}
       {host.hostId && (
         <div>
-          {selectedEpisode ? (
+          {selectedMinute ? (
             <HostMinuteBreakdown
               hostId={host.hostId}
               hostName={host.hostName}
-              episode={selectedEpisode}
+              minute={selectedMinute}
               threshold={threshold}
-              onBack={() => setSelectedEpisode(null)}
+              onBack={() => setSelectedMinute(null)}
             />
           ) : (
-            <HostEpisodesList
+            <HostMinutesList
               hostId={host.hostId}
               hostName={host.hostName}
               threshold={threshold}
               periodDays={periodDays}
-              onSelectEpisode={setSelectedEpisode}
+              onSelectMinute={setSelectedMinute}
             />
           )}
         </div>
@@ -1868,57 +1868,62 @@ function HostEvidenceView({
   );
 }
 
-/** Episode returned by /api/rt/host-episodes. */
-interface HostEpisode {
-  startSec: number;
-  endSec: number;
-  durationMin: number;
-  peakCpu: number;
-  peakSec: number;
+/** Per-minute sample returned by /api/rt/host-episodes. */
+interface MinuteSample {
+  /** Unix-seconds of the minute's primary sample. */
+  clockSec: number;
+  /** system.cpu.util[,,avg1] value at that minute (already > threshold). */
+  cpu: number;
 }
 
-/** Level 3 — list of threshold-crossing bursts for the selected host.
- *  Lazy-fetched on mount (and on host / threshold / period change);
- *  endpoint response is server-side clustered, so the list is at most
- *  ~100 episodes regardless of how busy the host is. */
-function HostEpisodesList({
+/** Level 3 — flat list of every minute the host's CPU was above the
+ *  selected threshold. Lazy-fetched on mount and on host / threshold
+ *  / period change. Capped at 500 minutes — beyond that, the operator
+ *  is told to narrow the Period filter for a fuller view. */
+function HostMinutesList({
   hostId,
   hostName,
   threshold,
   periodDays,
-  onSelectEpisode,
+  onSelectMinute,
 }: {
   hostId: string;
   hostName: string;
   threshold: number;
   periodDays: number;
-  onSelectEpisode: (e: HostEpisode) => void;
+  onSelectMinute: (m: MinuteSample) => void;
 }) {
-  const [episodes, setEpisodes] = useState<HostEpisode[] | null>(null);
+  const [minutes, setMinutes] = useState<MinuteSample[] | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    // Standard fetch-on-deps pattern: resetting state inside the
-    // effect *is* the correct lifecycle here — we want stale data
+    // Standard fetch-on-deps pattern: clearing state inside the
+    // effect *is* the correct lifecycle here — we want stale rows
     // visually cleared the moment the operator picks a different
     // host. The lint rule targets a different anti-pattern.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEpisodes(null);
+    setMinutes(null);
     setTruncated(false);
     setError(null);
     setLoading(true);
     const url = `/api/rt/host-episodes?hostId=${encodeURIComponent(hostId)}&periodDays=${periodDays}&threshold=${threshold}`;
-    fetch(url)
-      .then((r) => r.json())
+    fetch(url, { credentials: "same-origin" })
+      .then(async (r) => {
+        if (!r.ok) {
+          const text = await r.text().catch(() => "");
+          throw new Error(`HTTP ${r.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
+        }
+        return r.json();
+      })
       .then((data) => {
         if (cancelled) return;
         if (data.error) {
           setError(String(data.error));
         } else {
-          setEpisodes(Array.isArray(data.episodes) ? data.episodes : []);
+          setMinutes(Array.isArray(data.minutes) ? data.minutes : []);
           setTruncated(!!data.truncated);
         }
       })
@@ -1937,10 +1942,16 @@ function HostEpisodesList({
     <div>
       <div className="flex items-baseline justify-between mb-3">
         <div className="text-[11px] font-semibold text-gray-600 uppercase tracking-widest">
-          Threshold breaches above {threshold}%
+          Minutes above {threshold}%
+          {minutes && (
+            <span className="ml-2 text-gray-400 font-normal normal-case tracking-normal">
+              ({minutes.length}
+              {truncated ? "+" : ""} in {periodDays} d)
+            </span>
+          )}
         </div>
         <span className="text-[10px] text-gray-400">
-          {hostName} · Europe/Vilnius · {periodDays} d
+          {hostName} · Europe/Vilnius
         </span>
       </div>
 
@@ -1957,63 +1968,62 @@ function HostEpisodesList({
             <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="4" />
             <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
           </svg>
-          Loading bursts…
+          Loading minutes…
         </div>
       ) : error ? (
         <div className="text-[12px] text-red-600">Failed to load: {error}</div>
-      ) : episodes === null || episodes.length === 0 ? (
+      ) : minutes === null || minutes.length === 0 ? (
         <div className="text-[12px] text-gray-400 italic py-2">
-          No bursts above {threshold}% in the {periodDays}-day window.
+          No minutes above {threshold}% in the {periodDays}-day window.
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto border border-gray-200 rounded-md">
+          {/* Bounded-height scrollable container — even 500 rows stays
+              comfortable on a laptop because we keep it tight to the
+              host inventory's visual rhythm. */}
+          <div className="border border-gray-200 rounded-md max-h-[420px] overflow-y-auto">
             <table className="w-full text-[12px]">
-              <thead>
-                <tr className="bg-gray-50/60 text-left text-[10px] uppercase tracking-widest text-gray-600 border-b border-gray-200">
+              <thead className="sticky top-0 bg-gray-50/95 backdrop-blur">
+                <tr className="text-left text-[10px] uppercase tracking-widest text-gray-600 border-b border-gray-200">
                   <th className="py-2 px-3 font-semibold">Date</th>
                   <th className="py-2 px-3 font-semibold">Time</th>
-                  <th className="py-2 px-3 font-semibold text-right">Duration</th>
-                  <th className="py-2 px-3 font-semibold text-right">Peak</th>
+                  <th className="py-2 px-3 font-semibold text-right">CPU</th>
                   <th className="py-2 px-3 font-semibold w-[24px]" />
                 </tr>
               </thead>
               <tbody>
-                {episodes.map((ep) => (
+                {minutes.map((m) => (
                   <tr
-                    key={ep.startSec}
+                    key={m.clockSec}
                     className="border-t border-gray-100 hover:bg-sky-50/40 cursor-pointer focus:outline-none focus:bg-sky-50/40 transition-colors"
-                    onClick={() => onSelectEpisode(ep)}
+                    onClick={() => onSelectMinute(m)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        onSelectEpisode(ep);
+                        onSelectMinute(m);
                       }
                     }}
                     tabIndex={0}
-                    title="Open per-minute process breakdown at the burst peak"
+                    title="Open process breakdown for this minute"
                   >
-                    <td className="py-2 px-3 text-gray-700 tabular-nums">
-                      {fmtVilniusDate(ep.startSec)}
+                    <td className="py-1.5 px-3 text-gray-700 tabular-nums">
+                      {fmtVilniusDate(m.clockSec)}
                     </td>
-                    <td className="py-2 px-3 text-gray-700 tabular-nums">
-                      {fmtVilniusTime(ep.startSec)}–{fmtVilniusTime(ep.endSec)}
-                    </td>
-                    <td className="py-2 px-3 text-right tabular-nums text-gray-700">
-                      {ep.durationMin} min
+                    <td className="py-1.5 px-3 text-gray-700 tabular-nums">
+                      {fmtVilniusTime(m.clockSec)}
                     </td>
                     <td
-                      className={`py-2 px-3 text-right tabular-nums font-semibold ${
-                        ep.peakCpu >= 95
+                      className={`py-1.5 px-3 text-right tabular-nums font-semibold ${
+                        m.cpu >= 95
                           ? "text-red-600"
-                          : ep.peakCpu >= 85
+                          : m.cpu >= 85
                             ? "text-amber-700"
                             : "text-gray-800"
                       }`}
                     >
-                      {Math.round(ep.peakCpu)}%
+                      {Math.round(m.cpu)}%
                     </td>
-                    <td className="py-2 px-3 text-right text-gray-300">▸</td>
+                    <td className="py-1.5 px-3 text-right text-gray-300">▸</td>
                   </tr>
                 ))}
               </tbody>
@@ -2021,8 +2031,8 @@ function HostEpisodesList({
           </div>
           {truncated && (
             <div className="text-[11px] text-amber-700 mt-2">
-              Showing the 100 most recent bursts — host has more in the window.
-              Narrow the Period filter to see older bursts.
+              Showing the 500 most recent minutes — host has more in the
+              window. Narrow the Period filter for older minutes.
             </div>
           )}
         </>
@@ -2100,13 +2110,13 @@ const CATEGORY_ORDER = [
 function HostMinuteBreakdown({
   hostId,
   hostName,
-  episode,
+  minute,
   threshold,
   onBack,
 }: {
   hostId: string;
   hostName: string;
-  episode: HostEpisode;
+  minute: MinuteSample;
   threshold: number;
   onBack: () => void;
 }) {
@@ -2114,43 +2124,37 @@ function HostMinuteBreakdown({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Resolve the Vilnius-local date of the peak so the endpoint scopes
-  // its day-window correctly. Peak hour/minute are then used to find
-  // the matching slot client-side.
-  const peakDate = useMemo(
-    () => new Date(episode.peakSec * 1000).toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" }),
-    [episode.peakSec],
+  // Resolve the Vilnius-local date of the minute so the endpoint
+  // scopes its day-window correctly. Hour/minute are then used to
+  // find the matching per-minute slot client-side.
+  const minuteDate = useMemo(
+    () => new Date(minute.clockSec * 1000).toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" }),
+    [minute.clockSec],
   );
-  const peakLabel = useMemo(
-    () => fmtVilniusDateTime(episode.peakSec),
-    [episode.peakSec],
+  const minuteLabel = useMemo(
+    () => fmtVilniusDateTime(minute.clockSec),
+    [minute.clockSec],
   );
 
   useEffect(() => {
     let cancelled = false;
     // Reset stale UI before the new fetch lands. See the matching
-    // comment in HostEpisodesList for the lint-rule rationale.
+    // comment in HostMinutesList for the lint-rule rationale.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSlot(null);
     setError(null);
     setLoading(true);
-    // Granularity=5 — 5-minute buckets are the right resolution:
-    //   • Per-minute (granularity=1) returns 1440 slots and gets the
-    //     Next route close to a platform timeout on heavy hosts.
-    //   • 15-minute buckets over-average — the peak minute's process
-    //     mix gets diluted across 14 quiet minutes, so the legend
-    //     numbers don't visibly add up to the burst peak the operator
-    //     was reading two lines above.
-    //   • 5-min buckets keep payload small (288 slots/day, ~1 s fetch)
-    //     while staying close enough to the peak that the legend
-    //     sums to a recognisable share of the burst.
-    const url = `/api/rt/process-history?hostId=${encodeURIComponent(hostId)}&date=${peakDate}&granularity=5`;
+    // Granularity=1 — exact per-minute slot. The legend then sums
+    // directly to the minute's host-CPU value, which is what the
+    // operator reads in the row above. Anything coarser (5/15 min
+    // buckets) averaged the peak minute together with quieter
+    // surrounding minutes and made the math look wrong.
+    const url = `/api/rt/process-history?hostId=${encodeURIComponent(hostId)}&date=${minuteDate}&granularity=1`;
     fetch(url, { credentials: "same-origin" })
       .then(async (r) => {
         if (!r.ok) {
-          // Surface the HTTP status so we don't silently render "Load
-          // failed" as a generic browser fetch error. 401/307 means the
-          // session lapsed; 500 means the route blew up on this host.
+          // Surface the HTTP status so we don't silently render
+          // "Load failed" as a generic browser fetch error.
           const text = await r.text().catch(() => "");
           throw new Error(`HTTP ${r.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
         }
@@ -2163,14 +2167,12 @@ function HostMinuteBreakdown({
           return;
         }
         const slots = data.slots ?? [];
-        // Find the slot whose 15-min window contains the peak minute.
-        // Slot keys are Vilnius-local hour/minute; we floor the peak's
-        // minute to the nearest 15 (0, 15, 30, 45) for an apples-to-
-        // apples match.
-        const peakHmm = vilniusHourMinute(episode.peakSec);
-        const peakBucket = Math.floor(peakHmm.minute / 5) * 5;
+        // Granularity=1 returns 1440 per-day slots keyed by exact
+        // Vilnius-local hour and minute. Match the operator's chosen
+        // minute exactly — no rounding.
+        const hm = vilniusHourMinute(minute.clockSec);
         const match =
-          slots.find((s) => s.hour === peakHmm.hour && s.minute === peakBucket) ??
+          slots.find((s) => s.hour === hm.hour && s.minute === hm.minute) ??
           null;
         setSlot(match);
       })
@@ -2183,7 +2185,7 @@ function HostMinuteBreakdown({
     return () => {
       cancelled = true;
     };
-  }, [hostId, peakDate, episode.peakSec]);
+  }, [hostId, minuteDate, minute.clockSec]);
 
   return (
     <div>
@@ -2193,27 +2195,19 @@ function HostMinuteBreakdown({
           onClick={onBack}
           className="text-[11px] text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
         >
-          ◂ Back to burst list
+          ◂ Back to minute list
         </button>
         <span className="text-[10px] text-gray-400">{hostName}</span>
       </div>
       <div className="text-[11px] font-semibold text-gray-600 uppercase tracking-widest mb-2">
-        Process breakdown around burst peak
+        Process breakdown for this minute
       </div>
-      {/* Two figures, deliberately separated:
-            • Burst peak — single-minute maximum (matches the row in
-              the episode list above).
-            • 5-min window avg — what the process breakdown numbers
-              below actually average over.
-          Without surfacing both, the legend looks like it doesn't
-          add up to the peak (because it doesn't — different
-          aggregation, different window). */}
       <div className="text-[12px] text-gray-500 mb-3">
-        {peakLabel} · burst peak{" "}
+        {minuteLabel} · host CPU{" "}
         <span className="font-semibold text-gray-800">
-          {Math.round(episode.peakCpu)}%
+          {Math.round(minute.cpu)}%
         </span>
-        {" "}(threshold {threshold}%) · 5-min window for process breakdown
+        {" "}(threshold {threshold}%)
       </div>
 
       {loading ? (
@@ -2322,7 +2316,7 @@ function ProcessStackedBar({ slot }: { slot: ProcessHistorySlot }) {
         <li className="flex items-center gap-2 pt-1 mt-1 border-t border-gray-100">
           <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0 bg-gray-100 border border-gray-200" />
           <span className="flex-1 font-medium text-gray-600">
-            Avg host CPU (5-min window)
+            Host CPU at this minute
             {slot.hostCpu === null ? " — estimated from named categories" : ""}
           </span>
           <span className="tabular-nums font-semibold text-gray-900">

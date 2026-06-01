@@ -1,27 +1,35 @@
 /**
  * GET /api/rt/host-episodes?hostId=...&periodDays=14&threshold=80
  *
- * Returns clustered threshold-crossing episodes for a single host across
- * the requested window. Drives the Level 3 drilldown in the CPU Matrix:
- * the operator picks a host from the inventory and we surface the bursts
- * of high CPU rather than every offending minute.
+ * Returns the per-minute list of threshold-crossing samples for a single
+ * host across the requested window, plus a roll-up summary so the UI can
+ * render counts without iterating the array.
  *
- * Why episodes, not minutes:
- *   A host with 458 minutes above 80% over 14 days clusters into ~12–15
- *   bursts of 5–40 min each. The decision question — "how often does
- *   this host spike, and how long?" — is answered at the burst level,
- *   not at the minute level. Cuts the payload to <100 rows even on the
- *   busiest hosts and makes the list scannable.
+ * Drives the Level 3 drilldown in the CPU Matrix: the operator picks a
+ * host from the inventory, we surface every minute the host was above
+ * the chosen CPU threshold, and clicking a minute hands off to
+ * /api/rt/process-history at granularity=1 for the exact-minute process
+ * breakdown. Per-minute granularity means the breakdown sums directly
+ * to the minute's host-CPU value — no slot-average distortion.
  *
  * Performance budget:
- *   • One Zabbix history.get round-trip per call (already cached for
- *     120s by getCpuHistoryForRange).
- *   • Cluster computation is a single linear pass over minute samples.
- *   • Hard-cap of 100 episodes per response — if the host has more
- *     threshold-crossing bursts than that, return the 100 most recent
- *     and surface `truncated: true` so the UI can hint at it.
+ *   • One Zabbix history.get round-trip per call (cached 120 s by
+ *     getCpuHistoryForRange).
+ *   • A single filter+sort pass over the minute samples.
+ *   • Hard-cap of 500 minutes returned. A host pinning >500 minutes
+ *     above threshold over a single period is too sprawling to scan
+ *     row-by-row anyway; we return the most recent 500 and surface
+ *     `truncated: true` so the UI can hint at narrowing the period.
  *
  * Auth: session-required (same pattern as other /api/rt routes).
+ *
+ * Response shape:
+ *   {
+ *     hostId, periodDays, threshold,
+ *     sampleCount,         // raw samples scanned (above + below)
+ *     minutes: [ { clockSec, cpu } ],
+ *     truncated: boolean,
+ *   }
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -29,93 +37,29 @@ import { getZabbixClient } from "@/lib/zabbix/client";
 
 export const dynamic = "force-dynamic";
 
-interface Episode {
-  /** ISO 8601 start timestamp of the first minute above threshold. */
-  startSec: number;
-  endSec: number;
-  durationMin: number;
-  /** Highest CPU value seen during the burst (already > threshold). */
-  peakCpu: number;
-  /** Unix-seconds of the peak — granular handle for the Level 4
-   *  process-breakdown drill so we can land on the right minute slot. */
-  peakSec: number;
+interface MinuteSample {
+  clockSec: number;
+  cpu: number;
 }
 
-/** Cluster consecutive minute samples above `threshold` into episodes.
- *  Gap rule: any minute without a >threshold sample, or any sample
- *  more than 90 s after the previous one, ends the current burst.
- *  Returns episodes sorted newest first. */
-function clusterEpisodes(
+/** Filter Zabbix minute samples to the ones strictly above `threshold`,
+ *  sort newest-first, and cap. Strict `>` (not `>=`) matches the rest
+ *  of the dashboard's threshold semantics. */
+function filterMinutesAbove(
   samples: { clockSec: number; value: number }[],
   threshold: number,
   maxCount: number,
-): { episodes: Episode[]; truncated: boolean } {
-  if (samples.length === 0) return { episodes: [], truncated: false };
-
-  // Ensure chronological order — getCpuHistoryForRange returns
-  // ascending already, but be defensive.
-  const sorted = samples.slice().sort((a, b) => a.clockSec - b.clockSec);
-
-  const all: Episode[] = [];
-  // Gap break threshold: 90 s. Zabbix `system.cpu.util[,,avg1]` polls
-  // every 60 s; a 90 s window allows for one missed sample (slightly
-  // late agent push) without breaking a real burst.
-  const GAP_S = 90;
-
-  let curStart = -1;
-  let curEnd = -1;
-  let curPeak = 0;
-  let curPeakSec = 0;
-  let lastSec = -Infinity;
-  let lastWasAbove = false;
-
-  const flush = () => {
-    if (curStart < 0) return;
-    all.push({
-      startSec: curStart,
-      endSec: curEnd,
-      durationMin: Math.max(1, Math.round((curEnd - curStart) / 60) + 1),
-      peakCpu: curPeak,
-      peakSec: curPeakSec,
-    });
-    curStart = -1;
-    curEnd = -1;
-    curPeak = 0;
-    curPeakSec = 0;
-  };
-
-  for (const s of sorted) {
-    const above = s.value > threshold;
-    const gapTooBig = lastSec >= 0 && s.clockSec - lastSec > GAP_S;
-    lastSec = s.clockSec;
-
-    if (above) {
-      if (!lastWasAbove || gapTooBig) {
-        // Boundary: either we just emerged from below, or we crossed
-        // a gap inside an above-threshold streak. In both cases, close
-        // the previous burst (if any) and start fresh.
-        flush();
-        curStart = s.clockSec;
-      }
-      curEnd = s.clockSec;
-      if (s.value > curPeak) {
-        curPeak = s.value;
-        curPeakSec = s.clockSec;
-      }
-      lastWasAbove = true;
-    } else {
-      lastWasAbove = false;
-      flush();
-    }
+): { minutes: MinuteSample[]; truncated: boolean } {
+  const above: MinuteSample[] = [];
+  for (const s of samples) {
+    if (s.value > threshold) above.push({ clockSec: s.clockSec, cpu: s.value });
   }
-  flush();
-
-  // Newest-first ordering — operators care about recent bursts first.
-  all.sort((a, b) => b.startSec - a.startSec);
-  if (all.length > maxCount) {
-    return { episodes: all.slice(0, maxCount), truncated: true };
+  // Newest first — operators care about recent breaches.
+  above.sort((a, b) => b.clockSec - a.clockSec);
+  if (above.length > maxCount) {
+    return { minutes: above.slice(0, maxCount), truncated: true };
   }
-  return { episodes: all, truncated: false };
+  return { minutes: above, truncated: false };
 }
 
 export async function GET(req: NextRequest) {
@@ -158,7 +102,7 @@ export async function GET(req: NextRequest) {
       hostId,
       periodDays,
       threshold,
-      episodes: [],
+      minutes: [],
       truncated: false,
       note: "No system.cpu.util item found for this host.",
     });
@@ -174,18 +118,19 @@ export async function GET(req: NextRequest) {
     nowSec,
   );
 
-  // Episode hard cap. Anything beyond 100 is too many for the UI list
-  // anyway; we surface `truncated` so the operator can narrow the
-  // window (Period dropdown) if they want a fuller picture.
-  const MAX_EPISODES = 100;
-  const { episodes, truncated } = clusterEpisodes(samples, threshold, MAX_EPISODES);
+  // Minute hard cap. A host pinning >500 minutes above threshold over
+  // a single period is too sprawling to scan row-by-row anyway; we
+  // surface `truncated` so the UI can prompt the operator to narrow
+  // the window via the Period dropdown.
+  const MAX_MINUTES = 500;
+  const { minutes, truncated } = filterMinutesAbove(samples, threshold, MAX_MINUTES);
 
   return NextResponse.json({
     hostId,
     periodDays,
     threshold,
     sampleCount: samples.length,
-    episodes,
+    minutes,
     truncated,
   });
 }
