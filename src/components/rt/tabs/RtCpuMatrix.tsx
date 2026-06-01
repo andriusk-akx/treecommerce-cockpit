@@ -1443,7 +1443,13 @@ function computeCpuMatrix(
       // can spot the case.
       const rawDelta = avgOnTotalCpu - avgOffTotalCpu;
       const delta = Math.max(0, rawDelta);
-      impactPp = Math.min(20, Math.round(delta * 10) / 10);
+      // Cap raised 20 → 30 pp (2026-06-01) so legitimate worst-case
+      // measurements like i3-6100 Pavilnionys (+23 pp) and projected
+      // pre-Skylake tiers aren't silently clipped — the cap is only
+      // there to swallow obvious outliers (e.g. a single host with
+      // 60 pp delta from a stuck Zabbix counter), not to suppress real
+      // hardware-tier overhead.
+      impactPp = Math.min(30, Math.round(delta * 10) / 10);
       impactSource = "measured";
     } else {
       impactPp = conservativeImpactPp(g.model);
@@ -1795,23 +1801,43 @@ function cpuSpec(model: string): CpuSpec | null {
 /** Conservative impact scenario when no measured ON evidence exists.
  *  Bands by hardware tier — older CPUs get a larger reserved overhead
  *  because Retellect's per-frame Python load is a bigger fraction of
- *  available cycles on those classes. */
+ *  available cycles on those classes.
+ *
+ *  Anchors (real Rimi data observed 2026-05-08 .. 2026-06-01):
+ *   • i3-12300HL (12th gen) — Rimi Outlet SCO 1: RT On 12.6% / Off 12.3%
+ *     → +0.3 pp measured. Conservative band: 1 pp.
+ *   • i3-9100E (Coffee Lake-R) — Rimi Dangerutis SCO 1: RT On 26% /
+ *     Off 21% → +5 pp measured, but Retellect was lightly active
+ *     there (process avg 1%). Full-rollout conservative: 10 pp.
+ *   • i3-6100 (Skylake) — Pavilnionys SCO 2: RT On 43% / Off 20%
+ *     → +23 pp measured. Conservative = measured (already worst-case).
+ *   • i3-4330 (Haswell) — no installations yet. Extrapolated from
+ *     i3-6100 (weaker tier, same 2C/4T topology): 28 pp.
+ *   • Pentium/Celeron — no installations yet. Extrapolated further
+ *     down the tier ladder, headroom ~halved: 30 pp.
+ *
+ *  These defaults are used ONLY when the matrix lacks ≥2 ON + ≥2 OFF
+ *  hosts with active-minute samples for the class (the gate at
+ *  `measuredOnOff` above). Once that bar is cleared, the dashboard
+ *  uses the directly-measured delta (capped at 30 pp). */
 function conservativeImpactPp(model: string): number {
   const m = model.toLowerCase();
-  // Newer Intel mobile/desktop i3/i5/i7 (12th gen+).
-  if (/i[357]-1[2-9]\d{3}/.test(m)) return 4;
-  // i3/i5 9th gen and newer (excluding 12th+ caught above).
-  if (/i[357]-(9|1[01])\d{3}/.test(m)) return 5;
-  // Mid i3 (7th–8th gen).
-  if (/i[357]-[78]\d{3}/.test(m)) return 6;
-  // Older i3 (6th gen — i3-6100 etc).
-  if (/i[357]-6\d{3}/.test(m)) return 7;
-  // Old i3 (4th–5th gen — i3-4330 etc).
-  if (/i[357]-[45]\d{3}/.test(m)) return 8;
-  // Pentium / Celeron.
-  if (/(pentium|celeron|atom)/.test(m)) return 10;
-  // Unknown — be conservative.
-  return 8;
+  // 12th gen+ — anchor: i3-12300HL Rimi Outlet +0.3 pp measured.
+  if (/i[357]-1[2-9]\d{3}/.test(m)) return 1;
+  // 9th–11th gen — anchor: i3-9100E Dangerutis +5 pp measured (light
+  // activity), conservative projection for full rollout.
+  if (/i[357]-(9|1[01])\d{3}/.test(m)) return 10;
+  // 7th–8th gen — interpolated between 9-11th (+10) and 6th (+23).
+  if (/i[357]-[78]\d{3}/.test(m)) return 15;
+  // 6th gen — anchor: i3-6100 Pavilnionys +23 pp measured.
+  if (/i[357]-6\d{3}/.test(m)) return 23;
+  // 4th–5th gen — extrapolated from i3-6100, weaker IPC + same
+  // 2C/4T topology means less headroom for injected work.
+  if (/i[357]-[45]\d{3}/.test(m)) return 28;
+  // Pentium / Celeron — further extrapolation.
+  if (/(pentium|celeron|atom)/.test(m)) return 30;
+  // Unknown — middle-of-the-road conservative.
+  return 10;
 }
 
 /** Empty zero-filled bucket record — used as the zero element for
