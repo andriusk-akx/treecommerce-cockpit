@@ -888,28 +888,20 @@ function MatrixRowView({
         )}
       </td>
 
-      {/* Evidence base — strictly the Zabbix-monitored slice of the
-          class. Unmonitored hosts are intentionally not counted here:
-            (1) Zabbix-monitored host count   — the slice we can measure
-            (2) ON/OFF split inside that slice — strength of the A/B
-            (3) silent sub-count, if any      — Zabbix-known hosts whose
-                                                agent currently reports
-                                                no telemetry (broken
-                                                template, ZBX_NOTSUPPORTED,
-                                                etc.) */}
+      {/* Evidence base — Zabbix-monitored slice only. Font size
+          uniform across all three lines so no number 'screams' at the
+          reader; the count stays slightly bolder than its qualifiers
+          but doesn't dominate. */}
       <td className="py-4 px-3 align-top">
-        <div
-          className="text-xl font-bold text-gray-900 leading-none"
-          title={`${zabbixHosts} of ${row.hostCount} hosts in this class run a Zabbix agent. Unmonitored hosts live in the Unmonitored drilldown tab and never feed measured metrics.`}
-        >
-          {zabbixHosts}{" "}
-          <span className="text-xs font-normal text-gray-500">
-            on Zabbix
-          </span>
-        </div>
-        <div className="text-[11px] mt-1.5 leading-relaxed space-y-0.5">
+        <div className="text-[12px] text-gray-700 leading-relaxed space-y-0.5">
           <div
-            className="text-gray-700 font-medium"
+            className="font-semibold text-gray-900"
+            title={`${zabbixHosts} of ${row.hostCount} hosts in this class run a Zabbix agent. Unmonitored hosts live in the Unmonitored drilldown tab and never feed measured metrics.`}
+          >
+            {zabbixHosts}{" "}
+            <span className="text-gray-500 font-normal">on Zabbix</span>
+          </div>
+          <div
             title="Hosts classified as ON (Retellect active in window) vs OFF (Retellect inactive). Drives the measured A/B impact when both sides have enough samples."
           >
             {row.hostsOn} ON · {row.hostsOff} OFF
@@ -925,49 +917,52 @@ function MatrixRowView({
         </div>
       </td>
 
-      {/* Decision cell — minimalist hierarchy.
-            • One coloured pill (the verdict) anchors the cell.
-            • Subtitle, qualifier line, and priority all sit as plain
-              gray typography underneath. No competing pills, no
-              uppercase tracking blocks — type weight + colour do the
-              hierarchy work, not bordered chips.
-            • Confidence is conveyed by a subtle text-colour shift on
-              the word itself (emerald / amber / gray), so the eye picks
-              up the tier in scan reading without needing a separate
-              badge. */}
-      <td className="py-4 px-3 text-center align-top">
-        <div className="flex flex-col items-center gap-2.5 mx-auto max-w-[180px]">
+      {/* Decision cell — restrained pill + bulleted qualifier list.
+          The verdict is the only coloured element, and even it now
+          sits in a calmer size; subtitle, confidence, evidence, and
+          priority read as a short bulleted memo underneath rather
+          than competing pills. Each bullet's tone shift carries one
+          piece of meaning (confidence tier, priority colour) without
+          requiring border / badge geometry. */}
+      <td className="py-4 px-3 align-top">
+        <div className="flex flex-col items-start gap-1.5 mx-auto max-w-[180px]">
           <span
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-semibold whitespace-nowrap ${DECISION_STYLES[row.decision]}`}
+            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium whitespace-nowrap ${DECISION_STYLES[row.decision]}`}
           >
-            <span className={`w-1.5 h-1.5 rounded-full ${DECISION_DOT[row.decision]}`} />
+            <span className={`w-1 h-1 rounded-full ${DECISION_DOT[row.decision]}`} />
             {DECISION_LABEL[row.decision]}
           </span>
-          {row.subtitle && (
-            <p className="text-[11px] text-gray-500 leading-snug">
-              {row.subtitle}
-            </p>
-          )}
-          <p className="text-[10px] text-gray-400 leading-snug">
-            <span
-              className={`cursor-help font-medium ${CONFIDENCE_TONE[row.confidence]}`}
-              title={CONFIDENCE_TIP[row.confidence]}
-            >
-              {capitalize(row.confidence)} confidence
-            </span>
-            <span className="mx-1.5 text-gray-300">·</span>
-            <span className="cursor-help" title={EVIDENCE_TIP[row.evidence]}>
-              {EVIDENCE_LABEL[row.evidence]}
-            </span>
-          </p>
-          {priority && (
-            <p
-              className={`text-[10px] font-medium ${priority.tone}`}
-              title={priority.tip}
-            >
-              {priority.label}
-            </p>
-          )}
+          <ul className="text-[11px] text-gray-500 leading-snug space-y-0.5 w-full mt-0.5">
+            <li className="flex items-start gap-1.5">
+              <span className="text-gray-300 mt-px" aria-hidden="true">·</span>
+              <span
+                className={`cursor-help ${CONFIDENCE_TONE[row.confidence]}`}
+                title={CONFIDENCE_TIP[row.confidence]}
+              >
+                {capitalize(row.confidence)} confidence
+              </span>
+            </li>
+            {row.subtitle && (
+              <li className="flex items-start gap-1.5">
+                <span className="text-gray-300 mt-px" aria-hidden="true">·</span>
+                <span>{row.subtitle}</span>
+              </li>
+            )}
+            <li className="flex items-start gap-1.5">
+              <span className="text-gray-300 mt-px" aria-hidden="true">·</span>
+              <span className="cursor-help" title={EVIDENCE_TIP[row.evidence]}>
+                {EVIDENCE_LABEL[row.evidence]}
+              </span>
+            </li>
+            {priority && (
+              <li className="flex items-start gap-1.5">
+                <span className="text-gray-300 mt-px" aria-hidden="true">·</span>
+                <span className={priority.tone} title={priority.tip}>
+                  {priority.label}
+                </span>
+              </li>
+            )}
+          </ul>
         </div>
       </td>
     </tr>
