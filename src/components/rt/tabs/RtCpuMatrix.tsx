@@ -1506,7 +1506,6 @@ function CpuDrilldownWorkspace({
       {selectedHost ? (
         <HostEvidenceView
           host={selectedHost}
-          row={row}
           threshold={threshold}
           periodDays={periodDays}
           pilot={pilot}
@@ -1792,14 +1791,12 @@ function HostInventoryView({
  *  can't communicate. */
 function HostEvidenceView({
   host,
-  row,
   threshold,
   periodDays,
   pilot,
   onBack,
 }: {
   host: DrilldownHost;
-  row: CpuMatrixRow;
   threshold: number;
   periodDays: number;
   pilot: RtPilotData;
@@ -1825,40 +1822,19 @@ function HostEvidenceView({
         ◂ Back to host list
       </button>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Evidence headline numbers */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            Evidence summary
-          </div>
-          <dl className="space-y-2 text-[12px]">
-            <EvidenceRow label={`Minutes above ${threshold}%`} value={fmtMinutesPerDay(host.minutesAbovePerDay)} />
-            <EvidenceRow label="Total in period" value={host.minutesAbove === null ? "—" : `${Math.round(host.minutesAbove)} min over ${periodDays} d`} />
-            <EvidenceRow label="Peak CPU in period" value={host.peakCpu === null ? "—" : `${Math.round(host.peakCpu)}%`} />
-            <EvidenceRow label="Typical (median daily avg)" value={host.typicalCpu === null ? "—" : `${Math.round(host.typicalCpu)}%`} />
-            <EvidenceRow label="Store" value={host.storeName} />
-          </dl>
-        </div>
-
-        {/* Class context — answers "is this host an outlier within its class?" */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            {row.model === "Unknown" ? "Class context" : `Compared to ${row.model}`}
-          </div>
-          <dl className="space-y-2 text-[12px]">
-            <EvidenceRow label="Class peak" value={row.maxCpu === null ? "—" : `${Math.round(row.maxCpu)}%`} />
-            <EvidenceRow label="Class typical (median)" value={row.typicalCpu === null ? "—" : `${Math.round(row.typicalCpu)}%`} />
-            <EvidenceRow label="Class decision" value={DECISION_LABEL[row.decision]} />
-            <EvidenceRow label="Evidence base" value={EVIDENCE_LABEL[row.evidence]} />
-            <EvidenceRow label="Planned impact" value={`+${row.impactPp.toFixed(1)} pp`} />
-          </dl>
-        </div>
+      {/* Compact one-line host context — replaces the two redundant
+          Evidence summary / Class context cards. All the same numbers
+          live in the matrix row above; repeating them here was noise. */}
+      <div className="text-[11px] text-gray-500 mb-4">
+        {host.storeName} · peak {host.peakCpu === null ? "—" : `${Math.round(host.peakCpu)}%`}
+        {" · "}typical {host.typicalCpu === null ? "—" : `${Math.round(host.typicalCpu)}%`}
+        {" · "}{fmtMinutesPerDay(host.minutesAbovePerDay)} above {threshold}%
       </div>
 
       {/* Level 3 / 4 drilldown — only meaningful for Zabbix-monitored
           hosts. Unmonitored coverage rows skip this whole block. */}
       {host.hostId && (
-        <div className="mt-6">
+        <div>
           {selectedEpisode ? (
             <HostMinuteBreakdown
               hostId={host.hostId}
@@ -2059,23 +2035,35 @@ function HostEpisodesList({
  *  Reuses the existing /api/rt/process-history endpoint with
  *  granularity=1 (per-minute slots), pulls the date that contains the
  *  episode peak, and renders the slot whose timestamp matches peakSec.
- *  No new backend code path. */
+ *  No new backend code path.
+ *
+ *  Bug fix (2026-06-01): the slot shape returned by process-history is
+ *  FLAT (retellect/scoApp/db/system/besclient/elastic/osCore/other as
+ *  top-level number fields), not a nested `categories` object. The
+ *  earlier draft of this interface invented the nested shape, which
+ *  meant every category resolved to undefined and the bar rendered
+ *  empty. Also added besclient / elastic / osCore which the V2 split
+ *  rolled out in May. */
 interface ProcessHistorySlot {
   slot: number;
   hourKey: string;
   hour: number;
   minute: number;
   label: string;
-  hostCpu: number;
-  hostCpuMax: number | null;
-  categories: {
-    retellect?: number;
-    scoApp?: number;
-    db?: number;
-    system?: number;
-    hwAvailability?: number;
-    other?: number;
-  };
+  retellect: number;
+  scoApp: number;
+  db: number;
+  system: number;
+  besclient: number;
+  elastic: number;
+  osCore: number;
+  other: number;
+  free: number;
+  /** Avg system.cpu.util for the slot window. Null when no samples
+   *  landed — slot may still have proc.cpu data (e.g. only python
+   *  reported), in which case the total host-CPU bar should fall back
+   *  to Σ(named) instead of crashing on a null call. */
+  hostCpu: number | null;
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -2083,7 +2071,9 @@ const CATEGORY_LABEL: Record<string, string> = {
   scoApp: "SCO App (sp.sss)",
   db: "Database (SQL)",
   system: "System (VMWare)",
-  hwAvailability: "Hardware",
+  besclient: "BESClient",
+  elastic: "Elastic",
+  osCore: "OS Core",
   other: "Other",
 };
 const CATEGORY_COLOR: Record<string, string> = {
@@ -2091,10 +2081,21 @@ const CATEGORY_COLOR: Record<string, string> = {
   scoApp: "#6366f1",
   db: "#a855f7",
   system: "#64748b",
-  hwAvailability: "#94a3b8",
+  besclient: "#10b981",
+  elastic: "#f59e0b",
+  osCore: "#94a3b8",
   other: "#cbd5e1",
 };
-const CATEGORY_ORDER = ["retellect", "scoApp", "db", "system", "hwAvailability", "other"];
+const CATEGORY_ORDER = [
+  "retellect",
+  "scoApp",
+  "db",
+  "system",
+  "besclient",
+  "elastic",
+  "osCore",
+  "other",
+];
 
 function HostMinuteBreakdown({
   hostId,
@@ -2133,9 +2134,26 @@ function HostMinuteBreakdown({
     setSlot(null);
     setError(null);
     setLoading(true);
-    const url = `/api/rt/process-history?hostId=${encodeURIComponent(hostId)}&date=${peakDate}&granularity=1`;
-    fetch(url)
-      .then((r) => r.json())
+    // Granularity=15 — minute-level (granularity=1) returns 1440 slots
+    // per day which is needlessly heavy when we're going to pick a
+    // single matching slot anyway. 15-minute buckets align well with
+    // burst lengths (most are 5–30 min) and shrink the payload by 15×.
+    // Bug fix (2026-06-01): the earlier draft used granularity=1 and
+    // got "Failed to load" on production for some hosts — Zabbix can
+    // take long enough fetching 1440 slot's worth of per-process items
+    // that the Next route times out at the platform layer.
+    const url = `/api/rt/process-history?hostId=${encodeURIComponent(hostId)}&date=${peakDate}&granularity=15`;
+    fetch(url, { credentials: "same-origin" })
+      .then(async (r) => {
+        if (!r.ok) {
+          // Surface the HTTP status so we don't silently render "Load
+          // failed" as a generic browser fetch error. 401/307 means the
+          // session lapsed; 500 means the route blew up on this host.
+          const text = await r.text().catch(() => "");
+          throw new Error(`HTTP ${r.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
+        }
+        return r.json();
+      })
       .then((data: { slots?: ProcessHistorySlot[]; error?: string }) => {
         if (cancelled) return;
         if (data.error) {
@@ -2143,13 +2161,14 @@ function HostMinuteBreakdown({
           return;
         }
         const slots = data.slots ?? [];
-        // Find the slot whose timestamp matches the peak minute. The
-        // endpoint returns slot times in Vilnius-local h:m strings via
-        // hour/minute fields; we recompute the peak's hour/minute the
-        // same way for an apples-to-apples match.
+        // Find the slot whose 15-min window contains the peak minute.
+        // Slot keys are Vilnius-local hour/minute; we floor the peak's
+        // minute to the nearest 15 (0, 15, 30, 45) for an apples-to-
+        // apples match.
         const peakHmm = vilniusHourMinute(episode.peakSec);
+        const peakBucket = Math.floor(peakHmm.minute / 15) * 15;
         const match =
-          slots.find((s) => s.hour === peakHmm.hour && s.minute === peakHmm.minute) ??
+          slots.find((s) => s.hour === peakHmm.hour && s.minute === peakBucket) ??
           null;
         setSlot(match);
       })
@@ -2177,12 +2196,12 @@ function HostMinuteBreakdown({
         <span className="text-[10px] text-gray-400">{hostName}</span>
       </div>
       <div className="text-[11px] font-semibold text-gray-600 uppercase tracking-widest mb-2">
-        Process breakdown at burst peak
+        Process breakdown around burst peak
       </div>
       <div className="text-[12px] text-gray-500 mb-3">
         {peakLabel} · Peak host CPU{" "}
         <span className="font-semibold text-gray-800">{Math.round(episode.peakCpu)}%</span>
-        {" "}(threshold {threshold}%)
+        {" "}(threshold {threshold}%) · 15-min window
       </div>
 
       {loading ? (
@@ -2216,12 +2235,23 @@ function HostMinuteBreakdown({
 
 /** Stacked-bar rendering of a per-minute process breakdown. Mirrors the
  *  visual treatment from the CPU Timeline drilldown so operators see the
- *  same chart shape across tabs. */
+ *  same chart shape across tabs.
+ *
+ *  Bug fix (2026-06-01):
+ *   • Read category values from the flat slot shape — the previous
+ *     draft reached into a nested `slot.categories` object that the
+ *     endpoint never returns. Every category came back undefined and
+ *     the bar was always empty.
+ *   • Guard against `slot.hostCpu === null` — the endpoint sets it
+ *     null when no system.cpu.util samples landed in the minute. The
+ *     earlier draft called `null.toFixed(1)` and crashed. Falls back
+ *     to Σ(named) when total host CPU isn't available. */
 function ProcessStackedBar({ slot }: { slot: ProcessHistorySlot }) {
   const rows = useMemo(() => {
     const out: { key: string; label: string; value: number; color: string }[] = [];
+    const slotAny = slot as unknown as Record<string, number | null | undefined>;
     for (const key of CATEGORY_ORDER) {
-      const v = (slot.categories as Record<string, number | undefined>)[key];
+      const v = slotAny[key];
       if (typeof v === "number" && v > 0.05) {
         out.push({ key, label: CATEGORY_LABEL[key], value: v, color: CATEGORY_COLOR[key] });
       }
@@ -2231,8 +2261,12 @@ function ProcessStackedBar({ slot }: { slot: ProcessHistorySlot }) {
     return out;
   }, [slot]);
   const totalNamed = rows.reduce((s, r) => s + r.value, 0);
-  const hostCpu = slot.hostCpu;
-  const free = Math.max(0, 100 - hostCpu);
+  // Robust host-CPU figure: prefer the explicit slot.hostCpu, fall
+  // back to Σ(named) when null, finally clamp [0, 100] for the
+  // stacked-bar geometry below.
+  const hostCpu = slot.hostCpu === null ? totalNamed : slot.hostCpu;
+  const hostCpuDisplay = Math.max(0, Math.min(100, hostCpu));
+  const free = Math.max(0, 100 - hostCpuDisplay);
 
   return (
     <div className="space-y-3">
@@ -2242,7 +2276,7 @@ function ProcessStackedBar({ slot }: { slot: ProcessHistorySlot }) {
           <div
             key={r.key}
             style={{
-              width: `${Math.min(100, (r.value / 100) * 100)}%`,
+              width: `${Math.max(0, Math.min(100, r.value))}%`,
               background: r.color,
             }}
             title={`${r.label}: ${r.value.toFixed(1)}%`}
@@ -2250,7 +2284,7 @@ function ProcessStackedBar({ slot }: { slot: ProcessHistorySlot }) {
         ))}
         <div
           style={{ width: `${free}%`, background: "#f8fafc" }}
-          title={`Free: ${free.toFixed(1)}%`}
+          title={`Free / unattributed: ${free.toFixed(1)}%`}
         />
       </div>
 
@@ -2266,17 +2300,21 @@ function ProcessStackedBar({ slot }: { slot: ProcessHistorySlot }) {
             <span className="tabular-nums font-semibold">{r.value.toFixed(1)}%</span>
           </li>
         ))}
-        {totalNamed < hostCpu - 1 && (
+        {hostCpu - totalNamed > 1 && (
           <li className="flex items-center gap-2 text-gray-400 italic">
             <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0 bg-gray-200" />
             <span className="flex-1">Unattributed (named categories sum &lt; host total)</span>
-            <span className="tabular-nums">{Math.max(0, hostCpu - totalNamed).toFixed(1)}%</span>
+            <span className="tabular-nums">{(hostCpu - totalNamed).toFixed(1)}%</span>
           </li>
         )}
         <li className="flex items-center gap-2 pt-1 mt-1 border-t border-gray-100">
           <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0 bg-gray-100 border border-gray-200" />
-          <span className="flex-1 font-medium text-gray-600">Total host CPU</span>
-          <span className="tabular-nums font-semibold text-gray-900">{hostCpu.toFixed(1)}%</span>
+          <span className="flex-1 font-medium text-gray-600">
+            Total host CPU{slot.hostCpu === null ? " (estimated)" : ""}
+          </span>
+          <span className="tabular-nums font-semibold text-gray-900">
+            {hostCpu.toFixed(1)}%
+          </span>
         </li>
       </ul>
     </div>
@@ -2315,14 +2353,9 @@ function vilniusHourMinute(sec: number): { hour: number; minute: number } {
   return { hour: rawH === 24 ? 0 : rawH, minute: get("minute") };
 }
 
-function EvidenceRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4">
-      <dt className="text-gray-500">{label}</dt>
-      <dd className="font-semibold text-gray-900 tabular-nums">{value}</dd>
-    </div>
-  );
-}
+// EvidenceRow used to back the now-removed Evidence-summary / Class
+// context cards in HostEvidenceView; deleted 2026-06-01 along with
+// those cards. Their numbers already live in the matrix row above.
 
 function fmtMinutesPerDay(value: number | null): string {
   if (value === null) return "—";

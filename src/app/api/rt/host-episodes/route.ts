@@ -135,9 +135,13 @@ export async function GET(req: NextRequest) {
 
   const client = getZabbixClient();
 
-  // Fetch the host's overall CPU item (system.cpu.util[,,avg1]) so
-  // clustering speaks to 'host CPU above threshold', not 'one process
-  // above threshold'.
+  // Fetch the host's overall CPU item — must be `system.cpu.util[,,avg1]`
+  // (or the bare `system.cpu.util` fallback). Bug fix (2026-06-01): the
+  // earlier version matched any item whose key contained "avg1" and so
+  // could pick `system.cpu.util[,user,avg1]` or `[,system,avg1]` (user-
+  // mode or system-mode CPU instead of total). The rest of the codebase
+  // resolves the same item with an exact key match (see writer.ts,
+  // compare/resolve.ts, rollout-insights/fetcher.ts) — match that.
   type ZbxItem = { itemid: string; key_: string };
   const items = (await client.request("item.get", {
     output: ["itemid", "key_"],
@@ -145,10 +149,9 @@ export async function GET(req: NextRequest) {
     filter: { status: 0 },
     search: { key_: "system.cpu.util" },
   })) as ZbxItem[];
-  // Prefer the avg1 flavour — same item the rest of the dashboard reads.
   const cpuItem =
-    items.find((it) => it.key_.includes("avg1")) ??
-    items.find((it) => it.key_.startsWith("system.cpu.util")) ??
+    items.find((it) => it.key_ === "system.cpu.util[,,avg1]") ??
+    items.find((it) => it.key_ === "system.cpu.util") ??
     null;
   if (!cpuItem) {
     return NextResponse.json({
