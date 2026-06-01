@@ -65,15 +65,29 @@ async function main() {
     console.log(`Removed placeholder: ${d.count} devices + "${placeholderStore.name}"`);
   }
 
-  // Idempotent: clear all previously-seeded Rimi stores
+  // Idempotent: clear all previously-seeded Rimi stores' MONITORED
+  // devices (sourceHostKey IS NOT NULL). Unmonitored coverage rows
+  // populated by expand-lt-fleet.ts are preserved — they aren't this
+  // script's data, and wiping them would erase the LT-wide fleet share
+  // denominator on every re-seed.
+  //
+  // Stores themselves are no longer deleted here either; we just
+  // rewrite the monitored Device set. If a STORE_META row disappears,
+  // its store record stays in the DB and continues to host its
+  // unmonitored devices. (Was: store.delete cascaded by deleting all
+  // devices first — that's now too aggressive.)
   for (const code of Object.keys(STORE_META)) {
     const storeCode = STORE_META[code].code;
     const existing = await prisma.store.findFirst({
       where: { pilotId: pilot.id, code: storeCode },
     });
     if (existing) {
-      await prisma.device.deleteMany({ where: { storeId: existing.id } });
-      await prisma.store.delete({ where: { id: existing.id } });
+      await prisma.device.deleteMany({
+        where: {
+          storeId: existing.id,
+          sourceHostKey: { not: null },
+        },
+      });
     }
   }
 
@@ -90,17 +104,24 @@ async function main() {
     const meta = STORE_META[storeCode];
     if (!meta) { console.log(`  skipping unknown store ${storeCode}`); continue; }
     const storeHosts = byStore.get(storeCode)!;
-    const store = await prisma.store.create({
-      data: {
-        clientId: pilot.clientId,
-        pilotId: pilot.id,
-        name: meta.displayName,
-        code: meta.code,
-        country: "LT",
-        city: meta.city,
-        status: "active",
-      },
+    // Upsert the store (was create-after-delete; now we keep the row
+    // alive so unmonitored coverage devices on it survive re-seeding).
+    const existingStore = await prisma.store.findFirst({
+      where: { pilotId: pilot.id, code: meta.code },
     });
+    const store =
+      existingStore ??
+      (await prisma.store.create({
+        data: {
+          clientId: pilot.clientId,
+          pilotId: pilot.id,
+          name: meta.displayName,
+          code: meta.code,
+          country: "LT",
+          city: meta.city,
+          status: "active",
+        },
+      }));
     let active = 0;
     for (const h of storeHosts) {
       const m = /SCO(\d+)/i.exec(h.name) || /SCOW_(\d+)/i.exec(h.host) || /_(\d+)$/.exec(h.host);
