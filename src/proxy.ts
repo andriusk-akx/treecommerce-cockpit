@@ -34,6 +34,10 @@ const PUBLIC_PREFIXES = [
   "/api/internal/seed-testlab-cores",
   // (expand-lt-fleet was a one-shot import on 2026-06-01; route removed
   // post-execution per its own commit's "lifecycle" note.)
+  // Backfill cpuModel for Zabbix-monitored devices whose CPU we now
+  // know via the LT inventory spreadsheet — same idempotency-state
+  // gate. One-shot, removed after run.
+  "/api/internal/backfill-cpu-from-lt-fleet",
   "/_next",
   "/favicon.ico",
 ];
