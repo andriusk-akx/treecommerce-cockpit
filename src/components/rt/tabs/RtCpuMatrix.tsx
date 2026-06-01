@@ -675,11 +675,14 @@ function MatrixRowView({
   // base column to avoid the same numbers appearing twice in one row.
   const sharePct =
     fleetTotal > 0 ? Math.round((row.hostCount / fleetTotal) * 100) : 0;
-  // Coverage gap = hosts in the class with no telemetry: either
-  // unmonitored (no Zabbix link) or monitored but silent (broken agent).
-  // Surfaced explicitly in the Evidence base cell so the user knows how
-  // much of the class the metrics actually speak for.
-  const coverageGap = Math.max(0, row.hostCount - row.hostsWithData);
+  // Evidence column is strictly about the *Zabbix-monitored* slice of
+  // the class — unmonitored coverage rows live in the CPU class cell's
+  // fleet-share chip (which counts them) and in the drilldown's
+  // Unmonitored tab. Inside Evidence we only count hosts that are in
+  // Zabbix (ON ∪ OFF). Of those, some may have a broken agent and not
+  // report telemetry — that's the inner "silent" sub-count.
+  const zabbixHosts = row.hostsOn + row.hostsOff;
+  const silentZabbixHosts = Math.max(0, zabbixHosts - row.hostsWithData);
   return (
     <tr
       className={`border-t border-gray-100 align-top cursor-pointer transition-colors focus:outline-none focus:bg-blue-50/40 ${
@@ -885,41 +888,40 @@ function MatrixRowView({
         )}
       </td>
 
-      {/* Evidence base — how solid is the per-class sample?
-          Three lines, each answering a distinct question:
-            (1) class size              — how big is this segment?
-            (2) coverage                — how much of it can we see?
-            (3) Retellect ON/OFF split  — how strong is the A/B?
-          The big number is the absolute host count; the share-of-fleet
-          version of the same lives in the CPU class cell, so the two
-          columns don't repeat the same figure in two formats. Sits
-          immediately before Decision so sample size reads as setup
-          for the verdict, not as an early stat the eye has to hold. */}
+      {/* Evidence base — strictly the Zabbix-monitored slice of the
+          class. Unmonitored hosts are intentionally not counted here:
+            (1) Zabbix-monitored host count   — the slice we can measure
+            (2) ON/OFF split inside that slice — strength of the A/B
+            (3) silent sub-count, if any      — Zabbix-known hosts whose
+                                                agent currently reports
+                                                no telemetry (broken
+                                                template, ZBX_NOTSUPPORTED,
+                                                etc.) */}
       <td className="py-4 px-3 align-top">
-        <div className="text-xl font-bold text-gray-900 leading-none">
-          {row.hostCount}{" "}
+        <div
+          className="text-xl font-bold text-gray-900 leading-none"
+          title={`${zabbixHosts} of ${row.hostCount} hosts in this class run a Zabbix agent. Unmonitored hosts live in the Unmonitored drilldown tab and never feed measured metrics.`}
+        >
+          {zabbixHosts}{" "}
           <span className="text-xs font-normal text-gray-500">
-            {row.hostCount === 1 ? "host" : "hosts"}
+            on Zabbix
           </span>
         </div>
         <div className="text-[11px] mt-1.5 leading-relaxed space-y-0.5">
-          <div
-            className={coverageGap > 0 ? "text-amber-600" : "text-gray-500"}
-            title={
-              coverageGap > 0
-                ? `${row.hostsWithData} of ${row.hostCount} hosts report telemetry. ${coverageGap} have no Zabbix data — either unmonitored or with broken agents.`
-                : "All hosts in this class report telemetry."
-            }
-          >
-            {row.hostsWithData} reporting
-            {coverageGap > 0 && ` · ${coverageGap} no data`}
-          </div>
           <div
             className="text-gray-700 font-medium"
             title="Hosts classified as ON (Retellect active in window) vs OFF (Retellect inactive). Drives the measured A/B impact when both sides have enough samples."
           >
             {row.hostsOn} ON · {row.hostsOff} OFF
           </div>
+          {silentZabbixHosts > 0 && (
+            <div
+              className="text-amber-600"
+              title={`${silentZabbixHosts} Zabbix-monitored host${silentZabbixHosts === 1 ? "" : "s"} reported no telemetry in this window — broken agent or ZBX_NOTSUPPORTED items.`}
+            >
+              {silentZabbixHosts} silent
+            </div>
+          )}
         </div>
       </td>
 
