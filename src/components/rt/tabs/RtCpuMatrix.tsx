@@ -647,12 +647,18 @@ function MatrixRowView({
   // small grey/coloured label under the evidence badge, only when the
   // class actually merits a priority tag. Most rows show nothing.
   const priority = computePriority(row);
-  // Class share of fleet. Rendered as one compact secondary line under
-  // the model name; tightly bound to cores/threads when both exist so
-  // the row stays vertically compact.
+  // Class share of fleet. Rendered as a small highlighted chip so the
+  // decision-maker can scan "how big is this segment of the rollout?"
+  // at a glance without comparing absolute counts across rows. The chip
+  // shows ONLY the percent — the absolute counts live in the Evidence
+  // base column to avoid the same numbers appearing twice in one row.
   const sharePct =
     fleetTotal > 0 ? Math.round((row.hostCount / fleetTotal) * 100) : 0;
-  const shareLabel = `${sharePct}% of fleet · ${row.hostCount} / ${fleetTotal}`;
+  // Coverage gap = hosts in the class with no telemetry: either
+  // unmonitored (no Zabbix link) or monitored but silent (broken agent).
+  // Surfaced explicitly in the Evidence base cell so the user knows how
+  // much of the class the metrics actually speak for.
+  const coverageGap = Math.max(0, row.hostCount - row.hostsWithData);
   return (
     <tr
       className={`border-t border-gray-100 align-top cursor-pointer transition-colors ${
@@ -666,18 +672,21 @@ function MatrixRowView({
       {/* CPU class */}
       <td className={`py-4 px-4 relative ${isSelected ? "border-l-4 border-l-blue-500 pl-3" : ""}`}>
         <div className="font-semibold text-gray-900">{row.model}</div>
-        {row.cpuCores !== null && row.cpuThreads !== null ? (
+        {row.cpuCores !== null && row.cpuThreads !== null && (
           <div className="text-[10px] text-gray-400 mt-0.5 tabular-nums font-medium uppercase tracking-wide">
             {row.cpuCores}C / {row.cpuThreads}T
-            <span className="text-gray-300 mx-1">·</span>
-            <span className="normal-case tracking-normal font-medium">{shareLabel}</span>
-          </div>
-        ) : (
-          <div className="text-[10px] text-gray-400 mt-0.5 tabular-nums font-medium">
-            {shareLabel}
           </div>
         )}
-        <div className="text-[11px] text-gray-500 mt-0.5">{row.subtitle}</div>
+        {fleetTotal > 0 && (
+          <div
+            className="inline-flex items-center gap-1 mt-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200 tabular-nums cursor-help whitespace-nowrap"
+            title={`This CPU class accounts for ${sharePct}% of all devices in the pilot${fleetTotal === row.hostCount ? "" : " (counting hosts without Zabbix monitoring or telemetry too)"}. Useful as a priority signal — risk on a large segment matters more than the same risk on a small one.`}
+          >
+            <span className="w-1 h-1 rounded-full bg-sky-500" />
+            {sharePct}% of fleet
+          </div>
+        )}
+        <div className="text-[11px] text-gray-500 mt-1.5">{row.subtitle}</div>
         <div
           className={`inline-block mt-2 px-2 py-0.5 rounded-full border text-[10px] font-semibold whitespace-nowrap ${EVIDENCE_STYLES[row.evidence]}`}
         >
@@ -693,17 +702,37 @@ function MatrixRowView({
         )}
       </td>
 
-      {/* Evidence base — factual numbers only. The "No Retellect ON data yet"
-          state is communicated by the badge under the CPU class; repeating it
-          here was redundant and crowded the cell. */}
+      {/* Evidence base — how solid is the per-class sample? Three lines,
+          each answering a distinct question:
+            (1) class size                 — how big is this segment?
+            (2) coverage                   — how much of it can we see?
+            (3) Retellect ON/OFF split     — how strong is the A/B?
+          The big number is the absolute host count; the share-of-fleet
+          version of the same lives in the CPU class cell, so the two
+          columns don't repeat the same figure in two formats. */}
       <td className="py-4 px-3">
         <div className="text-xl font-bold text-gray-900 leading-none">
-          {row.hostCount} <span className="text-xs font-normal text-gray-500">hosts</span>
+          {row.hostCount}{" "}
+          <span className="text-xs font-normal text-gray-500">
+            {row.hostCount === 1 ? "host" : "hosts"}
+          </span>
         </div>
-        <div className="text-[11px] text-gray-500 mt-1 leading-relaxed">
-          {row.hostsWithData}/{row.hostCount} with data
+        <div className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
+          <span
+            className={coverageGap > 0 ? "text-amber-700 font-medium" : ""}
+            title={
+              coverageGap > 0
+                ? `${row.hostsWithData} of ${row.hostCount} hosts report telemetry. ${coverageGap} have no Zabbix data — either unmonitored or with broken agents.`
+                : "All hosts in this class report telemetry."
+            }
+          >
+            {row.hostsWithData} reporting
+            {coverageGap > 0 && ` · ${coverageGap} no data`}
+          </span>
           <br />
-          ON {row.hostsOn} · OFF {row.hostsOff}
+          <span title="Hosts classified as ON (Retellect active in window) vs OFF (Retellect inactive). Drives the measured A/B impact when both sides have enough samples.">
+            {row.hostsOn} ON · {row.hostsOff} OFF
+          </span>
         </div>
       </td>
 
