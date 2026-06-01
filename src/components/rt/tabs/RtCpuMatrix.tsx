@@ -724,10 +724,11 @@ function MatrixRowView({
         {fleetTotal > 0 && (
           <div
             className="inline-flex items-center gap-1 mt-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200 tabular-nums cursor-help whitespace-nowrap"
-            title={`This CPU class accounts for ${sharePct}% of all devices in the pilot${fleetTotal === row.hostCount ? "" : " (counting hosts without Zabbix monitoring or telemetry too)"}. Useful as a priority signal — risk on a large segment matters more than the same risk on a small one.`}
+            title={`This CPU class covers ${row.hostCount} of ${fleetTotal} devices (${sharePct}%) in the pilot${fleetTotal === row.hostCount ? "" : ", counting hosts without Zabbix monitoring or telemetry too"}. Useful as a priority signal — risk on a large segment matters more than the same risk on a small one.`}
           >
             <span className="w-1 h-1 rounded-full bg-sky-500" />
             {sharePct}% of fleet
+            <span className="font-normal text-sky-600/80">· {row.hostCount} {row.hostCount === 1 ? "host" : "hosts"}</span>
           </div>
         )}
       </td>
