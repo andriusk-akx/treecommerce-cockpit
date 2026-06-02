@@ -768,7 +768,7 @@ function MatrixRowView({
               value: perHostPerDay(row.timeAboveNowMin, row.hostsWithData, row.periodDays),
               unit: "min/d",
               bar: "used",
-              tip: "Average minutes per host per day above the selected CPU threshold, normalised over the selected period. Period-invariant for stable workloads — choosing 7d vs 30d vs 90d changes the sampling-window confidence, not the displayed intensity.",
+              tip: "Average minutes per host per day above the selected CPU threshold, normalised over the selected period (24h denominator — includes off-hours peaks like Windows updates / antivirus). Open the host drilldown to see the per-minute list with a 'Business hours only' filter for a more decision-relevant view. This will be replaced with transaction-derived active minutes once the Retellect-side API extension ships.",
               valueColor: timeAboveColor(
                 perHostPerDay(row.timeAboveNowMin, row.hostsWithData, row.periodDays),
               ),
@@ -873,7 +873,7 @@ function MatrixRowView({
                 unit: "min/d",
                 bar: "used",
                 approx: true,
-                tip: "Projected time above threshold — estimated minutes per host per day above the threshold after applying the Planned Retellect impact. Modeled value derived from the underlying per-minute distribution. Period-invariant: changing the Period dropdown adjusts the sampling-window confidence, not the displayed rate, when the workload is stable.",
+                tip: "Projected time above threshold — estimated minutes per host per day above the threshold after applying the Planned Retellect impact. Modeled value derived from the underlying per-minute distribution. 24h denominator (same caveat as Current state Time above). Will become active-minutes-aware once the transaction-timestamp API ships.",
                 valueColor: timeAboveColor(
                   perHostPerDay(
                     row.projectedTimeAboveMin,
@@ -1876,6 +1876,38 @@ interface MinuteSample {
   cpu: number;
 }
 
+/** Rimi store-operating-hours definition used as a stand-in for
+ *  "active minutes" until the Retellect-side transaction-timestamp
+ *  API ships and we can swap to real activity windows.
+ *
+ *    Mon–Sat: 08:00–22:00  (14 hours / day)
+ *    Sunday : 09:00–21:00  (12 hours / day)
+ *    Weekly : 6 × 14 + 12 = 96 business hours / 168 calendar hours
+ *
+ *  Bias notes:
+ *   • Holidays / national days off are not modelled. They look like
+ *     "business hours" but the lane is closed — a small over-count.
+ *   • Mid-day breaks are not modelled. We treat the full open
+ *     window as active, which is fine for rollout decisions
+ *     (off-hours noise was the bigger problem we wanted to filter
+ *     out, not within-business lulls). */
+function isVilniusBusinessHour(clockSec: number): boolean {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Vilnius",
+    weekday: "short",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(clockSec * 1000));
+  const weekday = parts.find((p) => p.type === "weekday")?.value ?? "";
+  const rawHour = parts.find((p) => p.type === "hour")?.value ?? "0";
+  const hour = parseInt(rawHour, 10) === 24 ? 0 : parseInt(rawHour, 10);
+  if (weekday === "Sun") {
+    return hour >= 9 && hour < 21;
+  }
+  // Mon, Tue, Wed, Thu, Fri, Sat
+  return hour >= 8 && hour < 22;
+}
+
 /** Level 3 — flat list of every minute the host's CPU was above the
  *  selected threshold. Lazy-fetched on mount and on host / threshold
  *  / period change. Capped at 500 minutes — beyond that, the operator
@@ -1897,6 +1929,13 @@ function HostMinutesList({
   const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Business-hours filter is on by default — for rollout decisions
+  // the operator overwhelmingly cares about in-store-hours pressure,
+  // not 03:00 AM antivirus / Windows-update peaks. Stand-in for the
+  // real active-minutes signal until the transaction-timestamp API
+  // ships. The toggle exists so the operator can verify they're not
+  // dropping a real burst that happened off-hours (rare, but possible).
+  const [businessOnly, setBusinessOnly] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -1938,21 +1977,50 @@ function HostMinutesList({
     };
   }, [hostId, threshold, periodDays]);
 
+  // Derive the displayed minute list from the raw fetched list +
+  // the business-hours toggle. Keep the raw list in state so toggling
+  // doesn't force a refetch.
+  const displayedMinutes = useMemo(() => {
+    if (!minutes) return null;
+    if (!businessOnly) return minutes;
+    return minutes.filter((m) => isVilniusBusinessHour(m.clockSec));
+  }, [minutes, businessOnly]);
+  const totalCount = minutes?.length ?? 0;
+  const displayedCount = displayedMinutes?.length ?? 0;
+  const filteredOutCount = totalCount - displayedCount;
+
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-3">
+      <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
         <div className="text-[11px] font-semibold text-gray-600 uppercase tracking-widest">
           Minutes above {threshold}%
           {minutes && (
             <span className="ml-2 text-gray-400 font-normal normal-case tracking-normal">
-              ({minutes.length}
-              {truncated ? "+" : ""} in {periodDays} d)
+              ({displayedCount}
+              {truncated ? "+" : ""} in {periodDays} d
+              {businessOnly && filteredOutCount > 0
+                ? `, ${filteredOutCount} off-hours hidden`
+                : ""})
             </span>
           )}
         </div>
-        <span className="text-[10px] text-gray-400">
-          {hostName} · Europe/Vilnius
-        </span>
+        <div className="flex items-center gap-3">
+          <label
+            className="inline-flex items-center gap-1.5 text-[10px] text-gray-600 cursor-pointer select-none"
+            title="Restrict the list to Rimi store-operating hours (Mon–Sat 08–22, Sun 09–21 Europe/Vilnius). Off-hours peaks are usually OS maintenance, not customer load — a temporary stand-in until the transaction-timestamp API ships."
+          >
+            <input
+              type="checkbox"
+              checked={businessOnly}
+              onChange={(e) => setBusinessOnly(e.target.checked)}
+              className="w-3 h-3 accent-sky-600 cursor-pointer"
+            />
+            Business hours only
+          </label>
+          <span className="text-[10px] text-gray-400">
+            {hostName} · Europe/Vilnius
+          </span>
+        </div>
       </div>
 
       {loading ? (
@@ -1972,9 +2040,11 @@ function HostMinutesList({
         </div>
       ) : error ? (
         <div className="text-[12px] text-red-600">Failed to load: {error}</div>
-      ) : minutes === null || minutes.length === 0 ? (
+      ) : displayedMinutes === null || displayedMinutes.length === 0 ? (
         <div className="text-[12px] text-gray-400 italic py-2">
-          No minutes above {threshold}% in the {periodDays}-day window.
+          {businessOnly && totalCount > 0
+            ? `All ${totalCount} minutes above ${threshold}% fell outside business hours.`
+            : `No minutes above ${threshold}% in the ${periodDays}-day window.`}
         </div>
       ) : (
         <>
@@ -1992,7 +2062,7 @@ function HostMinutesList({
                 </tr>
               </thead>
               <tbody>
-                {minutes.map((m) => (
+                {displayedMinutes.map((m) => (
                   <tr
                     key={m.clockSec}
                     className="border-t border-gray-100 hover:bg-sky-50/40 cursor-pointer focus:outline-none focus:bg-sky-50/40 transition-colors"
