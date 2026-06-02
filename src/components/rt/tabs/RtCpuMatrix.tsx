@@ -110,6 +110,15 @@ interface CpuMatrixRow {
   /** Measured Retellect direct CPU on ON hosts (avg over active min).
    *  Surfaced as supporting context under the impact box. */
   measuredRetellectCpuOn: number | null;
+  /** Indicative-only measured-impact signal when exactly ONE ON host
+   *  contributed to the class aggregate. The class falls below the
+   *  "≥2 ON + ≥2 OFF" bar for measured-on-off evidence, so this is
+   *  NOT used to drive the projection / decision — but it surfaces in
+   *  the Decision cell as a qualifier so the operator can see real
+   *  evidence (e.g. Pavilnionys SCO2 +23 pp on i3-6100) sitting next
+   *  to the conservative scenario the model is using instead. Null
+   *  when no single-ON-host signal is available. */
+  singleHostMeasuredImpactPp: number | null;
 
   // ── Planned impact ────────────────────────────────────────────────
   /** Effective Planned Retellect impact in percentage points — this is
@@ -1097,6 +1106,40 @@ function MatrixRowView({
                 {EVIDENCE_LABEL[row.evidence]}
               </span>
             </li>
+            {/* Single-ON-host indicative signal (batch 2, 2026-06-02).
+                Surfaces real measured behaviour from the one ON host
+                in the class so the operator doesn't lose sight of it
+                while the conservative scenario drives the projection
+                numbers above. Tone shifts to amber when the measured
+                delta differs from the conservative impact by ≥ 5 pp
+                — that's the "your real evidence contradicts the
+                model" case (e.g. Pavilnionys SCO2 +23 pp on i3-6100
+                when the conservative scenario also says +28 pp; close
+                enough). Drives validation focus when divergence is
+                wide. */}
+            {row.singleHostMeasuredImpactPp !== null &&
+              row.impactSource !== "measured" && (
+                (() => {
+                  const measured = row.singleHostMeasuredImpactPp;
+                  const conservative = row.defaultImpactPp;
+                  const diverges = Math.abs(measured - conservative) >= 5;
+                  return (
+                    <li className="flex items-start gap-1.5">
+                      <span className="text-gray-300 mt-px" aria-hidden="true">·</span>
+                      <span
+                        className={`cursor-help ${diverges ? "text-amber-700" : "text-gray-500"}`}
+                        title={
+                          diverges
+                            ? `One ON host in this class measured a +${measured.toFixed(1)} pp shift in mean CPU — diverges from the conservative scenario (${conservative.toFixed(1)} pp) by ≥ 5 pp. The class falls below the ≥2 ON + ≥2 OFF bar for "Measured ON/OFF" evidence, so projection above still uses the conservative figure. Validate the single host's behaviour against the projection before rollout.`
+                            : `One ON host in this class measured a +${measured.toFixed(1)} pp shift in mean CPU (consistent with the conservative scenario of ${conservative.toFixed(1)} pp).`
+                        }
+                      >
+                        1 ON host measured {measured >= 0 ? "+" : ""}{measured.toFixed(1)} pp
+                      </span>
+                    </li>
+                  );
+                })()
+              )}
             {priority && (
               <li className="flex items-start gap-1.5">
                 <span className="text-gray-300 mt-px" aria-hidden="true">·</span>
@@ -3183,6 +3226,32 @@ function computeCpuMatrix(
       if (evidence === "measured-on-off") evidence = "no-on-data";
     }
 
+    // Bug fix / observability (2026-06-02, batch 2): when exactly ONE
+    // ON host contributed (e.g. Pavilnionys SCO2 on i3-6100), we have
+    // a real measured delta but the class falls below the "≥2 ON +
+    // ≥2 OFF" bar for measured-on-off evidence. Conservative scenario
+    // takes over and the operator loses sight of the single host's
+    // real-world behaviour — even though that one host may have shown
+    // a much larger / smaller shift than the conservative figure
+    // predicts. Compute the indicative delta here so the row can
+    // surface it as a Decision-cell qualifier alongside the
+    // conservative scenario.
+    let singleHostMeasuredImpactPp: number | null = null;
+    if (
+      g.hostsOnContributed === 1 &&
+      g.hostsOffContributed >= 1 &&
+      avgOnTotalCpu !== null &&
+      avgOffTotalCpu !== null
+    ) {
+      const rawDelta = avgOnTotalCpu - avgOffTotalCpu;
+      // Clamp same as the measured path so a stuck Zabbix counter
+      // doesn't surface as +60 pp here either. Negative deltas are
+      // KEPT (clamped at -10 lower bound only) — when a real ON
+      // host runs cooler than the OFF average for the same hardware
+      // tier, that's information worth showing, not hiding.
+      singleHostMeasuredImpactPp = Math.max(-10, Math.min(30, Math.round(rawDelta * 10) / 10));
+    }
+
     // Projected state + decision derive from the *default* impact here.
     // The component layer recomputes both when the user manually
     // overrides Planned Retellect impact for a CPU class. See applyImpact.
@@ -3280,6 +3349,7 @@ function computeCpuMatrix(
         cpuCountFrom === "active" ? g.minutesAboveByBucketActive : g.minutesAboveByBucketTracked,
       maxCpu,
       measuredRetellectCpuOn: avgRetellectOn,
+      singleHostMeasuredImpactPp,
       impactPp,
       impactSource,
       defaultImpactPp: impactPp,
