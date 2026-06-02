@@ -32,12 +32,10 @@ const PUBLIC_PREFIXES = [
   // route, same rationale as warm-cache: the secret IS the auth boundary,
   // session cookies don't apply because operators hit this from curl.
   "/api/internal/seed-testlab-cores",
-  // (expand-lt-fleet, backfill-cpu-from-lt-fleet, and
-  // merge-sco-naming-duplicates were one-shot imports on 2026-06-01;
-  // routes removed post-execution per their own lifecycle notes.)
-  // LV + EE inventory import — one-shot, idempotency-gated. Removed
-  // after the import lands.
-  "/api/internal/expand-foreign-fleet",
+  // (expand-lt-fleet, backfill-cpu-from-lt-fleet,
+  // merge-sco-naming-duplicates, and expand-foreign-fleet were
+  // one-shot imports on 2026-06-01..02; routes removed
+  // post-execution per their own lifecycle notes.)
   "/_next",
   "/favicon.ico",
 ];
