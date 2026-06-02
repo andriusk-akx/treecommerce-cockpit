@@ -436,8 +436,23 @@ export function RtCpuMatrix({
       </div>
       {filteredMatrix.length === 0 ? (
         <div className="bg-white rounded-lg border border-gray-200 px-5 py-10 text-center text-sm text-gray-400">
+          {/* Bug fix (2026-06-02, batch of 10): the previous empty
+              state claimed "Not enough CPU history" unconditionally
+              when matrix.length === 0, which was wrong whenever a
+              Country / Store / CPU filter had narrowed the input
+              down to zero devices (data exists, filters just hid
+              everything) or when Business-hours-only was on and the
+              available days were all rollup-sourced (so they got
+              skipped to avoid mixed semantics — see Bug 1 of the
+              previous batch). The copy now points at the actual
+              likely cause so the operator doesn't go hunting for a
+              data-health issue that doesn't exist. */}
           {matrix.length === 0
-            ? "Not enough CPU history to score rollout. Check Data Health."
+            ? (filters.country !== "all" || filters.store !== "all" || filters.cpuModel !== "all")
+              ? "No CPU classes match the current Country / Store / CPU filters. Clear filters to see the full matrix."
+              : filters.businessHoursOnly
+                ? "No business-hour CPU history in this window. The available days came through the DB rollup (no business-hour filter applied yet). Switch off 'Business hours only' to read 24h aggregates, or pick a more recent Period."
+                : "Not enough CPU history to score rollout. Check Data Health."
             : "All classes filtered out by Hide silent — no Retellect activity observed in this window."}
         </div>
       ) : (
@@ -511,6 +526,7 @@ export function RtCpuMatrix({
                   row={row}
                   threshold={threshold}
                   fleetTotal={fleetTotal}
+                  filtersNarrowed={filters.country !== "all" || filters.store !== "all"}
                   onImpactChange={setImpactFor}
                   isSelected={row.model === selectedModel}
                   onSelect={onMatrixRowSelect}
@@ -544,14 +560,31 @@ export function RtCpuMatrix({
             const countries = Array.from(
               new Set(pilot.stores.map((s) => s.country).filter((c): c is string => !!c)),
             ).sort();
-            if (countries.length <= 1) return null;
+            // Bug fix (2026-06-02, batch of 10): the dropdown used to
+            // disappear whenever `countries.length <= 1`, which made
+            // sense as long as the operator's `countryFilter` was
+            // also "all". But if a stale localStorage value (e.g.
+            // "LV" left over from a multi-country session) kept
+            // countryFilter at an inactive country, the dropdown
+            // hid AND the chip bar didn't have a country entry yet
+            // — the operator literally couldn't see or clear the
+            // filter, and the matrix silently rendered empty. Now:
+            // the dropdown stays visible whenever the filter isn't
+            // already "all", regardless of country count, so the
+            // operator can always clear it. Also include the stale
+            // value in the option list so it's selectable / visible
+            // even when no current store is in that country.
+            if (countries.length <= 1 && countryFilter === "all") return null;
+            const optionCountries = countryFilter !== "all" && !countries.includes(countryFilter)
+              ? [...countries, countryFilter].sort()
+              : countries;
             return (
               <FilterSelect
                 label="Country"
                 value={countryFilter}
                 options={[
                   { v: "all", l: "All countries" },
-                  ...countries.map((c) => ({ v: c, l: COUNTRY_LABEL[c] ?? c })),
+                  ...optionCountries.map((c) => ({ v: c, l: COUNTRY_LABEL[c] ?? c })),
                 ]}
                 onChange={(v) => {
                   setFilter("country", v);
@@ -712,6 +745,7 @@ function MatrixRowView({
   row,
   threshold,
   fleetTotal,
+  filtersNarrowed,
   onImpactChange,
   isSelected,
   onSelect,
@@ -722,6 +756,11 @@ function MatrixRowView({
    *  per-class "% of fleet" line. Includes unmonitored hosts on purpose
    *  so the share reflects physical inventory, not monitoring coverage. */
   fleetTotal: number;
+  /** True when Country or Store filter is narrowing fleetTotal away
+   *  from the whole-pilot count — drives the chip tooltip wording so
+   *  the operator isn't told "% of fleet" when the denominator is
+   *  actually the filtered subset. */
+  filtersNarrowed: boolean;
   onImpactChange: (model: string, value: number | null) => void;
   isSelected: boolean;
   onSelect: (model: string) => void;
@@ -790,7 +829,19 @@ function MatrixRowView({
         {fleetTotal > 0 && (
           <div
             className="inline-flex items-center gap-1 mt-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200 tabular-nums cursor-help whitespace-nowrap"
-            title={`This CPU class covers ${row.hostCount} of ${fleetTotal} devices (${sharePct}%) in the pilot${fleetTotal === row.hostCount ? "" : ", counting hosts without Zabbix monitoring or telemetry too"}. Useful as a priority signal — risk on a large segment matters more than the same risk on a small one.`}
+            title={
+              /* Bug fix (2026-06-02, batch of 10): tooltip used to
+                  read "% of fleet in pilot" unconditionally, which
+                  was misleading once Country / Store filters were
+                  active — the denominator (fleetTotal) is itself
+                  filtered, so the same class would jump from 5% to
+                  20% as the operator narrowed scope, with the
+                  tooltip claiming nothing had changed. Now we name
+                  the actual denominator the chip is using. */
+              filtersNarrowed
+                ? `This CPU class covers ${row.hostCount} of ${fleetTotal} devices (${sharePct}%) WITHIN THE CURRENT FILTER (Country / Store narrowed scope). Clear the filters to see the whole-pilot share.`
+                : `This CPU class covers ${row.hostCount} of ${fleetTotal} devices (${sharePct}%) in the pilot${fleetTotal === row.hostCount ? "" : ", counting hosts without Zabbix monitoring or telemetry too"}. Useful as a priority signal — risk on a large segment matters more than the same risk on a small one.`
+            }
           >
             <span className="w-1 h-1 rounded-full bg-sky-500" />
             {sharePct}% of fleet
@@ -974,7 +1025,19 @@ function MatrixRowView({
           {silentZabbixHosts > 0 && (
             <div
               className="text-amber-600"
-              title={`${silentZabbixHosts} Zabbix-monitored host${silentZabbixHosts === 1 ? "" : "s"} reported no telemetry in this window — broken agent or ZBX_NOTSUPPORTED items.`}
+              title={
+                /* Bug fix (2026-06-02, batch of 10): when the
+                    Business-hours-only toggle is on, a host can
+                    look "silent" not because the agent is broken
+                    but because its only available data came
+                    through the DB rollup, which has no business-
+                    hour filter applied yet (the matrix skips
+                    those days outright to avoid mixed semantics).
+                    Tooltip now spells the alternative cause out
+                    so the operator doesn't go hunting for an
+                    agent issue that doesn't exist. */
+                `${silentZabbixHosts} Zabbix-monitored host${silentZabbixHosts === 1 ? "" : "s"} contributed no usable telemetry in this window — broken agent, ZBX_NOTSUPPORTED items, or (under the Business-hours-only toggle) only DB-rollup days available (which don't carry a business-hour filter yet).`
+              }
             >
               {silentZabbixHosts} silent
             </div>
@@ -2572,14 +2635,25 @@ function buildDrilldownHosts(
     let hostBusinessSamples = 0;
     let sawAnyData = false;
     for (const t of trends) {
-      const useAvg =
-        businessHoursOnly && typeof t.avgBusiness === "number" && t.avgBusiness !== null
-          ? t.avgBusiness
-          : t.avg;
-      const useMax =
-        businessHoursOnly && typeof t.maxBusiness === "number" && t.maxBusiness !== null
-          ? t.maxBusiness
-          : t.max;
+      // Bug fix (2026-06-02, batch of 10): drilldown's per-host
+      // peak / typical / minutes-above must use the SAME skip-on-
+      // missing-business-data semantics as the matrix above. The
+      // earlier draft silently fell back to t.avg / t.max for
+      // trend-only days when business stats were absent, producing
+      // drilldown numbers that drifted from the matrix row above
+      // (which now skips those days entirely per the earlier fix).
+      // Now: skip the day outright when business toggle is on and
+      // there's no business data for it. Drilldown header values
+      // therefore round-trip with the matrix class row.
+      const businessOk =
+        businessHoursOnly &&
+        t.avgBusiness !== null &&
+        t.avgBusiness !== undefined &&
+        t.maxBusiness !== null &&
+        t.maxBusiness !== undefined;
+      if (businessHoursOnly && !businessOk) continue;
+      const useAvg = businessHoursOnly ? (t.avgBusiness as number) : t.avg;
+      const useMax = businessHoursOnly ? (t.maxBusiness as number) : t.max;
       if (Number.isFinite(useAvg)) {
         sawAnyData = true;
         if (useAvg > 0) dailyAvgs.push(useAvg);
@@ -2612,8 +2686,21 @@ function buildDrilldownHosts(
     // Composite risk for sorting. Peak gets the heaviest weight because
     // a single high peak is what makes a host "interesting" for rollout
     // risk; sustained minutes-above is the supporting signal.
-    const riskScore =
-      (peakCpu ?? 0) + (minutesAbovePerDay ?? 0) * 0.5;
+    //
+    // Bug fix (2026-06-02, batch of 10): the raw addition
+    // `(peakCpu ?? 0) + (minutesAbovePerDay ?? 0) * 0.5` was a
+    // dimensional-analysis bug — peakCpu lives in 0-100 (%), while
+    // minutesAbovePerDay lives in 0-1440 (min/day). With the global
+    // business-hours toggle on, minutesAbovePerDay can land in the
+    // 200-600 range (intensity-projected to 24h equivalent), which
+    // utterly dominated peakCpu in the sort and reshuffled the
+    // drilldown host order whenever the operator toggled business
+    // hours. Now: cap the minutes-above contribution at 60 min/d
+    // (anything above 1h/day is all "very bad", a flat tie-breaker)
+    // and clamp peakCpu to 100. Sort order is now stable across
+    // toggle modes and consistent in semantics.
+    const cappedMin = Math.min(minutesAbovePerDay ?? 0, 60);
+    const riskScore = Math.min(100, peakCpu ?? 0) + cappedMin * 0.5;
 
     out.push({
       hostId: matched.hostId,

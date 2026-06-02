@@ -96,12 +96,20 @@ export const defaultFilters: DashboardFilters = {
   chartMode: "bars",
 };
 
-/** Human labels for chip bar. Order here = chip render order. */
+/** Human labels for chip bar. Order here = chip render order.
+ *  Bug fix (2026-06-02, batch of 10): two filters added on 2026-05-31
+ *  / 2026-06-01 (country + businessHoursOnly) were never registered
+ *  here, so changing them never surfaced in the active-filters chip
+ *  bar. The operator had no UI signal that the filter was active
+ *  (other than the filter bar itself), and no one-click way to clear
+ *  it. Both now register as chips so the chip bar honestly reflects
+ *  the current dashboard state. */
 const FILTER_LABELS: Array<{
   key: keyof DashboardFilters;
   label: string;
   format: (v: DashboardFilters[keyof DashboardFilters]) => string;
 }> = [
+  { key: "country", label: "Country", format: (v) => String(v) },
   { key: "store", label: "Store", format: (v) => String(v) },
   { key: "cpuModel", label: "CPU", format: (v) => String(v) },
   { key: "search", label: "Search", format: (v) => `"${String(v)}"` },
@@ -110,6 +118,12 @@ const FILTER_LABELS: Array<{
   { key: "threshold", label: "Threshold", format: (v) => `${v}%` },
   { key: "activeThresholdPp", label: "Active", format: (v) => `${v} pp` },
   { key: "cpuCountFrom", label: "Count from", format: (v) => v === "active" ? "active only" : "all tracked" },
+  // businessHoursOnly default is TRUE — so the chip surfaces only
+  // when the operator has switched it OFF (i.e. "24h" diverges from
+  // the default 'business-only' baseline). The label inverts the
+  // boolean for that reason: the chip says what's ACTIVE relative to
+  // default, not the literal toggle state.
+  { key: "businessHoursOnly", label: "Window", format: (v) => v === false ? "24h (off-hours included)" : "" },
   { key: "granularity", label: "Granularity", format: (v) => `${v}min` },
   { key: "chartMode", label: "Chart", format: (v) => String(v) },
 ];
@@ -226,6 +240,31 @@ export function RtFiltersProvider({ pilotId, initialPeriod, initialActiveThresho
         merged.retellectInstalled !== "installed"
       ) {
         merged.retellectInstalled = null;
+      }
+      // Migration 2026-06-02: country filter added on 2026-06-01 for
+      // LV / EE fleet import. If the previous session persisted a
+      // country value that's no longer valid (operator switched
+      // pilots, fleet shrunk to LT-only, or someone hand-edited
+      // localStorage), the Store dropdown silently empties because
+      // its options filter by store.country === countryFilter. Snap
+      // anything outside the {"all", "LT", "LV", "EE"} allowlist
+      // back to "all" — the country dropdown then re-shows the
+      // expected scope and Store re-fills.
+      if (
+        merged.country !== "all" &&
+        merged.country !== "LT" &&
+        merged.country !== "LV" &&
+        merged.country !== "EE"
+      ) {
+        merged.country = defaultFilters.country;
+      }
+      // Migration 2026-06-02: businessHoursOnly added on 2026-06-01.
+      // If someone hand-edited or an old payload carries a non-boolean
+      // value, fall back to the default (true) rather than letting a
+      // falsy/truthy coercion ride into the matrix compute, which
+      // would silently disable the business filter for some sessions.
+      if (typeof merged.businessHoursOnly !== "boolean") {
+        merged.businessHoursOnly = defaultFilters.businessHoursOnly;
       }
       return merged;
     } catch {
