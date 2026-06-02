@@ -128,10 +128,22 @@ export interface ZabbixCpuTrend {
    */
   minutesAbove?: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
   /**
+   * Same shape as `minutesAbove` but restricted to samples whose
+   * Vilnius-local timestamp falls inside Rimi store-operating hours
+   * (Mon–Sat 08–22, Sun 09–21). Stand-in for "active minutes" while we
+   * wait on the transaction-timestamp API. Present on Zabbix-sourced
+   * rows; absent / zero on DB-rollup rows (older dates). Matrix's
+   * Time-above metric prefers this counter when present and falls
+   * back to `minutesAbove` for DB-rolled days.
+   */
+  minutesAboveBusiness?: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
+  /**
    * Total number of raw samples (i.e. minutes with data) ingested for
    * this (host, date). Denominator for "X minutes above / Y total" UI.
    */
   totalSamples?: number;
+  /** Sample count restricted to business hours. */
+  businessSamples?: number;
 }
 
 /**

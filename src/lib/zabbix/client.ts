@@ -338,7 +338,7 @@ export class ZabbixClient {
     itemIds: string[],
     itemHostMap: Map<string, string>,
     daysBack: number = 14
-  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[]> {
+  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[]> {
     if (itemIds.length === 0) return [];
     // Cache the daily aggregate for 2 minutes. This data covers 14 days, the
     // newest day changes minute-by-minute, but the rest is frozen. A 2-minute
@@ -354,7 +354,7 @@ export class ZabbixClient {
     itemIds: string[],
     itemHostMap: Map<string, string>,
     daysBack: number = 14
-  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[]> {
+  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[]> {
     // Bound at 1..365 days. The internal merge handles >14 d windows via
     // trend.get hourly aggregates: history.get covers the recent ~14 d with
     // sample-level accuracy, trend.get fills in the rest of the window.
@@ -370,17 +370,63 @@ export class ZabbixClient {
     type Bucket = {
       max: number; sum: number; min: number; count: number;
       samples: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
+      /** Same shape as `samples` but only counts the 1-min sample when
+       *  its Vilnius-local timestamp falls inside Rimi store-operating
+       *  hours (Mon–Sat 08–22, Sun 09–21). Stand-in for "active minutes"
+       *  until the transaction-timestamp API arrives. */
+      samplesBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
       totalSamples: number;
+      /** Sample count restricted to business hours (denominator parity
+       *  with `totalSamples`). */
+      businessSamples: number;
     };
     const dailyMap = new Map<string, Bucket>();
     const localDate = (clockSec: number) =>
       new Date(clockSec * 1000).toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" });
+
+    // Per-date metadata cache — derive Vilnius weekday + UTC offset
+    // once per local day, then check business-hours arithmetically.
+    // 14 days × 1 Intl call per day = 14 calls total (cheap), vs
+    // up-to-1M Intl calls if we called .toLocaleString() per sample.
+    type DayMeta = { weekday: number; offsetSec: number };
+    const dayMetaCache = new Map<string, DayMeta>();
+    const dayMetaFor = (dateStr: string, witnessClockSec: number): DayMeta => {
+      const cached = dayMetaCache.get(dateStr);
+      if (cached) return cached;
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Vilnius",
+        weekday: "short",
+        timeZoneName: "shortOffset",
+      }).formatToParts(new Date(witnessClockSec * 1000));
+      const wdStr = parts.find((p) => p.type === "weekday")?.value ?? "Mon";
+      // Sun=0 Mon=1 ... Sat=6 — matches Date.prototype.getDay() ordering
+      const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(wdStr);
+      const tz = parts.find((p) => p.type === "timeZoneName")?.value ?? "GMT+02:00";
+      const m = /([+-])(\d{1,2})(?::(\d{2}))?/.exec(tz);
+      const sign = m?.[1] === "+" ? 1 : -1;
+      const oh = parseInt(m?.[2] ?? "0", 10);
+      const om = parseInt(m?.[3] ?? "0", 10);
+      const offsetSec = sign * (oh * 3600 + om * 60);
+      const meta = { weekday: weekday >= 0 ? weekday : 1, offsetSec };
+      dayMetaCache.set(dateStr, meta);
+      return meta;
+    };
+    const isBusinessHour = (clockSec: number, dateStr: string): boolean => {
+      const meta = dayMetaFor(dateStr, clockSec);
+      const localSec = ((clockSec + meta.offsetSec) % 86400 + 86400) % 86400;
+      const hour = Math.floor(localSec / 3600);
+      if (meta.weekday === 0) return hour >= 9 && hour < 21; // Sunday
+      return hour >= 8 && hour < 22; // Mon–Sat
+    };
+
     const newBucket = (value: number): Bucket => ({
       max: value, sum: value, min: value, count: 1,
       samples: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
+      samplesBusiness: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
       totalSamples: 0,
+      businessSamples: 0,
     });
-    const merge = (hostId: string, date: string, value: number, isRawSample: boolean) => {
+    const merge = (hostId: string, date: string, value: number, isRawSample: boolean, clockSec: number) => {
       const key = `${hostId}|${date}`;
       let b = dailyMap.get(key);
       if (!b) { b = newBucket(value); dailyMap.set(key, b); }
@@ -411,6 +457,20 @@ export class ZabbixClient {
         if (value > 70) b.samples[70]++;
         if (value > 80) b.samples[80]++;
         if (value > 90) b.samples[90]++;
+        // Same counters again but gated by the Rimi store-operating
+        // window. Costs a few arithmetic ops per sample plus one
+        // cached weekday/offset lookup per local date.
+        if (isBusinessHour(clockSec, date)) {
+          b.businessSamples += 1;
+          if (value > 20) b.samplesBusiness[20]++;
+          if (value > 30) b.samplesBusiness[30]++;
+          if (value > 40) b.samplesBusiness[40]++;
+          if (value > 50) b.samplesBusiness[50]++;
+          if (value > 60) b.samplesBusiness[60]++;
+          if (value > 70) b.samplesBusiness[70]++;
+          if (value > 80) b.samplesBusiness[80]++;
+          if (value > 90) b.samplesBusiness[90]++;
+        }
       }
     };
 
@@ -511,17 +571,18 @@ export class ZabbixClient {
     for (const r of historyRecords) {
       const hostId = itemHostMap.get(r.itemid);
       if (!hostId) continue;
-      const date = localDate(parseInt(r.clock));
+      const clockSec = parseInt(r.clock);
+      const date = localDate(clockSec);
       const value = parseFloat(r.value);
       // Skip the history row when value is non-numeric (same rationale as
       // the trend loop above). `parseFloat() || 0` silently injected 0
       // into the average, biasing it downward for items that occasionally
       // report empty.
       if (!Number.isFinite(value)) continue;
-      merge(hostId, date, value, true);
+      merge(hostId, date, value, true, clockSec);
     }
 
-    const result: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[] = [];
+    const result: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[] = [];
     for (const [key, data] of dailyMap) {
       const [hostId, date] = key.split("|");
       result.push({
@@ -531,7 +592,9 @@ export class ZabbixClient {
         avg: Math.round((data.sum / data.count) * 10) / 10,
         min: Math.round(data.min * 10) / 10,
         minutesAbove: data.samples,
+        minutesAboveBusiness: data.samplesBusiness,
         totalSamples: data.totalSamples,
+        businessSamples: data.businessSamples,
       });
     }
     return result;
@@ -556,7 +619,7 @@ export class ZabbixClient {
     fromSec: number,
     toSec: number,
   ): Promise<{
-    daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[];
+    daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[];
     samples: { hostId: string; clockSec: number; value: number }[];
   }> {
     if (itemIds.length === 0 || fromSec >= toSec) {
@@ -572,23 +635,64 @@ export class ZabbixClient {
     fromSec: number,
     toSec: number,
   ): Promise<{
-    daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[];
+    daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[];
     samples: { hostId: string; clockSec: number; value: number }[];
   }> {
     type Bucket = {
       max: number; sum: number; min: number; count: number;
       samples: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
+      /** Same shape as `samples` but only counts the 1-min sample when
+       *  its Vilnius-local timestamp falls inside Rimi store-operating
+       *  hours (Mon–Sat 08–22, Sun 09–21). Active-minutes proxy. */
+      samplesBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
       totalSamples: number;
+      businessSamples: number;
     };
     const dailyMap = new Map<string, Bucket>();
     const localDate = (clockSec: number) =>
       new Date(clockSec * 1000).toLocaleDateString("en-CA", { timeZone: "Europe/Vilnius" });
+
+    // Per-date Vilnius weekday + UTC offset cache. Same logic as in
+    // _getCpuHistoryDailyUncached — one Intl call per local date,
+    // arithmetic-only check per sample.
+    type DayMeta = { weekday: number; offsetSec: number };
+    const dayMetaCache = new Map<string, DayMeta>();
+    const dayMetaFor = (dateStr: string, witnessClockSec: number): DayMeta => {
+      const cached = dayMetaCache.get(dateStr);
+      if (cached) return cached;
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Vilnius",
+        weekday: "short",
+        timeZoneName: "shortOffset",
+      }).formatToParts(new Date(witnessClockSec * 1000));
+      const wdStr = parts.find((p) => p.type === "weekday")?.value ?? "Mon";
+      const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(wdStr);
+      const tz = parts.find((p) => p.type === "timeZoneName")?.value ?? "GMT+02:00";
+      const m = /([+-])(\d{1,2})(?::(\d{2}))?/.exec(tz);
+      const sign = m?.[1] === "+" ? 1 : -1;
+      const oh = parseInt(m?.[2] ?? "0", 10);
+      const om = parseInt(m?.[3] ?? "0", 10);
+      const offsetSec = sign * (oh * 3600 + om * 60);
+      const meta = { weekday: weekday >= 0 ? weekday : 1, offsetSec };
+      dayMetaCache.set(dateStr, meta);
+      return meta;
+    };
+    const isBusinessHour = (clockSec: number, dateStr: string): boolean => {
+      const meta = dayMetaFor(dateStr, clockSec);
+      const localSec = ((clockSec + meta.offsetSec) % 86400 + 86400) % 86400;
+      const hour = Math.floor(localSec / 3600);
+      if (meta.weekday === 0) return hour >= 9 && hour < 21;
+      return hour >= 8 && hour < 22;
+    };
+
     const newBucket = (value: number): Bucket => ({
       max: value, sum: value, min: value, count: 1,
       samples: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
+      samplesBusiness: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
       totalSamples: 0,
+      businessSamples: 0,
     });
-    const merge = (hostId: string, date: string, value: number, isRawSample: boolean) => {
+    const merge = (hostId: string, date: string, value: number, isRawSample: boolean, clockSec: number) => {
       const key = `${hostId}|${date}`;
       let b = dailyMap.get(key);
       if (!b) { b = newBucket(value); dailyMap.set(key, b); }
@@ -608,6 +712,17 @@ export class ZabbixClient {
         if (value > 70) b.samples[70]++;
         if (value > 80) b.samples[80]++;
         if (value > 90) b.samples[90]++;
+        if (isBusinessHour(clockSec, date)) {
+          b.businessSamples += 1;
+          if (value > 20) b.samplesBusiness[20]++;
+          if (value > 30) b.samplesBusiness[30]++;
+          if (value > 40) b.samplesBusiness[40]++;
+          if (value > 50) b.samplesBusiness[50]++;
+          if (value > 60) b.samplesBusiness[60]++;
+          if (value > 70) b.samplesBusiness[70]++;
+          if (value > 80) b.samplesBusiness[80]++;
+          if (value > 90) b.samplesBusiness[90]++;
+        }
       }
     };
 
@@ -696,11 +811,11 @@ export class ZabbixClient {
       const value = parseFloat(r.value);
       if (!Number.isFinite(value)) continue;
       const date = localDate(clockSec);
-      merge(hostId, date, value, true);
+      merge(hostId, date, value, true, clockSec);
       samples.push({ hostId, clockSec, value });
     }
 
-    const daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number }[] = [];
+    const daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[] = [];
     for (const [key, data] of dailyMap) {
       const [hostId, date] = key.split("|");
       daily.push({
@@ -710,7 +825,9 @@ export class ZabbixClient {
         avg: Math.round((data.sum / data.count) * 10) / 10,
         min: Math.round(data.min * 10) / 10,
         minutesAbove: data.samples,
+        minutesAboveBusiness: data.samplesBusiness,
         totalSamples: data.totalSamples,
+        businessSamples: data.businessSamples,
       });
     }
     return { daily, samples };

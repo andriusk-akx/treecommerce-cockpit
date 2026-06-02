@@ -768,7 +768,7 @@ function MatrixRowView({
               value: perHostPerDay(row.timeAboveNowMin, row.hostsWithData, row.periodDays),
               unit: "min/d",
               bar: "used",
-              tip: "Average minutes per host per day above the selected CPU threshold, normalised over the selected period (24h denominator — includes off-hours peaks like Windows updates / antivirus). Open the host drilldown to see the per-minute list with a 'Business hours only' filter for a more decision-relevant view. This will be replaced with transaction-derived active minutes once the Retellect-side API extension ships.",
+              tip: "Average minutes per host per day above the selected CPU threshold. Counts only samples taken during Rimi store-operating hours (Mon–Sat 08–22, Sun 09–21 Europe/Vilnius) — off-hours peaks (Windows updates, antivirus, OS maintenance) are filtered out. Stand-in for true 'active minutes' until the Retellect-side transaction-timestamp API ships and we can replace the business-hour proxy with real activity windows.",
               valueColor: timeAboveColor(
                 perHostPerDay(row.timeAboveNowMin, row.hostsWithData, row.periodDays),
               ),
@@ -873,7 +873,7 @@ function MatrixRowView({
                 unit: "min/d",
                 bar: "used",
                 approx: true,
-                tip: "Projected time above threshold — estimated minutes per host per day above the threshold after applying the Planned Retellect impact. Modeled value derived from the underlying per-minute distribution. 24h denominator (same caveat as Current state Time above). Will become active-minutes-aware once the transaction-timestamp API ships.",
+                tip: "Projected time above threshold — estimated minutes per host per day above the threshold after applying the Planned Retellect impact. Derived from the underlying per-minute distribution, restricted to Rimi store-operating hours (matches the Current state Time above). Will become transaction-derived active-minutes once the API ships.",
                 valueColor: timeAboveColor(
                   perHostPerDay(
                     row.projectedTimeAboveMin,
@@ -2515,7 +2515,13 @@ function buildDrilldownHosts(
       if (Number.isFinite(t.max) && t.max > 0) {
         peakCpu = peakCpu === null ? t.max : Math.max(peakCpu, t.max);
       }
-      if (t.minutesAbove) minutesAbove += t.minutesAbove[thKey] || 0;
+      if (t.minutesAbove) {
+        // Same business-hours preference as the matrix-level sum.
+        const businessBucket = t.minutesAboveBusiness;
+        minutesAbove += businessBucket
+          ? businessBucket[thKey] ?? 0
+          : t.minutesAbove[thKey] ?? 0;
+      }
     }
     const typicalCpu = dailyAvgs.length > 0 ? median(dailyAvgs) : null;
     const minutesAbovePerDay =
@@ -2729,9 +2735,21 @@ function computeCpuMatrix(
         g.maxCpu = g.maxCpu === null ? t.max : Math.max(g.maxCpu, t.max);
       }
       if (t.minutesAbove) {
-        g.sumMinAboveTracked += t.minutesAbove[thKey] || 0;
+        // Prefer the business-hours-filtered counter when the Zabbix
+        // path supplied it (recent ≤14 d). For older days that came
+        // from the DB rollup, business filter isn't recorded yet —
+        // fall back to the 24h counter to keep the metric defined
+        // rather than silently flipping to zero. Mixed-source matrices
+        // (very long periods) will show a slight under-count for the
+        // DB-rolled tail; the tooltip flags the 24h caveat for those.
+        const businessBucket = t.minutesAboveBusiness;
+        const dayMinutesAbove = businessBucket
+          ? businessBucket[thKey] ?? 0
+          : t.minutesAbove[thKey] ?? 0;
+        g.sumMinAboveTracked += dayMinutesAbove;
         for (const b of ACTIVE_ABOVE_BUCKETS) {
-          g.minutesAboveByBucketTracked[b] += t.minutesAbove[b] || 0;
+          const v = businessBucket ? businessBucket[b] ?? 0 : t.minutesAbove[b] ?? 0;
+          g.minutesAboveByBucketTracked[b] += v;
         }
       }
     }

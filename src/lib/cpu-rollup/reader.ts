@@ -29,7 +29,18 @@ export interface DailyAggregate {
   avg: number;
   min: number;
   minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
+  /** Same shape as `minutesAbove`, but only counts samples whose
+   *  Vilnius-local timestamp lies in Rimi store-operating hours
+   *  (Mon–Sat 08–22, Sun 09–21). Present on Zabbix-sourced rows
+   *  (recent ≤14 d); zeroed on DB-rollup rows (older dates) until
+   *  the rollup table grows hour-of-day-aware columns or the
+   *  transaction-timestamp API replaces this proxy entirely. */
+  minutesAboveBusiness?: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
   totalSamples: number;
+  /** Sample count restricted to business hours — denominator parity
+   *  with `totalSamples`. Optional for the same reason as
+   *  `minutesAboveBusiness`. */
+  businessSamples?: number;
 }
 
 /** Raw sample shape. From Zabbix for recent dates; reconstructed from
