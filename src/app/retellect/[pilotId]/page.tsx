@@ -107,7 +107,7 @@ export default async function RetellectPilotPage({ params, searchParams }: Props
     include: {
       client: { select: { name: true, code: true } },
       devices: {
-        include: { store: { select: { name: true } } },
+        include: { store: { select: { name: true, country: true } } },
         orderBy: { name: "asc" },
       },
       stores: { orderBy: { name: "asc" } },
@@ -321,9 +321,9 @@ type PrismaPilotRow = NonNullable<Awaited<ReturnType<typeof prisma.pilot.findUni
     status: string;
     deviceType: string;
     os: string | null;
-    store: { name: string } | null;
+    store: { name: string; country: string | null } | null;
   }>;
-  stores: Array<{ id: string; name: string; code: string }>;
+  stores: Array<{ id: string; name: string; code: string; country: string | null }>;
   _count: { devices: number; incidents: number; stores: number };
 };
 
@@ -343,12 +343,18 @@ function buildPilotData(pilot: PrismaPilotRow): RtPilotData {
       id: s.id,
       name: s.name,
       code: s.code,
+      country: s.country ?? null,
     })),
     devices: pilot.devices.map((d) => ({
       id: d.id,
       name: d.name,
       sourceHostKey: d.sourceHostKey,
       storeName: d.store?.name ?? "—",
+      // Two-letter country code joined from the device's Store row.
+      // Drives the matrix's Country filter so the operator can slice
+      // the fleet by LT / LV / EE without the Store dropdown having
+      // to spell out all 311 stores in a single list.
+      country: d.store?.country ?? null,
       cpuModel: d.cpuModel ?? "—",
       // cpuCores + provenance flow through to the timeline so the cpu_num
       // badge can be rendered alongside the cpu model column ("i3-6100 · 4c")

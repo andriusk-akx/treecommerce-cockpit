@@ -16,6 +16,13 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from "react";
 
 export interface DashboardFilters {
+  /** ISO 3166-1 alpha-2 country code filter ("all" = no filter).
+   *  Slices the fleet by Baltic estate (LT / LV / EE) — Latvia and
+   *  Estonia hosts are imported as inventory-only (no Zabbix, no
+   *  Retellect), so the country filter is mostly used to switch the
+   *  matrix's CPU-class share-of-fleet between per-country and Baltic-
+   *  wide views. */
+  country: string;
   /** Store name filter ("all" = no filter). Applied across Overview, Timeline, Inventory. */
   store: string;
   /** CPU model filter ("all" = no filter). Lets the user narrow the heatmap
@@ -66,6 +73,7 @@ export interface DashboardFilters {
 }
 
 export const defaultFilters: DashboardFilters = {
+  country: "all",
   store: "all",
   cpuModel: "all",
   search: "",

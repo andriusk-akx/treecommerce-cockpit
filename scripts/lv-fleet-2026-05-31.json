@@ -1,0 +1,6320 @@
+[
+  {
+    "country": "LV",
+    "sap": "L006",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR85",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR85",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR85",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR85",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR85",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LV06",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV06",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV06",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR24",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR24",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR24",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR24",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR24",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR24",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR24",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR24",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR24",
+    "rawName": "POS39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR24",
+    "rawName": "POS40",
+    "scoLabel": "SCO40",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR24",
+    "rawName": "POS41",
+    "scoLabel": "SCO41",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR92",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR92",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR92",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR92",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV16",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV16",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV16",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV37",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV37",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV37",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV37",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV37",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV37",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV37",
+    "rawName": "POS 37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV37",
+    "rawName": "POS 38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV41",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV41",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV41",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV41",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV41",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV41",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV41",
+    "rawName": "POS 37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV41",
+    "rawName": "POS 38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV82",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-12300HL",
+    "cpuRaw": "12th Gen Intel(R) Core(TM) i3-12300HL",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV82",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-12300HL",
+    "cpuRaw": "12th Gen Intel(R) Core(TM) i3-12300HL",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV82",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-12300HL",
+    "cpuRaw": "12th Gen Intel(R) Core(TM) i3-12300HL",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV82",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV82",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L003",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L003",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L003",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L003",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L003",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L003",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L004",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L004",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L004",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L005",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L005",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L005",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L007",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L007",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L007",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-12300HL",
+    "cpuRaw": "12th Gen Intel(R) Core(TM) i3-12300HL",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L007",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-12300HL",
+    "cpuRaw": "12th Gen Intel(R) Core(TM) i3-12300HL",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L009",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L009",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L009",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "L009",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR03",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR03",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR03",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR03",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR03",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR04",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR04",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR04",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR04",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR04",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR04",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR09",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR09",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR09",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR09",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR09",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR35",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR35",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR35",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR35",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR35",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR48",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR48",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR49",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR49",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR49",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR49",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR64",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR64",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR64",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR64",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR71",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR71",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR71",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR71",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR71",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR71",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR74",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR74",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR74",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR74",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR74",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR75",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR75",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR75",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR75",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR75",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR75",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR76",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR76",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR76",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR76",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR76",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR76",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR76",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR76",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR77",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR77",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR77",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR77",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR77",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR77",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR77",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR77",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR80",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR80",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR80",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR81",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR81",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR81",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR81",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR81",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR84",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR84",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR84",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR84",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR84",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR84",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR84",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR87",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR87",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR87",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR87",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR87",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR87",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR90",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR90",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR90",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR90",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR90",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR90",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR90",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR95",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR95",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR95",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR95",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR96",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR96",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR96",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR96",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR96",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR96",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR96",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR96",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR97",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR97",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR97",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR97",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR97",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR97",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV30",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LV43",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV43",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV43",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV43",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV43",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV43",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV43",
+    "rawName": "POS 37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV43",
+    "rawName": "POS 38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV43",
+    "rawName": "POS 39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "C315",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "C315",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "C315",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "C315",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "C315",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "C315",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "L008",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR05",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR05",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR05",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR05",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR05",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR16",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR16",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR16",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR21",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR21",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR21",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR21",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR22",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR22",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR22",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR22",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR22",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR22",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR22",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR22",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR32",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR32",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR32",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR32",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR32",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR32",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR32",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR37",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR37",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR37",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR37",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR50",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR50",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR50",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR50",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR55",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR55",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR55",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR55",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR63",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR63",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR63",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR63",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV11",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV11",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV11",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV15",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV15",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV15",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV17",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV17",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV17",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV22",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV22",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV22",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV25",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LV26",
+    "rawName": "SCO 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV26",
+    "rawName": "SCO 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV26",
+    "rawName": "SCO 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV27",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV27",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV27",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV28",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV28",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV28",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV29",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV29",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV29",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV34",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV34",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV34",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV35",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV35",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV35",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV36",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV36",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV36",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV36",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV36",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV36",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV42",
+    "rawName": "SCO 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV42",
+    "rawName": "SCO 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV42",
+    "rawName": "SCO 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV42",
+    "rawName": "SCO 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV46",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV46",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV46",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV48",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV48",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV48",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV49",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV49",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV49",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV52",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV52",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV53",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV53",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV53",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV55",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV55",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV55",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV56",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV56",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV56",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV57",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV57",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV57",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV58",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV58",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV58",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV66",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV66",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV66",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV67",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV67",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV67",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV67",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV67",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV68",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV68",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV68",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV69",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV69",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV69",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV69",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV69",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV69",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV69",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV69",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV69",
+    "rawName": "POS39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV69",
+    "rawName": "POS40",
+    "scoLabel": "SCO40",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV70",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV70",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV74",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV74",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV76",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV76",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV76",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV76",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV76",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV76",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV78",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV78",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV78",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV78",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV78",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV78",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV79",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV79",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV85",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV85",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV85",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV85",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV85",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV85",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV86",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV86",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV86",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV86",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV86",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV87",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV87",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV87",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV87",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV87",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV87",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV89",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV89",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV89",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV89",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV89",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-12300HL",
+    "cpuRaw": "12th Gen Intel(R) Core(TM) i3-12300HL",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV96",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV96",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV15",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS40",
+    "scoLabel": "SCO40",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS41",
+    "scoLabel": "SCO41",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS42",
+    "scoLabel": "SCO42",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS43",
+    "scoLabel": "SCO43",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "IRBE",
+    "rawName": "POS44",
+    "scoLabel": "SCO44",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR06",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR06",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR06",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR06",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR06",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR06",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR06",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR13",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR13",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR13",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR13",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR13",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR13",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR13",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR13",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR13",
+    "rawName": "POS39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR13",
+    "rawName": "POS40",
+    "scoLabel": "SCO40",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR18",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR18",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR18",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR18",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR18",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR19",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR19",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR19",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR19",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR23",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR23",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR23",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR23",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR23",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR23",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR23",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR23",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR25",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR25",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR25",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR25",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR25",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR25",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR25",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR25",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR25",
+    "rawName": "POS39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR27",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR27",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR27",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR27",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR27",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR27",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR27",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR27",
+    "rawName": "POS39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR27",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR44",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR44",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR44",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR44",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR44",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR44",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR44",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR44",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR70",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR70",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR70",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR70",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR70",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR70",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR79",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR79",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR79",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR79",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR98",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR98",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR98",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV02",
+    "rawName": "SCO 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV02",
+    "rawName": "SCO 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV02",
+    "rawName": "SCO 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LV02",
+    "rawName": "SCO 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LV02",
+    "rawName": "SCO 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LV02",
+    "rawName": "SCO 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LV02",
+    "rawName": "SCO 37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LV02",
+    "rawName": "SCO 38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LV02",
+    "rawName": "SCO 39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LV08",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV08",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV08",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV12",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV12",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV12",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV18",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV18",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV18",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV24",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV24",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV24",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV24",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV24",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV24",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV38",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV38",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV38",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV38",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV73",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV73",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV73",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV75",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV75",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV75",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV75",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV77",
+    "rawName": "SCO 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV77",
+    "rawName": "SCO 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV77",
+    "rawName": "SCO 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV77",
+    "rawName": "SCO 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV83",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV83",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV83",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS40",
+    "scoLabel": "SCO40",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS41",
+    "scoLabel": "SCO41",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "C316",
+    "rawName": "POS42",
+    "scoLabel": "SCO42",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR01",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR01",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR01",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR01",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR01",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR01",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR01",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR01",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR01",
+    "rawName": "POS39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR01",
+    "rawName": "POS40",
+    "scoLabel": "SCO40",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR12",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR12",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR12",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR12",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR12",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR12",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR12",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR12",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR30",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR30",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR30",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR30",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR58",
+    "rawName": "SCO 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR58",
+    "rawName": "SCO 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR58",
+    "rawName": "SCO 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR58",
+    "rawName": "SCO 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR58",
+    "rawName": "SCO 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR58",
+    "rawName": "SCO 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR67",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR67",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR67",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR67",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR67",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR67",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR67",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR68",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR68",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR68",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR68",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR68",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR68",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR68",
+    "rawName": "POS 37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR86",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR86",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR86",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR86",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR86",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR86",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR86",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR89",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR89",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR89",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR89",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR89",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR89",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR91",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR91",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR91",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR91",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR91",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR94",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR94",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR94",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR94",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV09",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV09",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV09",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV10",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV10",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV10",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV10",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV23",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV44",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV44",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV44",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV47",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV47",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV47",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV72",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV72",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV72",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV72",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV72",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV72",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV72",
+    "rawName": "POS 37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV80",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV80",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV90",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV90",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV90",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV94",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV94",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV94",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR08",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR08",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR08",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR08",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR08",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR29",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR29",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR29",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR29",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR29",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR29",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR29",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR29",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR29",
+    "rawName": "POS39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR29",
+    "rawName": "POS40",
+    "scoLabel": "SCO40",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR46",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR46",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR46",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR46",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR46",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR46",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR46",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR46",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR66",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR66",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR66",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR66",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR66",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR66",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR66",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR69",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR69",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR69",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR69",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR69",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR69",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR69",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "LR69",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR69",
+    "rawName": "POS39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR78",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR78",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR78",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR78",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR78",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR78",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR78",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LR78",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV13",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV13",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV13",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV19",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV19",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV19",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV39",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV50",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV50",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV50",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV51",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV51",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV51",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV54",
+    "rawName": "SCO 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV54",
+    "rawName": "SCO 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV54",
+    "rawName": "SCO 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 39",
+    "scoLabel": "SCO39",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 40",
+    "scoLabel": "SCO40",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 41",
+    "scoLabel": "SCO41",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV63",
+    "rawName": "POS 42",
+    "scoLabel": "SCO42",
+    "cpuModel": "Intel i3-6100",
+    "cpuRaw": "Intel(R) Core(TM) i3-6100 CPU @ 3.70GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV64",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV64",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV64",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV88",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV88",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV88",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV88",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV88",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV88",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "PULK",
+    "rawName": "POS31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "PULK",
+    "rawName": "POS32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "PULK",
+    "rawName": "POS33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "PULK",
+    "rawName": "POS34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "PULK",
+    "rawName": "POS35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "PULK",
+    "rawName": "POS36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "PULK",
+    "rawName": "POS37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i3-4330",
+    "cpuRaw": "Intel(R) Core(TM) i3-4330 CPU @ 3.50GHz",
+    "vendor": "Wincor"
+  },
+  {
+    "country": "LV",
+    "sap": "PULK",
+    "rawName": "POS38",
+    "scoLabel": "SCO38",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV84",
+    "rawName": "POS 31",
+    "scoLabel": "SCO31",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV84",
+    "rawName": "POS 32",
+    "scoLabel": "SCO32",
+    "cpuModel": "Intel i5-9500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-9500E CPU @ 3.00GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV84",
+    "rawName": "POS 33",
+    "scoLabel": "SCO33",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV84",
+    "rawName": "POS 34",
+    "scoLabel": "SCO34",
+    "cpuModel": "Intel i3-9100E",
+    "cpuRaw": "Intel(R) Core(TM) i3-9100E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV84",
+    "rawName": "POS 35",
+    "scoLabel": "SCO35",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV84",
+    "rawName": "POS 36",
+    "scoLabel": "SCO36",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  },
+  {
+    "country": "LV",
+    "sap": "LV84",
+    "rawName": "POS 37",
+    "scoLabel": "SCO37",
+    "cpuModel": "Intel i5-10500E",
+    "cpuRaw": "Intel(R) Core(TM) i5-10500E CPU @ 3.10GHz",
+    "vendor": "StrongPoint"
+  }
+]

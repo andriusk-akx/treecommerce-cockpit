@@ -33,12 +33,16 @@ export interface RtPilotData {
   deviceCount: number;
   incidentCount: number;
   storeCount: number;
-  stores: { id: string; name: string; code: string }[];
+  stores: { id: string; name: string; code: string; country: string | null }[];
   devices: {
     id: string;
     name: string;
     sourceHostKey: string | null;
     storeName: string;
+    /** ISO 3166-1 alpha-2 country code of the device's store. Drives
+     *  the matrix's Country filter. Null for legacy seeds that didn't
+     *  set Store.country. */
+    country: string | null;
     cpuModel: string;
     /** Persistent CPU core count for this device, as resolved by
      *  scripts/backfill-device-cpu-cores.mjs (or set manually via Settings).

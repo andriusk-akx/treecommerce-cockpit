@@ -194,6 +194,15 @@ const CONFIDENCE_TIP: Record<Confidence, string> = {
   low: "Low confidence — fewer than 3 hosts. Treat as directional.",
 };
 
+/** Country ISO-code → display label. Kept small (3 Baltic states) and
+ *  centralised so the filter dropdown and any future header chip read
+ *  the same human name. Falls back to the raw code when unknown. */
+const COUNTRY_LABEL: Record<string, string> = {
+  LT: "Lithuania",
+  LV: "Latvia",
+  EE: "Estonia",
+};
+
 /** Sort priority — riskiest decisions first, then strongest evidence. */
 const DECISION_RANK: Record<Decision, number> = {
   "do-not-roll-out": 0,
@@ -215,6 +224,7 @@ export function RtCpuMatrix({
   const { filters, setFilter } = useRtFilters();
   const threshold = filters.threshold;
   const storeFilter = filters.store;
+  const countryFilter = filters.country;
   // Current page contract: calculation is always from ALL minutes in the
   // selected period. Active-only mode is on the roadmap but disabled in
   // the UI for now (see Minute scope below), so we force the compute
@@ -275,17 +285,19 @@ export function RtCpuMatrix({
   // opacity dim on the matrix.
   const deferredThreshold = useDeferredValue(threshold);
   const deferredStore = useDeferredValue(storeFilter);
+  const deferredCountry = useDeferredValue(countryFilter);
   const deferredCountFrom = useDeferredValue(cpuCountFrom);
   const isRefreshing =
     isPeriodPending ||
     deferredThreshold !== threshold ||
     deferredStore !== storeFilter ||
+    deferredCountry !== countryFilter ||
     deferredCountFrom !== cpuCountFrom;
 
   // Build decision matrix from the deferred inputs.
   const { matrix: baselineMatrix, periodDays, fleetTotal } = useMemo(
-    () => computeCpuMatrix(pilot, zabbix, deferredThreshold, deferredStore, deferredCountFrom),
-    [pilot, zabbix, deferredThreshold, deferredStore, deferredCountFrom],
+    () => computeCpuMatrix(pilot, zabbix, deferredThreshold, deferredStore, deferredCountry, deferredCountFrom),
+    [pilot, zabbix, deferredThreshold, deferredStore, deferredCountry, deferredCountFrom],
   );
 
   // ── Custom (manual) Planned Retellect impact, keyed by CPU model ──
@@ -520,12 +532,49 @@ export function RtCpuMatrix({
             options={[20, 30, 40, 50, 60, 70, 80, 90].map((v) => ({ v: String(v), l: `${v}%` }))}
             onChange={(v) => setFilter("threshold", Number(v))}
           />
+          {/* Country filter — derived from the distinct ISO codes in
+              pilot.stores. Hidden when only one country is present
+              (single-country pilot, no slice to make). When the
+              operator switches countries, the Store dropdown is
+              automatically narrowed to that country's stores so the
+              two filters don't fight each other. */}
+          {(() => {
+            const countries = Array.from(
+              new Set(pilot.stores.map((s) => s.country).filter((c): c is string => !!c)),
+            ).sort();
+            if (countries.length <= 1) return null;
+            return (
+              <FilterSelect
+                label="Country"
+                value={countryFilter}
+                options={[
+                  { v: "all", l: "All countries" },
+                  ...countries.map((c) => ({ v: c, l: COUNTRY_LABEL[c] ?? c })),
+                ]}
+                onChange={(v) => {
+                  setFilter("country", v);
+                  // Reset store filter when switching country so the
+                  // operator doesn't see "no rows" because the
+                  // previously picked store doesn't exist in the new
+                  // country.
+                  if (v !== "all" && storeFilter !== "all") {
+                    const stillVisible = pilot.stores.some(
+                      (s) => s.name === storeFilter && s.country === v,
+                    );
+                    if (!stillVisible) setFilter("store", "all");
+                  }
+                }}
+              />
+            );
+          })()}
           <FilterSelect
             label="Store"
             value={storeFilter}
             options={[
               { v: "all", l: "All stores" },
-              ...pilot.stores.map((s) => ({ v: s.name, l: s.name })),
+              ...pilot.stores
+                .filter((s) => countryFilter === "all" || s.country === countryFilter)
+                .map((s) => ({ v: s.name, l: s.name })),
             ]}
             onChange={(v) => setFilter("store", v)}
           />
@@ -2605,19 +2654,27 @@ function computeCpuMatrix(
   zabbix: ZabbixData,
   threshold: number,
   storeFilter: string,
+  countryFilter: string,
   cpuCountFrom: "tracked" | "active",
 ): { matrix: CpuMatrixRow[]; periodDays: number; fleetTotal: number } {
+  // Combined country + store filter — both narrow the same device
+  // set, applied as an AND. Country is the coarser slice (LT / LV /
+  // EE); store is finer. When country is "all" and store is "all"
+  // we operate on the full Baltic estate.
+  const matchesFilters = (d: { storeName: string; country: string | null }) => {
+    if (countryFilter !== "all" && d.country !== countryFilter) return false;
+    if (storeFilter !== "all" && d.storeName !== storeFilter) return false;
+    return true;
+  };
+
   // Fleet denominator for the per-row "% of fleet" badge. Includes
-  // every pilot device under the current store filter — even hosts
-  // without a Zabbix link or with no agent installed at all. The
-  // share is a strategic-importance signal, not a measurement signal,
-  // so the count must reflect physical inventory, not monitoring
-  // coverage. (Coverage gaps are surfaced separately in the drilldown
+  // every pilot device under the current filters — even hosts without
+  // a Zabbix link or with no agent installed at all. The share is a
+  // strategic-importance signal, not a measurement signal, so the
+  // count must reflect physical inventory, not monitoring coverage.
+  // (Coverage gaps are surfaced separately in the drilldown
   // "Unmonitored" tab.)
-  const fleetTotal =
-    storeFilter === "all"
-      ? pilot.devices.length
-      : pilot.devices.filter((d) => d.storeName === storeFilter).length;
+  const fleetTotal = pilot.devices.filter(matchesFilters).length;
   const periodDays = (() => {
     const fromAggregate = zabbix.rolloutPerHost?.periodDays;
     if (fromAggregate && fromAggregate > 0) return fromAggregate;
@@ -2709,7 +2766,7 @@ function computeCpuMatrix(
   const groups = new Map<string, Group>();
 
   for (const d of pilot.devices) {
-    if (storeFilter !== "all" && d.storeName !== storeFilter) continue;
+    if (!matchesFilters(d)) continue;
     // Bug fix (2026-06-01): see buildDrilldownHosts — empty
     // sourceHostKey must not fall through to Map.get("").
     const matchedHost =

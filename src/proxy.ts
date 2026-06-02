@@ -35,6 +35,9 @@ const PUBLIC_PREFIXES = [
   // (expand-lt-fleet, backfill-cpu-from-lt-fleet, and
   // merge-sco-naming-duplicates were one-shot imports on 2026-06-01;
   // routes removed post-execution per their own lifecycle notes.)
+  // LV + EE inventory import — one-shot, idempotency-gated. Removed
+  // after the import lands.
+  "/api/internal/expand-foreign-fleet",
   "/_next",
   "/favicon.ico",
 ];
