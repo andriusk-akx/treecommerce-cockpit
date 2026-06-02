@@ -2155,8 +2155,16 @@ function HostMinutesList({
           </div>
           {truncated && (
             <div className="text-[11px] text-amber-700 mt-2">
-              Showing the 500 most recent minutes — host has more in the
-              window. Narrow the Period filter for older minutes.
+              {/* Bug fix (2026-06-02): when the operator is viewing
+                  business-hours-only, the visible list may be a small
+                  fraction of the 500 the endpoint actually returned —
+                  reading 'showing 500' next to 30 visible rows was
+                  confusing. Surface BOTH counts explicitly when they
+                  diverge, plus the off-hours fraction the client is
+                  hiding. */}
+              {businessHoursOnly && displayedCount !== totalCount
+                ? `${totalCount} above-threshold minutes returned (server cap); ${displayedCount} fall in business hours, ${totalCount - displayedCount} off-hours hidden. Older bursts beyond the cap may still include business-hour minutes — narrow the Period filter to inspect.`
+                : `Showing the 500 most recent minutes — host has more in the window. Narrow the Period filter for older minutes.`}
             </div>
           )}
         </>
@@ -2824,18 +2832,29 @@ function computeCpuMatrix(
     let hostHasData = false;
     for (const t of trends) {
       // Pick the appropriate avg / max field based on the toggle.
-      // When businessHoursOnly is on AND the row carries the
-      // business-only stats (recent Zabbix path), use them. When
-      // the toggle is off, or when business stats are missing (older
-      // days from the DB rollup), fall back to the 24h fields.
-      const useAvg =
-        businessHoursOnly && typeof t.avgBusiness === "number" && t.avgBusiness !== null
-          ? t.avgBusiness
-          : t.avg;
-      const useMax =
-        businessHoursOnly && typeof t.maxBusiness === "number" && t.maxBusiness !== null
-          ? t.maxBusiness
-          : t.max;
+      //
+      // Bug fix (2026-06-02): the earlier draft silently fell back
+      // to the 24h fields when business stats were missing for a
+      // day, which produced a class-level Typical / Max that mixed
+      // business-hour and 24h semantics across days. Now: when the
+      // toggle is ON and the day has no business stats (older
+      // trend-only days outside Zabbix history retention), the day
+      // is SKIPPED from dailyAvgPool / maxCpu aggregation rather
+      // than dilluted in. The metric is then either honestly
+      // business-only (recent history-driven days only) or honestly
+      // 24h (toggle off).
+      const businessOk =
+        businessHoursOnly &&
+        t.avgBusiness !== null &&
+        t.avgBusiness !== undefined &&
+        t.maxBusiness !== null &&
+        t.maxBusiness !== undefined;
+      if (businessHoursOnly && !businessOk) {
+        // Skip this day — no business data, won't mix semantics.
+        continue;
+      }
+      const useAvg = businessHoursOnly ? (t.avgBusiness as number) : t.avg;
+      const useMax = businessHoursOnly ? (t.maxBusiness as number) : t.max;
       if (Number.isFinite(useAvg)) {
         hostHasData = true;
         if (useAvg > 0) g.dailyAvgPool.push(useAvg);
