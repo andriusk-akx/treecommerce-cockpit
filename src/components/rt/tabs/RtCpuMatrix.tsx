@@ -2024,13 +2024,34 @@ function HostEvidenceView({
         ◂ Back to host list
       </button>
 
-      {/* Compact one-line host context — replaces the two redundant
-          Evidence summary / Class context cards. All the same numbers
-          live in the matrix row above; repeating them here was noise. */}
-      <div className="text-[11px] text-gray-500 mb-4">
-        {host.storeName} · peak {host.peakCpu === null ? "—" : `${Math.round(host.peakCpu)}%`}
-        {" · "}typical {host.typicalCpu === null ? "—" : `${Math.round(host.typicalCpu)}%`}
-        {" · "}{fmtMinutesPerDay(host.minutesAbovePerDay)} above {threshold}%
+      {/* Trust-audit fix (2026-06-02): the previous header showed
+          host.peakCpu / typical / minutesAbovePerDay with no scope
+          label, leaving the operator to remember which mode the
+          numbers were aggregated under. Now we surface the active
+          scope (business hours vs 24h, plus the window size) in a
+          small tag next to the headline numbers so anyone reading
+          the drilldown can see at a glance what the figures are
+          conditioned on. Matches the chip bar's "Window" filter
+          semantics. */}
+      <div className="text-[11px] text-gray-500 mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span>{host.storeName}</span>
+        <span>peak {host.peakCpu === null ? "—" : `${Math.round(host.peakCpu)}%`}</span>
+        <span>typical {host.typicalCpu === null ? "—" : `${Math.round(host.typicalCpu)}%`}</span>
+        <span>{fmtMinutesPerDay(host.minutesAbovePerDay)} above {threshold}%</span>
+        <span
+          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+            businessHoursOnly
+              ? "bg-sky-50 text-sky-700 border-sky-200"
+              : "bg-gray-50 text-gray-600 border-gray-200"
+          }`}
+          title={
+            businessHoursOnly
+              ? `Numbers above restrict to Rimi store-operating hours (Mon-Sat 08-22, Sun 09-21 Europe/Vilnius), aggregated over the last ${periodDays} days.`
+              : `Numbers above use the full 24h window, aggregated over the last ${periodDays} days.`
+          }
+        >
+          {businessHoursOnly ? "Business hrs" : "24h"} · {periodDays}d
+        </span>
       </div>
 
       {/* Level 3 / 4 drilldown — only meaningful for Zabbix-monitored
@@ -2061,7 +2082,12 @@ function HostEvidenceView({
       <div className="mt-4 flex items-center gap-2 text-[11px] text-gray-500">
         <span>For full hour-level / day-level inspection:</span>
         <a
-          href={`/retellect/${pilot.id}?tab=timeline&host=${host.hostId ?? ""}`}
+          // Trust-audit fix (2026-06-02): the cross-tab link used to
+          // strip Period entirely, so clicking it took the operator
+          // from a 30-day drilldown straight into a 14-day Timeline.
+          // Preserve Period in the URL so the Timeline opens on the
+          // same window the operator was just reading.
+          href={`/retellect/${pilot.id}?tab=timeline&host=${host.hostId ?? ""}&period=${periodDays}d`}
           className="text-blue-600 hover:underline"
         >
           Open in CPU Timeline ↗
@@ -2232,6 +2258,18 @@ function HostMinutesList({
   const displayedCount = displayedMinutes?.length ?? 0;
   const filteredOutCount = totalCount - displayedCount;
 
+  // Trust-audit fix (2026-06-02): Zabbix history.get retention only
+  // reliably covers ~14 days. When the operator picks Period = 30 d,
+  // the matrix row + drilldown header still show full 30-day counts
+  // (cpuTrends combines live Zabbix + DB rollup), but the per-minute
+  // list endpoint reads from Zabbix history.get directly — so the
+  // list only ever shows the most recent ~14 days of breach minutes.
+  // Without a banner the operator sees a class row claiming "100
+  // min/d above 70 %" and a list of 30 entries and assumes the math
+  // is broken. Surface the gap explicitly when periodDays > 14.
+  const MINUTE_LEVEL_RETENTION_DAYS = 14;
+  const minuteCoverageGap = periodDays > MINUTE_LEVEL_RETENTION_DAYS;
+
   return (
     <div>
       <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
@@ -2251,6 +2289,24 @@ function HostMinutesList({
           {hostName} · Europe/Vilnius
         </span>
       </div>
+
+      {/* Minute-level coverage banner. Renders only when the chosen
+          Period reaches beyond Zabbix history.get retention so the
+          operator sees the gap before they wonder why the per-minute
+          numbers don't reconcile with the matrix / drilldown totals. */}
+      {minuteCoverageGap && (
+        <div className="text-[11px] text-gray-500 bg-gray-50 border border-gray-200 rounded px-3 py-2 mb-3 leading-snug">
+          <span className="font-medium text-gray-700">Note:</span>{" "}
+          Minute-level data is only retained for the last
+          {" "}~{MINUTE_LEVEL_RETENTION_DAYS} days
+          {" "}in Zabbix. The matrix row and the drilldown header
+          above include older days from rolled-up daily aggregates,
+          but the per-minute list below covers only the recent
+          {" "}{MINUTE_LEVEL_RETENTION_DAYS}-day slice. Switch Period
+          to <span className="font-medium">14 d</span> for an apples-
+          to-apples comparison.
+        </div>
+      )}
 
       {loading ? (
         <div className="text-[12px] text-gray-500 inline-flex items-center gap-2 py-2">

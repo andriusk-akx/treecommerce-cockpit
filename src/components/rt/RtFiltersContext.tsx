@@ -128,12 +128,14 @@ const FILTER_LABELS: Array<{
   { key: "threshold", label: "Threshold", format: (v) => `${v}%` },
   { key: "activeThresholdPp", label: "Active", format: (v) => `${v} pp` },
   { key: "cpuCountFrom", label: "Count from", format: (v) => v === "active" ? "active only" : "all tracked" },
-  // businessHoursOnly default is TRUE — so the chip surfaces only
-  // when the operator has switched it OFF (i.e. "24h" diverges from
-  // the default 'business-only' baseline). The label inverts the
-  // boolean for that reason: the chip says what's ACTIVE relative to
-  // default, not the literal toggle state.
-  { key: "businessHoursOnly", label: "Window", format: (v) => v === false ? "24h (off-hours included)" : "" },
+  // Trust-audit fix (2026-06-02): chip label used to read "Window:
+  // 24h (off-hours included)" globally, but the toggle only governs
+  // the CPU Matrix tab — Timeline and other dashboards stay 24h
+  // regardless of the toggle. The global chip label was misleading
+  // ("Window" implied page-wide). Narrow the label to call out that
+  // the filter is matrix-scoped so operators don't expect Timeline
+  // numbers to follow it.
+  { key: "businessHoursOnly", label: "Matrix scope", format: (v) => v === false ? "24h (off-hours included)" : "" },
   { key: "granularity", label: "Granularity", format: (v) => `${v}min` },
   { key: "chartMode", label: "Chart", format: (v) => String(v) },
 ];
