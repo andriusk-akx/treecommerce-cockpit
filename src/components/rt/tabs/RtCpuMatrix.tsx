@@ -76,6 +76,12 @@ interface CpuMatrixRow {
    *  Period dropdown doesn't change the displayed intensity for a
    *  stable workload. */
   periodDays: number;
+  /** Sum of business-hour samples observed across all hosts in this
+   *  class over the period. When > 0, perHostPerDay() uses it as the
+   *  denominator (intensity-based formula). Zero when no business
+   *  filter data is available (mixed DB-rollup window), in which case
+   *  perHostPerDay() falls back to the calendar-day formula. */
+  businessSamples: number;
   /** Physical core count for this CPU model. Null when the model
    *  string doesn't match a known SKU; row falls back to no spec line. */
   cpuCores: number | null;
@@ -765,12 +771,12 @@ function MatrixRowView({
             },
             {
               label: "Time above threshold",
-              value: perHostPerDay(row.timeAboveNowMin, row.hostsWithData, row.periodDays),
+              value: perHostPerDay(row.timeAboveNowMin, row.hostsWithData, row.periodDays, row.businessSamples),
               unit: "min/d",
               bar: "used",
-              tip: "Average minutes per host per day above the selected CPU threshold. Counts only samples taken during Rimi store-operating hours (Mon–Sat 08–22, Sun 09–21 Europe/Vilnius) — off-hours peaks (Windows updates, antivirus, OS maintenance) are filtered out. Stand-in for true 'active minutes' until the Retellect-side transaction-timestamp API ships and we can replace the business-hour proxy with real activity windows.",
+              tip: "Business-hour intensity, projected to a 24h equivalent. Counts only samples taken during Rimi store-operating hours (Mon–Sat 08–22, Sun 09–21 Europe/Vilnius) and divides by observed business-hour sample minutes × 1440 — so a host with 5 minutes above threshold over 192 business hours reads as ~37 min/d-equivalent, not the 5/14 ≈ 0.4 min/d a 24h-uniform average would give. Off-hours peaks (Windows updates, antivirus) are excluded. Stand-in for true active minutes until the Retellect-side transaction-timestamp API ships.",
               valueColor: timeAboveColor(
-                perHostPerDay(row.timeAboveNowMin, row.hostsWithData, row.periodDays),
+                perHostPerDay(row.timeAboveNowMin, row.hostsWithData, row.periodDays, row.businessSamples),
               ),
             },
             {
@@ -869,16 +875,18 @@ function MatrixRowView({
                   row.projectedTimeAboveMin,
                   row.hostsWithData,
                   row.periodDays,
+                  row.businessSamples,
                 ),
                 unit: "min/d",
                 bar: "used",
                 approx: true,
-                tip: "Projected time above threshold — estimated minutes per host per day above the threshold after applying the Planned Retellect impact. Derived from the underlying per-minute distribution, restricted to Rimi store-operating hours (matches the Current state Time above). Will become transaction-derived active-minutes once the API ships.",
+                tip: "Projected time above threshold — estimated business-hour intensity (projected to a 24h equivalent) after applying the Planned Retellect impact. Same business-hour denominator as Current state Time above. Will become transaction-derived active-minutes once the API ships.",
                 valueColor: timeAboveColor(
                   perHostPerDay(
                     row.projectedTimeAboveMin,
                     row.hostsWithData,
                     row.periodDays,
+                    row.businessSamples,
                   ),
                 ),
               },
@@ -2506,6 +2514,7 @@ function buildDrilldownHosts(
     let peakCpu: number | null = null;
     const dailyAvgs: number[] = [];
     let minutesAbove = 0;
+    let hostBusinessSamples = 0;
     let sawAnyData = false;
     for (const t of trends) {
       if (Number.isFinite(t.avg)) {
@@ -2516,16 +2525,26 @@ function buildDrilldownHosts(
         peakCpu = peakCpu === null ? t.max : Math.max(peakCpu, t.max);
       }
       if (t.minutesAbove) {
-        // Same business-hours preference as the matrix-level sum.
         const businessBucket = t.minutesAboveBusiness;
         minutesAbove += businessBucket
           ? businessBucket[thKey] ?? 0
           : t.minutesAbove[thKey] ?? 0;
+        if (businessBucket && typeof t.businessSamples === "number") {
+          hostBusinessSamples += t.businessSamples;
+        }
       }
     }
     const typicalCpu = dailyAvgs.length > 0 ? median(dailyAvgs) : null;
-    const minutesAbovePerDay =
-      sawAnyData && periodDays > 0 ? minutesAbove / periodDays : null;
+    // Use the business-intensity formula when business samples are
+    // available; fall back to calendar-day rate otherwise (older
+    // dates from the DB rollup).
+    const minutesAbovePerDay = sawAnyData
+      ? hostBusinessSamples > 0
+        ? (minutesAbove * 1440) / hostBusinessSamples
+        : periodDays > 0
+          ? minutesAbove / periodDays
+          : null
+      : null;
 
     // Composite risk for sorting. Peak gets the heaviest weight because
     // a single high peak is what makes a host "interesting" for rollout
@@ -2652,8 +2671,20 @@ function computeCpuMatrix(
     dailyAvgPool: number[];
     /** Max of per-host daily max. */
     maxCpu: number | null;
-    /** Sum of minutesAbove[threshold] from cpuTrends (tracked mode). */
+    /** Sum of minutesAbove[threshold] from cpuTrends — uses the
+     *  business-hours subset when cpuTrends carries it, otherwise
+     *  falls back to the 24h count. */
     sumMinAboveTracked: number;
+    /** Sum of *business-hour* samples observed across all
+     *  (host, day) rows in this class. Acts as a true denominator
+     *  for the business-intensity rate (numerator above is the
+     *  business subset of `minutesAbove`, so the denominator must
+     *  match — using calendar minutes here would scale the rate
+     *  back down toward 24h). When 0, the rate falls back to the
+     *  legacy hostsWithData × periodDays denominator so the metric
+     *  stays defined for older days that came through the rollup
+     *  table (no business filter yet). */
+    sumBusinessSamples: number;
     /** Sum of activeMinutesAboveThreshold[threshold] from rolloutPerHost (active mode). */
     sumMinAboveActive: number;
     /** Sum of cpuTrends.minutesAbove per bucket — drives the bucket-
@@ -2697,6 +2728,7 @@ function computeCpuMatrix(
         dailyAvgPool: [],
         maxCpu: null,
         sumMinAboveTracked: 0,
+        sumBusinessSamples: 0,
         sumMinAboveActive: 0,
         minutesAboveByBucketTracked: emptyBucketRecord(),
         minutesAboveByBucketActive: emptyBucketRecord(),
@@ -2735,13 +2767,11 @@ function computeCpuMatrix(
         g.maxCpu = g.maxCpu === null ? t.max : Math.max(g.maxCpu, t.max);
       }
       if (t.minutesAbove) {
-        // Prefer the business-hours-filtered counter when the Zabbix
-        // path supplied it (recent ≤14 d). For older days that came
-        // from the DB rollup, business filter isn't recorded yet —
-        // fall back to the 24h counter to keep the metric defined
-        // rather than silently flipping to zero. Mixed-source matrices
-        // (very long periods) will show a slight under-count for the
-        // DB-rolled tail; the tooltip flags the 24h caveat for those.
+        // Prefer the business-hours subset when present (Zabbix
+        // recent-window path). DB-rollup days have no business
+        // filter yet; for those, sumBusinessSamples stays 0 and the
+        // display formula falls back to the legacy calendar-day
+        // denominator further down.
         const businessBucket = t.minutesAboveBusiness;
         const dayMinutesAbove = businessBucket
           ? businessBucket[thKey] ?? 0
@@ -2750,6 +2780,9 @@ function computeCpuMatrix(
         for (const b of ACTIVE_ABOVE_BUCKETS) {
           const v = businessBucket ? businessBucket[b] ?? 0 : t.minutesAbove[b] ?? 0;
           g.minutesAboveByBucketTracked[b] += v;
+        }
+        if (businessBucket && typeof t.businessSamples === "number") {
+          g.sumBusinessSamples += t.businessSamples;
         }
       }
     }
@@ -2856,6 +2889,7 @@ function computeCpuMatrix(
           hostsWithData: g.hostsWithData,
           evidence,
           periodDays,
+          businessSamples: g.sumBusinessSamples,
         },
         impactPp,
         threshold,
@@ -2904,7 +2938,7 @@ function computeCpuMatrix(
     // as the displayed Time-above-threshold cell.
     const perHostPerDayRateForSubtitle =
       timeAboveNowMin > 0 || hasUsableSample
-        ? perHostPerDay(timeAboveNowMin, g.hostsWithData, periodDays)
+        ? perHostPerDay(timeAboveNowMin, g.hostsWithData, periodDays, g.sumBusinessSamples)
         : null;
     const subtitle = subtitleFor(
       decision,
@@ -2926,6 +2960,7 @@ function computeCpuMatrix(
       hostsOff: g.hostsOff.size,
       evidence,
       periodDays,
+      businessSamples: g.sumBusinessSamples,
       cpuCores: spec?.cores ?? null,
       cpuThreads: spec?.threads ?? null,
       cpuRank: spec?.rank ?? -1,
@@ -2980,7 +3015,7 @@ function computeCpuMatrix(
  */
 function applyImpact(
   row: Pick<CpuMatrixRow,
-    "typicalCpu" | "timeAboveNowMin" | "minutesAboveByBucket" | "hostsWithData" | "evidence" | "periodDays"
+    "typicalCpu" | "timeAboveNowMin" | "minutesAboveByBucket" | "hostsWithData" | "evidence" | "periodDays" | "businessSamples"
   >,
   impactPp: number,
   threshold: number,
@@ -3010,6 +3045,7 @@ function applyImpact(
     projectedTimeAboveMin,
     row.hostsWithData,
     row.periodDays,
+    row.businessSamples,
   );
 
   let decision: Decision;
@@ -3048,12 +3084,36 @@ function applyImpact(
  *  stable. Lets the user compare 7d vs 30d vs 90d as different
  *  sampling-window confidence levels, not as different "amount of
  *  problem". */
+/** Convert a total `minutes above threshold` count into a per-day rate.
+ *
+ *  Two formulas, both label as "min/day":
+ *
+ *   • Business-intensity (preferred): when `businessSamples` is
+ *     supplied, return `total × 1440 / businessSamples`. The total is
+ *     business-only minutes above; the denominator is the count of
+ *     observed business-hour samples (i.e. business minutes that have
+ *     data). The 1440 factor projects the density to a 24h baseline so
+ *     the number reads as "if the host kept this business-hour
+ *     intensity for a full day". Higher than the 24h-uniform rate
+ *     because off-hours quiet time isn't pulling the average down.
+ *
+ *   • Calendar fallback: when `businessSamples` is 0/undefined (older
+ *     dates from the DB rollup table that don't carry the business
+ *     filter yet, or any caller still on the legacy contract), divide
+ *     by `hostsWithData × periodDays`. Same formula the matrix used
+ *     before the business-hours change landed.
+ *
+ *  Returning null on null input keeps "no data" propagation clean. */
 function perHostPerDay(
   total: number | null,
   hostsWithData: number,
   periodDays: number,
+  businessSamples?: number,
 ): number | null {
   if (total === null) return null;
+  if (businessSamples && businessSamples > 0) {
+    return (total * 1440) / businessSamples;
+  }
   const denom = Math.max(1, hostsWithData * Math.max(1, periodDays));
   return total / denom;
 }
