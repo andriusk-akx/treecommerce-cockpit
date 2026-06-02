@@ -287,17 +287,19 @@ export function RtCpuMatrix({
   const deferredStore = useDeferredValue(storeFilter);
   const deferredCountry = useDeferredValue(countryFilter);
   const deferredCountFrom = useDeferredValue(cpuCountFrom);
+  const deferredBusinessOnly = useDeferredValue(filters.businessHoursOnly);
   const isRefreshing =
     isPeriodPending ||
     deferredThreshold !== threshold ||
     deferredStore !== storeFilter ||
     deferredCountry !== countryFilter ||
-    deferredCountFrom !== cpuCountFrom;
+    deferredCountFrom !== cpuCountFrom ||
+    deferredBusinessOnly !== filters.businessHoursOnly;
 
   // Build decision matrix from the deferred inputs.
   const { matrix: baselineMatrix, periodDays, fleetTotal } = useMemo(
-    () => computeCpuMatrix(pilot, zabbix, deferredThreshold, deferredStore, deferredCountry, deferredCountFrom),
-    [pilot, zabbix, deferredThreshold, deferredStore, deferredCountry, deferredCountFrom],
+    () => computeCpuMatrix(pilot, zabbix, deferredThreshold, deferredStore, deferredCountry, deferredCountFrom, deferredBusinessOnly),
+    [pilot, zabbix, deferredThreshold, deferredStore, deferredCountry, deferredCountFrom, deferredBusinessOnly],
   );
 
   // ── Custom (manual) Planned Retellect impact, keyed by CPU model ──
@@ -594,24 +596,29 @@ export function RtCpuMatrix({
             ]}
             onChange={setPeriod}
           />
-          <FilterSegmented<"tracked" | "active">
-            label="Minute scope"
-            value="tracked"
-            info="Current effective calculation: All minutes in the selected period. Active-only mode (busy-windows-only) is planned for a future iteration."
-            options={[
-              { v: "tracked", l: "All minutes" },
-              {
-                v: "active",
-                l: "Active only (later)",
-                title: "Active-only mode (restricting the calculation to busy windows) is planned for a later release.",
-                disabled: true,
-              },
-            ]}
-            onChange={() => {
-              /* no-op — Active only is intentionally disabled for now;
-                 the current page always computes from all tracked minutes. */
-            }}
-          />
+          {/* Global Business-hours-only toggle. When on, every CPU
+              metric on this page — Typical / Room / Max / Time above
+              and the drilldown's per-host inventory — restricts to
+              Rimi store-operating hours (Mon–Sat 08–22, Sun 09–21).
+              When off, the matrix falls back to 24h-uniform
+              aggregation. Stand-in for true active minutes until the
+              transaction-timestamp API ships. */}
+          <label
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded border text-[11px] font-medium transition cursor-pointer select-none ${
+              filters.businessHoursOnly
+                ? "bg-sky-50 text-sky-800 border-sky-300"
+                : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
+            }`}
+            title="When on, every CPU metric on this page restricts to Rimi store-operating hours (Mon–Sat 08:00–22:00, Sun 09:00–21:00 Europe/Vilnius). Off-hours peaks (Windows updates, antivirus, OS maintenance) are filtered out. Stand-in for true active minutes until the Retellect transaction-timestamp API ships."
+          >
+            <input
+              type="checkbox"
+              checked={filters.businessHoursOnly}
+              onChange={(e) => setFilter("businessHoursOnly", e.target.checked)}
+              className="w-3 h-3 accent-sky-600 cursor-pointer"
+            />
+            Business hours only
+          </label>
           <button
             type="button"
             onClick={() => setHideSilent((s) => !s)}
@@ -665,6 +672,7 @@ export function RtCpuMatrix({
               periodDays={periodDays}
               pilot={pilot}
               zabbix={zabbix}
+              businessHoursOnly={filters.businessHoursOnly}
               selectedHostId={selectedHostId}
               onSelectHost={setSelectedHostId}
               onClose={() => {
@@ -1475,6 +1483,7 @@ function CpuDrilldownWorkspace({
   periodDays,
   pilot,
   zabbix,
+  businessHoursOnly,
   selectedHostId,
   onSelectHost,
   onClose,
@@ -1484,15 +1493,16 @@ function CpuDrilldownWorkspace({
   periodDays: number;
   pilot: RtPilotData;
   zabbix: ZabbixData;
+  businessHoursOnly: boolean;
   selectedHostId: string | null;
   onSelectHost: (hostId: string | null) => void;
   onClose: () => void;
 }) {
-  // Build the per-host inventory once per (row, threshold, periodDays).
-  // Pure derivation — no fetch, all data already lives in props.
+  // Build the per-host inventory once per (row, threshold, periodDays,
+  // businessHoursOnly). Pure derivation — no fetch.
   const hosts = useMemo(
-    () => buildDrilldownHosts(row.model, pilot, zabbix, threshold, periodDays),
-    [row.model, pilot, zabbix, threshold, periodDays],
+    () => buildDrilldownHosts(row.model, pilot, zabbix, threshold, periodDays, businessHoursOnly),
+    [row.model, pilot, zabbix, threshold, periodDays, businessHoursOnly],
   );
 
   // Fleet-share signal in the header — "this CPU class is N% of the
@@ -1566,6 +1576,7 @@ function CpuDrilldownWorkspace({
           threshold={threshold}
           periodDays={periodDays}
           pilot={pilot}
+          businessHoursOnly={businessHoursOnly}
           onBack={() => onSelectHost(null)}
         />
       ) : (
@@ -1851,12 +1862,14 @@ function HostEvidenceView({
   threshold,
   periodDays,
   pilot,
+  businessHoursOnly,
   onBack,
 }: {
   host: DrilldownHost;
   threshold: number;
   periodDays: number;
   pilot: RtPilotData;
+  businessHoursOnly: boolean;
   onBack: () => void;
 }) {
   // Level 3 selection: which minute the operator clicked, or null for
@@ -1906,6 +1919,7 @@ function HostEvidenceView({
               hostName={host.hostName}
               threshold={threshold}
               periodDays={periodDays}
+              businessHoursOnly={businessHoursOnly}
               onSelectMinute={setSelectedMinute}
             />
           )}
@@ -1974,25 +1988,20 @@ function HostMinutesList({
   hostName,
   threshold,
   periodDays,
+  businessHoursOnly,
   onSelectMinute,
 }: {
   hostId: string;
   hostName: string;
   threshold: number;
   periodDays: number;
+  businessHoursOnly: boolean;
   onSelectMinute: (m: MinuteSample) => void;
 }) {
   const [minutes, setMinutes] = useState<MinuteSample[] | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Business-hours filter is on by default — for rollout decisions
-  // the operator overwhelmingly cares about in-store-hours pressure,
-  // not 03:00 AM antivirus / Windows-update peaks. Stand-in for the
-  // real active-minutes signal until the transaction-timestamp API
-  // ships. The toggle exists so the operator can verify they're not
-  // dropping a real burst that happened off-hours (rare, but possible).
-  const [businessOnly, setBusinessOnly] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -2034,14 +2043,16 @@ function HostMinutesList({
     };
   }, [hostId, threshold, periodDays]);
 
-  // Derive the displayed minute list from the raw fetched list +
-  // the business-hours toggle. Keep the raw list in state so toggling
-  // doesn't force a refetch.
+  // Drilldown's minute list now obeys the GLOBAL Business-hours-only
+  // toggle in the matrix filter bar — single source of truth, so the
+  // numbers the operator sees match between matrix metric and per-host
+  // detail. The local toggle that used to live here was removed when
+  // the global toggle landed.
   const displayedMinutes = useMemo(() => {
     if (!minutes) return null;
-    if (!businessOnly) return minutes;
+    if (!businessHoursOnly) return minutes;
     return minutes.filter((m) => isVilniusBusinessHour(m.clockSec));
-  }, [minutes, businessOnly]);
+  }, [minutes, businessHoursOnly]);
   const totalCount = minutes?.length ?? 0;
   const displayedCount = displayedMinutes?.length ?? 0;
   const filteredOutCount = totalCount - displayedCount;
@@ -2055,29 +2066,15 @@ function HostMinutesList({
             <span className="ml-2 text-gray-400 font-normal normal-case tracking-normal">
               ({displayedCount}
               {truncated ? "+" : ""} in {periodDays} d
-              {businessOnly && filteredOutCount > 0
+              {businessHoursOnly && filteredOutCount > 0
                 ? `, ${filteredOutCount} off-hours hidden`
                 : ""})
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          <label
-            className="inline-flex items-center gap-1.5 text-[10px] text-gray-600 cursor-pointer select-none"
-            title="Restrict the list to Rimi store-operating hours (Mon–Sat 08–22, Sun 09–21 Europe/Vilnius). Off-hours peaks are usually OS maintenance, not customer load — a temporary stand-in until the transaction-timestamp API ships."
-          >
-            <input
-              type="checkbox"
-              checked={businessOnly}
-              onChange={(e) => setBusinessOnly(e.target.checked)}
-              className="w-3 h-3 accent-sky-600 cursor-pointer"
-            />
-            Business hours only
-          </label>
-          <span className="text-[10px] text-gray-400">
-            {hostName} · Europe/Vilnius
-          </span>
-        </div>
+        <span className="text-[10px] text-gray-400">
+          {hostName} · Europe/Vilnius
+        </span>
       </div>
 
       {loading ? (
@@ -2099,7 +2096,7 @@ function HostMinutesList({
         <div className="text-[12px] text-red-600">Failed to load: {error}</div>
       ) : displayedMinutes === null || displayedMinutes.length === 0 ? (
         <div className="text-[12px] text-gray-400 italic py-2">
-          {businessOnly && totalCount > 0
+          {businessHoursOnly && totalCount > 0
             ? `All ${totalCount} minutes above ${threshold}% fell outside business hours.`
             : `No minutes above ${threshold}% in the ${periodDays}-day window.`}
         </div>
@@ -2513,6 +2510,7 @@ function buildDrilldownHosts(
   zabbix: ZabbixData,
   threshold: number,
   periodDays: number,
+  businessHoursOnly: boolean,
 ): DrilldownHost[] {
   const zabbixByName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
   const trendsByHost = new Map<string, ZabbixCpuTrend[]>();
@@ -2566,15 +2564,23 @@ function buildDrilldownHosts(
     let hostBusinessSamples = 0;
     let sawAnyData = false;
     for (const t of trends) {
-      if (Number.isFinite(t.avg)) {
+      const useAvg =
+        businessHoursOnly && typeof t.avgBusiness === "number" && t.avgBusiness !== null
+          ? t.avgBusiness
+          : t.avg;
+      const useMax =
+        businessHoursOnly && typeof t.maxBusiness === "number" && t.maxBusiness !== null
+          ? t.maxBusiness
+          : t.max;
+      if (Number.isFinite(useAvg)) {
         sawAnyData = true;
-        if (t.avg > 0) dailyAvgs.push(t.avg);
+        if (useAvg > 0) dailyAvgs.push(useAvg);
       }
-      if (Number.isFinite(t.max) && t.max > 0) {
-        peakCpu = peakCpu === null ? t.max : Math.max(peakCpu, t.max);
+      if (Number.isFinite(useMax) && useMax > 0) {
+        peakCpu = peakCpu === null ? useMax : Math.max(peakCpu, useMax);
       }
       if (t.minutesAbove) {
-        const businessBucket = t.minutesAboveBusiness;
+        const businessBucket = businessHoursOnly ? t.minutesAboveBusiness : undefined;
         minutesAbove += businessBucket
           ? businessBucket[thKey] ?? 0
           : t.minutesAbove[thKey] ?? 0;
@@ -2656,6 +2662,7 @@ function computeCpuMatrix(
   storeFilter: string,
   countryFilter: string,
   cpuCountFrom: "tracked" | "active",
+  businessHoursOnly: boolean,
 ): { matrix: CpuMatrixRow[]; periodDays: number; fleetTotal: number } {
   // Combined country + store filter — both narrow the same device
   // set, applied as an AND. Country is the coarser slice (LT / LV /
@@ -2816,20 +2823,33 @@ function computeCpuMatrix(
     const trends = trendsByHost.get(matchedHost.hostId) || [];
     let hostHasData = false;
     for (const t of trends) {
-      if (Number.isFinite(t.avg)) {
+      // Pick the appropriate avg / max field based on the toggle.
+      // When businessHoursOnly is on AND the row carries the
+      // business-only stats (recent Zabbix path), use them. When
+      // the toggle is off, or when business stats are missing (older
+      // days from the DB rollup), fall back to the 24h fields.
+      const useAvg =
+        businessHoursOnly && typeof t.avgBusiness === "number" && t.avgBusiness !== null
+          ? t.avgBusiness
+          : t.avg;
+      const useMax =
+        businessHoursOnly && typeof t.maxBusiness === "number" && t.maxBusiness !== null
+          ? t.maxBusiness
+          : t.max;
+      if (Number.isFinite(useAvg)) {
         hostHasData = true;
-        if (t.avg > 0) g.dailyAvgPool.push(t.avg);
+        if (useAvg > 0) g.dailyAvgPool.push(useAvg);
       }
-      if (Number.isFinite(t.max) && t.max > 0) {
-        g.maxCpu = g.maxCpu === null ? t.max : Math.max(g.maxCpu, t.max);
+      if (Number.isFinite(useMax) && useMax > 0) {
+        g.maxCpu = g.maxCpu === null ? useMax : Math.max(g.maxCpu, useMax);
       }
       if (t.minutesAbove) {
         // Prefer the business-hours subset when present (Zabbix
-        // recent-window path). DB-rollup days have no business
-        // filter yet; for those, sumBusinessSamples stays 0 and the
-        // display formula falls back to the legacy calendar-day
-        // denominator further down.
-        const businessBucket = t.minutesAboveBusiness;
+        // recent-window path) AND the toggle is on. DB-rollup days
+        // have no business filter yet; for those, sumBusinessSamples
+        // stays 0 and the display formula falls back to the legacy
+        // calendar-day denominator further down.
+        const businessBucket = businessHoursOnly ? t.minutesAboveBusiness : undefined;
         const dayMinutesAbove = businessBucket
           ? businessBucket[thKey] ?? 0
           : t.minutesAbove[thKey] ?? 0;

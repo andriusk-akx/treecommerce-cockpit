@@ -141,6 +141,13 @@ export interface ZabbixCpuTrend {
    * back to `minutesAbove` for DB-rolled days.
    */
   minutesAboveBusiness?: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
+  /** Business-only max / avg / min — null when no business-hour
+   *  samples landed (day covered only by trend.get). Drives the matrix
+   *  Typical / Max metrics when the global Business-hours-only toggle
+   *  is on. */
+  maxBusiness?: number | null;
+  avgBusiness?: number | null;
+  minBusiness?: number | null;
   /**
    * Total number of raw samples (i.e. minutes with data) ingested for
    * this (host, date). Denominator for "X minutes above / Y total" UI.

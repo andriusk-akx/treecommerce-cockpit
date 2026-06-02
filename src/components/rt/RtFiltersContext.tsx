@@ -66,6 +66,15 @@ export interface DashboardFilters {
    * `active` for Retellect-only attribution.
    */
   cpuCountFrom: "tracked" | "active";
+  /**
+   * Global Business-hours-only toggle. When true (default), every
+   * CPU-Matrix metric — Typical / Room / Max / Time above and the
+   * drilldown per-host inventory — restricts to Rimi store-operating
+   * hours (Mon–Sat 08–22, Sun 09–21 Europe/Vilnius). When false the
+   * dashboard falls back to 24h-uniform aggregation. Active-minutes
+   * proxy until the transaction-timestamp API ships.
+   */
+  businessHoursOnly: boolean;
   /** Drill-down granularity in minutes (1, 5, 15, 60). 1m = native sample rate. */
   granularity: number;
   /** Drill-down chart mode. */
@@ -82,6 +91,7 @@ export const defaultFilters: DashboardFilters = {
   threshold: 70,
   activeThresholdPp: 2.0,
   cpuCountFrom: "tracked",
+  businessHoursOnly: true,
   granularity: 1,
   chartMode: "bars",
 };

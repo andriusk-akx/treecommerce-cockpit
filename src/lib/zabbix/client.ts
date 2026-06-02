@@ -338,7 +338,7 @@ export class ZabbixClient {
     itemIds: string[],
     itemHostMap: Map<string, string>,
     daysBack: number = 14
-  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[]> {
+  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; maxBusiness: number | null; avgBusiness: number | null; minBusiness: number | null; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[]> {
     if (itemIds.length === 0) return [];
     // Cache the daily aggregate for 2 minutes. This data covers 14 days, the
     // newest day changes minute-by-minute, but the rest is frozen. A 2-minute
@@ -354,7 +354,7 @@ export class ZabbixClient {
     itemIds: string[],
     itemHostMap: Map<string, string>,
     daysBack: number = 14
-  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[]> {
+  ): Promise<{ hostId: string; date: string; max: number; avg: number; min: number; maxBusiness: number | null; avgBusiness: number | null; minBusiness: number | null; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[]> {
     // Bound at 1..365 days. The internal merge handles >14 d windows via
     // trend.get hourly aggregates: history.get covers the recent ~14 d with
     // sample-level accuracy, trend.get fills in the rest of the window.
@@ -379,6 +379,15 @@ export class ZabbixClient {
       /** Sample count restricted to business hours (denominator parity
        *  with `totalSamples`). */
       businessSamples: number;
+      /** Same as max/sum/min/count but restricted to business-hour
+       *  samples. Drives the matrix's Typical / Max metrics when the
+       *  global Business-hours-only toggle is on. Initialised lazily
+       *  inside merge() to keep cases without any business-hour
+       *  samples cleanly null. */
+      maxBusiness: number | null;
+      sumBusiness: number;
+      minBusiness: number | null;
+      countBusiness: number;
     };
     const dailyMap = new Map<string, Bucket>();
     const localDate = (clockSec: number) =>
@@ -425,6 +434,10 @@ export class ZabbixClient {
       samplesBusiness: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
       totalSamples: 0,
       businessSamples: 0,
+      maxBusiness: null,
+      sumBusiness: 0,
+      minBusiness: null,
+      countBusiness: 0,
     });
     const merge = (hostId: string, date: string, value: number, isRawSample: boolean, clockSec: number) => {
       const key = `${hostId}|${date}`;
@@ -470,6 +483,17 @@ export class ZabbixClient {
           if (value > 70) b.samplesBusiness[70]++;
           if (value > 80) b.samplesBusiness[80]++;
           if (value > 90) b.samplesBusiness[90]++;
+          // Track business-only max / sum / min / count so the
+          // matrix's Typical / Max / Room metrics can switch to the
+          // business-hour view when the global toggle is on. Trend
+          // rows can't contribute here (no minute-level timestamp)
+          // — for days that came through trend.get only, these
+          // remain at their initial null/0 values and the matrix
+          // falls back to the 24h fields.
+          b.maxBusiness = b.maxBusiness === null ? value : Math.max(b.maxBusiness, value);
+          b.minBusiness = b.minBusiness === null ? value : Math.min(b.minBusiness, value);
+          b.sumBusiness += value;
+          b.countBusiness += 1;
         }
       }
     };
@@ -582,7 +606,7 @@ export class ZabbixClient {
       merge(hostId, date, value, true, clockSec);
     }
 
-    const result: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[] = [];
+    const result: { hostId: string; date: string; max: number; avg: number; min: number; maxBusiness: number | null; avgBusiness: number | null; minBusiness: number | null; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[] = [];
     for (const [key, data] of dailyMap) {
       const [hostId, date] = key.split("|");
       result.push({
@@ -591,6 +615,14 @@ export class ZabbixClient {
         max: Math.round(data.max * 10) / 10,
         avg: Math.round((data.sum / data.count) * 10) / 10,
         min: Math.round(data.min * 10) / 10,
+        // Business-only max/avg/min — null when no business-hour
+        // samples landed (e.g. day covered only by trend.get).
+        maxBusiness: data.maxBusiness === null ? null : Math.round(data.maxBusiness * 10) / 10,
+        avgBusiness:
+          data.countBusiness > 0
+            ? Math.round((data.sumBusiness / data.countBusiness) * 10) / 10
+            : null,
+        minBusiness: data.minBusiness === null ? null : Math.round(data.minBusiness * 10) / 10,
         minutesAbove: data.samples,
         minutesAboveBusiness: data.samplesBusiness,
         totalSamples: data.totalSamples,
@@ -619,7 +651,7 @@ export class ZabbixClient {
     fromSec: number,
     toSec: number,
   ): Promise<{
-    daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[];
+    daily: { hostId: string; date: string; max: number; avg: number; min: number; maxBusiness: number | null; avgBusiness: number | null; minBusiness: number | null; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[];
     samples: { hostId: string; clockSec: number; value: number }[];
   }> {
     if (itemIds.length === 0 || fromSec >= toSec) {
@@ -635,7 +667,7 @@ export class ZabbixClient {
     fromSec: number,
     toSec: number,
   ): Promise<{
-    daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[];
+    daily: { hostId: string; date: string; max: number; avg: number; min: number; maxBusiness: number | null; avgBusiness: number | null; minBusiness: number | null; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[];
     samples: { hostId: string; clockSec: number; value: number }[];
   }> {
     type Bucket = {
@@ -647,6 +679,10 @@ export class ZabbixClient {
       samplesBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
       totalSamples: number;
       businessSamples: number;
+      maxBusiness: number | null;
+      sumBusiness: number;
+      minBusiness: number | null;
+      countBusiness: number;
     };
     const dailyMap = new Map<string, Bucket>();
     const localDate = (clockSec: number) =>
@@ -691,6 +727,10 @@ export class ZabbixClient {
       samplesBusiness: { 20: 0, 30: 0, 40: 0, 50: 0, 60: 0, 70: 0, 80: 0, 90: 0 },
       totalSamples: 0,
       businessSamples: 0,
+      maxBusiness: null,
+      sumBusiness: 0,
+      minBusiness: null,
+      countBusiness: 0,
     });
     const merge = (hostId: string, date: string, value: number, isRawSample: boolean, clockSec: number) => {
       const key = `${hostId}|${date}`;
@@ -722,6 +762,13 @@ export class ZabbixClient {
           if (value > 70) b.samplesBusiness[70]++;
           if (value > 80) b.samplesBusiness[80]++;
           if (value > 90) b.samplesBusiness[90]++;
+          // Mirror max/sum/min/count for business-only aggregation
+          // so the matrix's Typical / Max / Room metrics can be
+          // toggled to business-hour view.
+          b.maxBusiness = b.maxBusiness === null ? value : Math.max(b.maxBusiness, value);
+          b.minBusiness = b.minBusiness === null ? value : Math.min(b.minBusiness, value);
+          b.sumBusiness += value;
+          b.countBusiness += 1;
         }
       }
     };
@@ -815,7 +862,7 @@ export class ZabbixClient {
       samples.push({ hostId, clockSec, value });
     }
 
-    const daily: { hostId: string; date: string; max: number; avg: number; min: number; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[] = [];
+    const daily: { hostId: string; date: string; max: number; avg: number; min: number; maxBusiness: number | null; avgBusiness: number | null; minBusiness: number | null; minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; minutesAboveBusiness: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number }; totalSamples: number; businessSamples: number }[] = [];
     for (const [key, data] of dailyMap) {
       const [hostId, date] = key.split("|");
       daily.push({
@@ -824,6 +871,12 @@ export class ZabbixClient {
         max: Math.round(data.max * 10) / 10,
         avg: Math.round((data.sum / data.count) * 10) / 10,
         min: Math.round(data.min * 10) / 10,
+        maxBusiness: data.maxBusiness === null ? null : Math.round(data.maxBusiness * 10) / 10,
+        avgBusiness:
+          data.countBusiness > 0
+            ? Math.round((data.sumBusiness / data.countBusiness) * 10) / 10
+            : null,
+        minBusiness: data.minBusiness === null ? null : Math.round(data.minBusiness * 10) / 10,
         minutesAbove: data.samples,
         minutesAboveBusiness: data.samplesBusiness,
         totalSamples: data.totalSamples,

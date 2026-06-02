@@ -28,6 +28,13 @@ export interface DailyAggregate {
   max: number;
   avg: number;
   min: number;
+  /** Business-only equivalents of max / avg / min. Null when no
+   *  business-hour samples landed (e.g. day covered exclusively by
+   *  trend.get). Used by the matrix Typical / Max / Room metrics
+   *  when the global Business-hours-only toggle is on. */
+  maxBusiness?: number | null;
+  avgBusiness?: number | null;
+  minBusiness?: number | null;
   minutesAbove: { 20: number; 30: number; 40: number; 50: number; 60: number; 70: number; 80: number; 90: number };
   /** Same shape as `minutesAbove`, but only counts samples whose
    *  Vilnius-local timestamp lies in Rimi store-operating hours
