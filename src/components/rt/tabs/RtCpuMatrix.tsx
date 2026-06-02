@@ -307,8 +307,8 @@ export function RtCpuMatrix({
   // pilot data measured locally). Same hoisted bundle is reused by
   // buildDrilldownHosts so the drilldown opens faster as well.
   const pilotZabbixIndex = useMemo(
-    () => buildPilotZabbixIndex(pilot, zabbix),
-    [pilot, zabbix],
+    () => buildPilotZabbixIndex(zabbix),
+    [zabbix],
   );
 
   // Build decision matrix from the deferred inputs.
@@ -719,7 +719,6 @@ export function RtCpuMatrix({
               threshold={threshold}
               periodDays={periodDays}
               pilot={pilot}
-              zabbix={zabbix}
               index={pilotZabbixIndex}
               businessHoursOnly={filters.businessHoursOnly}
               selectedHostId={selectedHostId}
@@ -1561,7 +1560,6 @@ function CpuDrilldownWorkspace({
   threshold,
   periodDays,
   pilot,
-  zabbix,
   index,
   businessHoursOnly,
   selectedHostId,
@@ -1572,7 +1570,9 @@ function CpuDrilldownWorkspace({
   threshold: number;
   periodDays: number;
   pilot: RtPilotData;
-  zabbix: ZabbixData;
+  /** Hoisted pilot+zabbix index — see buildPilotZabbixIndex. Carries
+   *  the heavy maps so the drilldown doesn't rebuild them on every
+   *  re-render. `zabbix` itself is no longer needed downstream. */
   index: PilotZabbixIndex;
   businessHoursOnly: boolean;
   selectedHostId: string | null;
@@ -1584,8 +1584,8 @@ function CpuDrilldownWorkspace({
   // PilotZabbixIndex carries the heavy maps so this re-runs in O(devices)
   // rather than O(devices + hosts + trends) per re-render.
   const hosts = useMemo(
-    () => buildDrilldownHosts(row.model, pilot, zabbix, index, threshold, periodDays, businessHoursOnly),
-    [row.model, pilot, zabbix, index, threshold, periodDays, businessHoursOnly],
+    () => buildDrilldownHosts(row.model, pilot, index, threshold, periodDays, businessHoursOnly),
+    [row.model, pilot, index, threshold, periodDays, businessHoursOnly],
   );
 
   // Fleet-share signal in the header — "this CPU class is N% of the
@@ -1961,9 +1961,15 @@ function HostEvidenceView({
   // wrong host context.
   const [selectedMinute, setSelectedMinute] = useState<MinuteSample | null>(null);
   useEffect(() => {
+    // Bug fix (2026-06-02, batch 2): businessHoursOnly was missing
+    // from the dep list. Toggling the global Business-hours-only
+    // filter while the operator was inspecting a Level-4 process
+    // breakdown could leave them staring at a breakdown for a
+    // minute that the new toggle state had hidden from the Level-3
+    // list above. Clearing on toggle keeps the workspace honest.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedMinute(null);
-  }, [host.hostId, threshold, periodDays]);
+  }, [host.hostId, threshold, periodDays, businessHoursOnly]);
 
   return (
     <div className="p-5">
@@ -2222,8 +2228,18 @@ function HostMinutesList({
         <div className="text-[12px] text-red-600">Failed to load: {error}</div>
       ) : displayedMinutes === null || displayedMinutes.length === 0 ? (
         <div className="text-[12px] text-gray-400 italic py-2">
+          {/* Bug fix (2026-06-02, batch 2): the old copy said
+              "All N minutes above X% fell outside business hours"
+              even when the endpoint was capped at 500 — implying
+              the host had exactly N minutes and they ALL fell
+              outside business hours. In a heavy host where the
+              server returned 500 of, say, 8 000 actual minutes-
+              above-threshold, that's a misleading absolute claim.
+              The reworded copy reflects what we actually know. */}
           {businessHoursOnly && totalCount > 0
-            ? `All ${totalCount} minutes above ${threshold}% fell outside business hours.`
+            ? truncated
+              ? `Of the ${totalCount} most recent above-${threshold}% minutes returned (server cap), none fall in business hours. Older bursts beyond the cap may still include business-hour minutes — narrow the Period filter to inspect.`
+              : `All ${totalCount} minutes above ${threshold}% in this window fell outside business hours.`
             : `No minutes above ${threshold}% in the ${periodDays}-day window.`}
         </div>
       ) : (
@@ -2641,18 +2657,16 @@ function fmtMinutesPerDay(value: number | null): string {
 function buildDrilldownHosts(
   modelMatch: string,
   pilot: RtPilotData,
-  zabbix: ZabbixData,
   index: PilotZabbixIndex,
   threshold: number,
   periodDays: number,
   businessHoursOnly: boolean,
 ): DrilldownHost[] {
-  // Perf 2026-06-02: zabbixByName / trendsByHost used to be rebuilt
-  // every time the drilldown re-rendered. Now consumed from the shared
-  // PilotZabbixIndex bundle so opening / sorting / re-filtering the
-  // drilldown doesn't replay the O(hosts + trends) map construction.
+  // Bug fix (2026-06-02, batch 2): the previous signature still
+  // accepted `zabbix` even though it consumed everything through
+  // `index` and silenced the unused param with `void zabbix`. Drop
+  // it. Callers only need to pass the precomputed index.
   const { zabbixByName, trendsByHost } = index;
-  void zabbix;
   const thKey: ActiveAboveBucket =
     threshold >= 90 ? 90 :
     threshold >= 80 ? 80 :
@@ -2824,9 +2838,20 @@ interface PilotZabbixIndex {
   trendsByHost: Map<string, ZabbixCpuTrend[]>;
   perHostMap: Map<string, RolloutPerHostEntry>;
   deployedSet: Set<string>;
+  /** Pre-computed period length derived from the zabbix payload.
+   *  Hoisted here so filter-only re-renders of computeCpuMatrix don't
+   *  re-iterate `new Set(cpuTrends.map(t.date))` every time. */
+  periodDays: number;
 }
 
-function buildPilotZabbixIndex(pilot: RtPilotData, zabbix: ZabbixData): PilotZabbixIndex {
+function buildPilotZabbixIndex(zabbix: ZabbixData): PilotZabbixIndex {
+  // Bug fix (2026-06-02, batch 2): the previous signature accepted
+  // `pilot` only to keep its symmetry with the older non-hoisted
+  // call sites and silenced the unused-arg lint warning with
+  // `void pilot`. Now that every call site reads from `index`, the
+  // unused parameter is just dead noise — drop it. Future device-
+  // level indexes can re-add the param without breaking callers
+  // because `index` is a typed bundle.
   const zabbixByName = new Map(zabbix.hosts.map((h) => [h.hostName, h]));
   const trendsByHost = new Map<string, ZabbixCpuTrend[]>();
   for (const t of zabbix.cpuTrends ?? []) {
@@ -2846,11 +2871,16 @@ function buildPilotZabbixIndex(pilot: RtPilotData, zabbix: ZabbixData): PilotZab
     const onTracked = entry.on.realTrackedMinutes + entry.on.syntheticTrackedMinutes;
     if (onTracked > 0) deployedSet.add(entry.hostId);
   }
-  // Silence the unused-pilot warning while keeping the signature
-  // stable for future device-level indexes (e.g. devicesByStore for
-  // the fleet-share denominator).
-  void pilot;
-  return { zabbixByName, trendsByHost, perHostMap, deployedSet };
+  const periodDays = (() => {
+    const fromAggregate = zabbix.rolloutPerHost?.periodDays;
+    if (fromAggregate && fromAggregate > 0) return fromAggregate;
+    const trends = zabbix.cpuTrends ?? [];
+    if (trends.length === 0) return 14;
+    const dates = new Set<string>();
+    for (const t of trends) dates.add(t.date);
+    return Math.max(1, dates.size);
+  })();
+  return { zabbixByName, trendsByHost, perHostMap, deployedSet, periodDays };
 }
 
 function computeCpuMatrix(
@@ -2863,7 +2893,7 @@ function computeCpuMatrix(
   cpuCountFrom: "tracked" | "active",
   businessHoursOnly: boolean,
 ): { matrix: CpuMatrixRow[]; periodDays: number; fleetTotal: number } {
-  const { zabbixByName, trendsByHost, perHostMap, deployedSet } = index;
+  const { zabbixByName, trendsByHost, perHostMap, deployedSet, periodDays } = index;
   // Combined country + store filter — both narrow the same device
   // set, applied as an AND. Country is the coarser slice (LT / LV /
   // EE); store is finer. When country is "all" and store is "all"
@@ -2881,15 +2911,18 @@ function computeCpuMatrix(
   // count must reflect physical inventory, not monitoring coverage.
   // (Coverage gaps are surfaced separately in the drilldown
   // "Unmonitored" tab.)
-  const fleetTotal = pilot.devices.filter(matchesFilters).length;
-  const periodDays = (() => {
-    const fromAggregate = zabbix.rolloutPerHost?.periodDays;
-    if (fromAggregate && fromAggregate > 0) return fromAggregate;
-    const raw = (zabbix.cpuTrends?.length || 0) > 0
-      ? new Set(zabbix.cpuTrends!.map((t) => t.date)).size
-      : 14;
-    return Math.max(1, raw);
-  })();
+  // Bug fix (2026-06-02, batch 2): fleetTotal used to live in its own
+  // `pilot.devices.filter(matchesFilters).length` pass — a full O(devices)
+  // sweep that ran in addition to the main loop below which already
+  // iterates pilot.devices with the same filter. Now we accumulate
+  // `fleetTotal` inside the main loop (see the `if (matchesFilters)
+  // ... fleetTotal++` block below) so the matrix compute does ONE pass
+  // through pilot.devices instead of two. Saves ~50 % on the device-
+  // scan portion of computeCpuMatrix wall time at Rimi scale (1554
+  // devices).
+  let fleetTotal = 0;
+  // (periodDays now lives on the PilotZabbixIndex bundle — see Bug
+  // batch 2 perf hoist.)
 
   // (zabbixByName / trendsByHost / perHostMap / deployedSet now arrive
   // pre-built in `index` — see PilotZabbixIndex + buildPilotZabbixIndex
@@ -2958,6 +2991,10 @@ function computeCpuMatrix(
 
   for (const d of pilot.devices) {
     if (!matchesFilters(d)) continue;
+    // Combined fleetTotal accumulation (batch 2 perf): count every
+    // filter-passing device here so we don't need a second
+    // pilot.devices.filter pass for the % of fleet denominator.
+    fleetTotal++;
     // Bug fix (2026-06-01): see buildDrilldownHosts — empty
     // sourceHostKey must not fall through to Map.get("").
     const matchedHost =

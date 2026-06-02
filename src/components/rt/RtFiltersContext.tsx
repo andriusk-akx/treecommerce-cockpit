@@ -114,7 +114,17 @@ const FILTER_LABELS: Array<{
   { key: "cpuModel", label: "CPU", format: (v) => String(v) },
   { key: "search", label: "Search", format: (v) => `"${String(v)}"` },
   { key: "retellectInstalled", label: "Retellect", format: (v) => v === "today" ? "active today" : v === "installed" ? "installed" : "" },
-  { key: "period", label: "Period", format: (v) => /^\d+$/.test(String(v)) ? `${v}d` : String(v) },
+  // Bug fix (2026-06-02, batch 2): Period was registered as a chip,
+  // but Period also lives in the URL (?period=…) and the page-level
+  // useEffect in RtCpuMatrix re-applies the URL value on every
+  // urlSearchParams change. Clicking the chip's ✕ ran resetField
+  // (filters.period → "14d") but the URL stayed at "30d" — the next
+  // urlSearchParams change snapped period back to "30d", and in the
+  // meantime the matrix compute showed a 30-day periodDays from the
+  // server while the segmented control claimed 14d. Drop the chip so
+  // operators only change Period through the segmented control (which
+  // updates both filters AND the URL atomically via setPeriod).
+  // { key: "period", label: "Period", format: (v) => /^\d+$/.test(String(v)) ? `${v}d` : String(v) },
   { key: "threshold", label: "Threshold", format: (v) => `${v}%` },
   { key: "activeThresholdPp", label: "Active", format: (v) => `${v} pp` },
   { key: "cpuCountFrom", label: "Count from", format: (v) => v === "active" ? "active only" : "all tracked" },
@@ -206,6 +216,7 @@ export function RtFiltersProvider({ pilotId, initialPeriod, initialActiveThresho
       // dashboard always opens on the lightweight window. Without this
       // step, a user who once picked 30d on a slow day would silently
       // keep paying the heavier fetch every time they returned.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { period: _droppedPeriod, ...parsedWithoutPeriod } = parsed;
       // Shallow-merge with defaults so missing keys fall back gracefully when
       // the schema gains a field between sessions. URL `period` (if present)
@@ -279,6 +290,7 @@ export function RtFiltersProvider({ pilotId, initialPeriod, initialActiveThresho
       // Strip `period` before persisting — see load-path comment for the
       // rationale (period should not carry across reloads; defaults to
       // URL or 14 d each fresh visit).
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { period: _droppedPeriod, ...persisted } = filters;
       window.localStorage.setItem(storageKey, JSON.stringify(persisted));
     } catch {
@@ -294,7 +306,23 @@ export function RtFiltersProvider({ pilotId, initialPeriod, initialActiveThresho
     setFilters((prev) => ({ ...prev, [key]: defaultFilters[key] }));
   }, []);
 
-  const resetAll = useCallback(() => setFilters(defaultFilters), []);
+  const resetAll = useCallback(
+    () =>
+      // Bug fix (2026-06-02, batch 2): the old resetAll cleared
+      // EVERY field back to defaultFilters, including `period`. But
+      // `period` is URL-driven — the page's useEffect re-syncs the
+      // filter state from `?period=…` on every urlSearchParams
+      // change. So pressing Clear all dropped filters.period to
+      // "14d" while the URL kept the operator's previous choice
+      // (say "30d") — segmented control flickered, then the
+      // useEffect snapped period back to 30d on the next URL nav,
+      // and in the meantime the matrix showed mixed numbers (30d
+      // worth of server data, 14d label in the UI). Preserve the
+      // current period across reset so the URL and the segmented
+      // control stay in sync.
+      setFilters((prev) => ({ ...defaultFilters, period: prev.period })),
+    [],
+  );
 
   const activeChips = useMemo(() => {
     const chips: Array<{ key: keyof DashboardFilters; label: string; value: string }> = [];
