@@ -41,6 +41,12 @@ interface CompareSummary {
   offPeak: number | null;
   deltaPp: number | null;
   deltaRel: number | null;
+  // Peak-vs-peak delta for the "Daily peak" metric. Without it the
+  // delta card would compare avg-to-avg even when the user is viewing
+  // peaks, which silently hides the case where Retellect changes peaks
+  // sharply while shifting averages only slightly.
+  deltaPeakPp: number | null;
+  deltaPeakRel: number | null;
   // Minutes-above-threshold track (min≥thr metric uses this). Added
   // alongside the CPU track so the cards/delta can reflect the active
   // metric's units instead of mis-labelling CPU% as minutes.
@@ -662,20 +668,40 @@ export function RtProcessTrend({ hostId, sourceHostKey, displayName, threshold, 
               </div>
 
               {/* A/B compare row.
-                  Metric-aware field selection: when the user picks the
-                  "Min ≥ threshold" metric, the cards must reflect the
-                  minutes-above-threshold accumulators (which DO change
-                  with the threshold prop). For "Daily avg" / "Daily peak"
-                  we stay on the CPU-percent accumulators. Without this
-                  split the cards always showed CPU % values labelled as
-                  minutes — the bug where flipping the global threshold
-                  80→90 left every card number unchanged. */}
+                  Metric-aware headline selection so each metric's card
+                  reflects the right summary number — previously the card
+                  always showed mean(d.avg) regardless of metric, with only
+                  the label and unit changing. Result was that "Daily avg"
+                  16.1 %, "Daily peak" 16.1 % (labelled peak), and
+                  "Min ≥ threshold" 16 min (mislabelled minutes) all shared
+                  one value across all three views.
+                    • avg metric      → headline mean(d.avg), sub max(d.peak)
+                    • peak metric     → headline max(d.peak), sub mean(d.avg)
+                    • minAbove metric → headline mean(d.minutesAbove),
+                                        sub max(d.minutesAbove)
+                  The `usePeak` / `useMin` flags below carry this routing
+                  through to CompareCard and DeltaCard so the unit, value
+                  and delta basis stay consistent. */}
               {summary && (() => {
                 const useMin = metric === "minAbove";
-                const onAvgVal  = useMin ? summary.onMinAvg  : summary.onAvg;
-                const onPeakVal = useMin ? summary.onMinPeak : summary.onPeak;
-                const offAvgVal = useMin ? summary.offMinAvg : summary.offAvg;
-                const offPeakVal= useMin ? summary.offMinPeak: summary.offPeak;
+                const usePeak = metric === "peak";
+                // Headline (top number): metric-specific.
+                const onAvgVal  = useMin ? summary.onMinAvg
+                                : usePeak ? summary.onPeak
+                                : summary.onAvg;
+                const offAvgVal = useMin ? summary.offMinAvg
+                                : usePeak ? summary.offPeak
+                                : summary.offAvg;
+                // Sub-line "peak X" — for peak metric we use mean(d.avg)
+                // as supplementary context ("worst-case peak is 31 %,
+                // typical daily mean is 16 %"). For avg / minAbove the
+                // sub still surfaces the worst-day spike.
+                const onPeakVal = useMin ? summary.onMinPeak
+                                : usePeak ? summary.onAvg
+                                : summary.onPeak;
+                const offPeakVal= useMin ? summary.offMinPeak
+                                : usePeak ? summary.offAvg
+                                : summary.offPeak;
                 return (
                   <div
                     style={{
@@ -803,6 +829,10 @@ function CompareCard({
   yIsTime: boolean;
   metric: MetricId;
 }) {
+  // For the peak metric the sub-line shows mean(d.avg) — "avg X" reads
+  // honestly there. For avg / minAbove metrics the sub still shows the
+  // worst-day spike, so "peak X" is correct.
+  const subLabel = metric === "peak" ? "avg" : "peak";
   return (
     <div
       style={{
@@ -820,7 +850,7 @@ function CompareCard({
         </span>
       </div>
       <div style={{ fontSize: 11, color: secondary }}>
-        {peak === null ? "—" : `peak ${formatVal(peak, yIsTime)}`}
+        {peak === null ? "—" : `${subLabel} ${formatVal(peak, yIsTime)}`}
       </div>
     </div>
   );
@@ -849,13 +879,23 @@ function DeltaCard({
     : " avg";
 
   // Metric-aware delta selection — see the matching block in the
-  // compare-row above. The CPU-percent (deltaPp/deltaRel) track is
-  // threshold-independent, so for the minutes-above metric we MUST
-  // read from the minutes track (deltaMin/deltaMinRel) or the card
-  // value won't change when the threshold prop does.
+  // compare-row above. Each metric needs its own delta basis:
+  //   • avg metric      → deltaPp     = mean(d.avg)  ON vs OFF
+  //   • peak metric     → deltaPeakPp = max(d.peak)  ON vs OFF
+  //   • minAbove metric → deltaMin    = mean(d.minutesAbove) ON vs OFF
+  // Before this fix the peak metric quietly reused the avg delta — so
+  // even when Retellect moved peaks by 30 %, the card would report the
+  // (much smaller) avg shift, and the threshold knob did nothing at all
+  // in the minutes-above view because the CPU avg doesn't depend on the
+  // threshold.
   const useMin = metric === "minAbove";
-  const deltaPrimary = useMin ? summary.deltaMin    : summary.deltaPp;
-  const deltaRelative = useMin ? summary.deltaMinRel : summary.deltaRel;
+  const usePeak = metric === "peak";
+  const deltaPrimary = useMin ? summary.deltaMin
+                     : usePeak ? summary.deltaPeakPp
+                     : summary.deltaPp;
+  const deltaRelative = useMin ? summary.deltaMinRel
+                      : usePeak ? summary.deltaPeakRel
+                      : summary.deltaRel;
 
   if (deltaPrimary === null || isSelfReference) {
     return (

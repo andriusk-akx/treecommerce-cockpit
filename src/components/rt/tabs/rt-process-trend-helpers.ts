@@ -138,13 +138,19 @@ export interface CompareSummary {
   // ── CPU-percent track ──────────────────────────────────────────────
   // `onAvg/offAvg` = mean of daily-avg CPU%, `onPeak/offPeak` = max of
   // daily-peak CPU%. Used when the chart metric is "Daily avg" or
-  // "Daily peak"; units are %. deltaPp/deltaRel compare onAvg vs offAvg.
+  // "Daily peak"; units are %. deltaPp/deltaRel compare onAvg vs offAvg
+  // (i.e., the AVG track). The "Daily peak" metric needs its OWN delta
+  // — comparing avg-to-avg there silently sells the story short:
+  // Retellect can shift peak loads dramatically while moving avg only
+  // a little. deltaPeakPp/deltaPeakRel close that gap.
   onAvg: number | null;
   onPeak: number | null;
   offAvg: number | null;
   offPeak: number | null;
   deltaPp: number | null;
   deltaRel: number | null;
+  deltaPeakPp: number | null;
+  deltaPeakRel: number | null;
   // ── Minutes-above-threshold track ──────────────────────────────────
   // Same shape but computed against `d.minutesAbove` (raw 1-min sample
   // count where value ≥ threshold). Used when the chart metric is
@@ -201,6 +207,17 @@ export function compareOnOff(
       deltaRel = 0;
     }
   }
+  // Peak-track delta (Daily peak metric uses this). Same /0 clamp rule.
+  let deltaPeakPp: number | null = null;
+  let deltaPeakRel: number | null = null;
+  if (onPeakOut !== null && offPeakOut !== null) {
+    deltaPeakPp = Math.round((onPeakOut - offPeakOut) * 10) / 10;
+    if (offPeakOut > 0) {
+      deltaPeakRel = Math.round(((onPeakOut - offPeakOut) / offPeakOut) * 1000) / 10;
+    } else {
+      deltaPeakRel = 0;
+    }
+  }
   // Minutes-above-threshold track. Integers in the source data, but we
   // round to one decimal anyway because onMinAvg is a mean across days
   // (e.g., 12 ON days summing to 45.6 min/day average).
@@ -230,6 +247,8 @@ export function compareOnOff(
     offPeak: offPeakOut,
     deltaPp,
     deltaRel,
+    deltaPeakPp,
+    deltaPeakRel,
     onMinAvg,
     onMinPeak: onMinPeakOut,
     offMinAvg,

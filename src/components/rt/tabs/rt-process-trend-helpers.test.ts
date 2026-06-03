@@ -186,6 +186,9 @@ describe("compareOnOff", () => {
     expect(r.offMinPeak).toBeNull();
     expect(r.deltaMin).toBeNull();
     expect(r.deltaMinRel).toBeNull();
+    // Peak-track delta follows the same null discipline.
+    expect(r.deltaPeakPp).toBeNull();
+    expect(r.deltaPeakRel).toBeNull();
   });
 
   it("computes simple ON vs OFF means and delta", () => {
@@ -321,6 +324,42 @@ describe("compareOnOff", () => {
     expect(r.offMinAvg).toBeNull();
     expect(r.deltaMin).toBeNull();
     expect(r.deltaMinRel).toBeNull();
+  });
+
+  // ── Peak-vs-peak delta ─────────────────────────────────────────
+  //
+  // Daily peak metric needs deltaPeakPp = max(d.peak) ON minus
+  // max(d.peak) OFF. Re-using deltaPp (avg-vs-avg) would hide cases
+  // where Retellect smashes the worst-case peak while moving averages
+  // only a little.
+
+  it("peak-track delta compares max(d.peak) ON vs OFF, not the averages", () => {
+    // ON peaks: 90 / 85 / 80 → max 90.
+    // OFF peaks: 70 / 65 / 60 → max 70.
+    // Avg track delta: avg ON 28 (30+28+26)/3, avg OFF 58 (60+56+58)/3
+    //   → deltaPp = -30 (which the existing test pins).
+    // Peak track delta: max ON 90, max OFF 70 → +20.
+    const r = compareOnOff([
+      { agg: { date: "1", avg: 30, peak: 90, minutesAbove: 0, totalSamples: 1000 }, retellectOn: true },
+      { agg: { date: "2", avg: 28, peak: 85, minutesAbove: 0, totalSamples: 1000 }, retellectOn: true },
+      { agg: { date: "3", avg: 26, peak: 80, minutesAbove: 0, totalSamples: 1000 }, retellectOn: true },
+      { agg: { date: "4", avg: 60, peak: 70, minutesAbove: 0, totalSamples: 1000 }, retellectOn: false },
+      { agg: { date: "5", avg: 56, peak: 65, minutesAbove: 0, totalSamples: 1000 }, retellectOn: false },
+      { agg: { date: "6", avg: 58, peak: 60, minutesAbove: 0, totalSamples: 1000 }, retellectOn: false },
+    ]);
+    expect(r.deltaPp).toBe(-30);     // avg ON − avg OFF
+    expect(r.deltaPeakPp).toBe(20);  // max(peak) ON − max(peak) OFF
+    expect(r.deltaPeakRel).toBeCloseTo(28.6, 1); // 20/70 * 100
+  });
+
+  it("peak-track delta clamps relative to 0 when OFF baseline is 0", () => {
+    const r = compareOnOff([
+      { agg: { date: "1", avg: 50, peak: 80, minutesAbove: 0, totalSamples: 1000 }, retellectOn: true },
+      { agg: { date: "2", avg: 30, peak: 0, minutesAbove: 0, totalSamples: 1000 }, retellectOn: false },
+    ]);
+    expect(r.offPeak).toBe(0);
+    expect(r.deltaPeakPp).toBe(80);
+    expect(r.deltaPeakRel).toBe(0);
   });
 });
 
