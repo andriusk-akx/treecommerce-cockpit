@@ -178,6 +178,14 @@ describe("compareOnOff", () => {
     expect(r.offAvg).toBeNull();
     expect(r.deltaPp).toBeNull();
     expect(r.deltaRel).toBeNull();
+    // Minutes-above track follows the same null discipline so the UI can
+    // render "—" identically for either track when there's no data.
+    expect(r.onMinAvg).toBeNull();
+    expect(r.offMinAvg).toBeNull();
+    expect(r.onMinPeak).toBeNull();
+    expect(r.offMinPeak).toBeNull();
+    expect(r.deltaMin).toBeNull();
+    expect(r.deltaMinRel).toBeNull();
   });
 
   it("computes simple ON vs OFF means and delta", () => {
@@ -245,6 +253,74 @@ describe("compareOnOff", () => {
     ]);
     expect(r.deltaPp).toBe(20);
     expect(r.deltaRel).toBe(40); // (70-50)/50*100
+  });
+
+  // ── Minutes-above-threshold track ────────────────────────────────
+  //
+  // Regression guard for the bug that shipped to prod (v0.1.233): the
+  // CompareCard was wired to summary.onAvg/onPeak (CPU-percent track)
+  // even when the user picked the "Min ≥ threshold" metric. The result
+  // was that flipping the threshold (80 % → 90 %) left every card
+  // value unchanged because CPU-avg is threshold-independent. The fix
+  // added onMinAvg/onMinPeak (and the matching delta fields), which
+  // ARE threshold-dependent because they're derived from d.minutesAbove
+  // — and d.minutesAbove is computed at the threshold the route was
+  // called with. Tests below pin down each track behaving correctly
+  // in isolation.
+
+  it("minutes-above track: averages and peaks daily minutesAbove counts", () => {
+    // 3 ON days with 30 / 24 / 18 minutes above → mean 24, peak 30.
+    // 3 OFF days with 6 / 4 / 2 minutes above   → mean 4,  peak 6.
+    const r = compareOnOff([
+      { agg: { date: "1", avg: 50, peak: 90, minutesAbove: 30, totalSamples: 1440 }, retellectOn: true },
+      { agg: { date: "2", avg: 48, peak: 85, minutesAbove: 24, totalSamples: 1440 }, retellectOn: true },
+      { agg: { date: "3", avg: 46, peak: 80, minutesAbove: 18, totalSamples: 1440 }, retellectOn: true },
+      { agg: { date: "4", avg: 20, peak: 60, minutesAbove: 6, totalSamples: 1440 }, retellectOn: false },
+      { agg: { date: "5", avg: 18, peak: 55, minutesAbove: 4, totalSamples: 1440 }, retellectOn: false },
+      { agg: { date: "6", avg: 22, peak: 65, minutesAbove: 2, totalSamples: 1440 }, retellectOn: false },
+    ]);
+    expect(r.onMinAvg).toBe(24);
+    expect(r.offMinAvg).toBe(4);
+    expect(r.onMinPeak).toBe(30);
+    expect(r.offMinPeak).toBe(6);
+    expect(r.deltaMin).toBe(20);   // 24 - 4
+    expect(r.deltaMinRel).toBe(500); // (24-4)/4 * 100
+  });
+
+  it("minutes-above and CPU tracks coexist independently in one summary", () => {
+    // The CPU track sees identical daily-avg numbers across ON and OFF
+    // (i.e., the threshold is the ONLY meaningful difference). Without
+    // the minutes track, the user sees deltaPp = 0 even though Retellect
+    // visibly drove samples over 80 %. With it, deltaMin > 0 surfaces.
+    const r = compareOnOff([
+      { agg: { date: "1", avg: 50, peak: 85, minutesAbove: 45, totalSamples: 1440 }, retellectOn: true },
+      { agg: { date: "2", avg: 50, peak: 85, minutesAbove: 12, totalSamples: 1440 }, retellectOn: false },
+    ]);
+    expect(r.deltaPp).toBe(0);
+    expect(r.deltaMin).toBe(33); // 45 - 12 — the real story the user wants
+  });
+
+  it("minutes-above track clamps relative delta to 0 when OFF baseline is 0", () => {
+    // OFF days never went above threshold → offMinAvg = 0. Reporting
+    // "+Infinity %" or NaN would be hostile in the UI; we report 0 and
+    // let the absolute deltaMin carry the signal.
+    const r = compareOnOff([
+      { agg: { date: "1", avg: 50, peak: 90, minutesAbove: 18, totalSamples: 1440 }, retellectOn: true },
+      { agg: { date: "2", avg: 30, peak: 60, minutesAbove: 0, totalSamples: 1440 }, retellectOn: false },
+    ]);
+    expect(r.offMinAvg).toBe(0);
+    expect(r.deltaMin).toBe(18);
+    expect(r.deltaMinRel).toBe(0);
+  });
+
+  it("minutes-above track null-side discipline matches CPU track", () => {
+    const r = compareOnOff([
+      { agg: { date: "1", avg: 50, peak: 80, minutesAbove: 12, totalSamples: 1440 }, retellectOn: true },
+    ]);
+    expect(r.onMinAvg).toBe(12);
+    expect(r.offMinAvg).toBeNull();
+    expect(r.deltaMin).toBeNull();
+    expect(r.deltaMinRel).toBeNull();
   });
 });
 

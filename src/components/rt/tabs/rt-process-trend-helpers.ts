@@ -135,12 +135,30 @@ export function isRetellectOnDay(
 export interface CompareSummary {
   onCount: number;
   offCount: number;
+  // ── CPU-percent track ──────────────────────────────────────────────
+  // `onAvg/offAvg` = mean of daily-avg CPU%, `onPeak/offPeak` = max of
+  // daily-peak CPU%. Used when the chart metric is "Daily avg" or
+  // "Daily peak"; units are %. deltaPp/deltaRel compare onAvg vs offAvg.
   onAvg: number | null;
   onPeak: number | null;
   offAvg: number | null;
   offPeak: number | null;
   deltaPp: number | null;
   deltaRel: number | null;
+  // ── Minutes-above-threshold track ──────────────────────────────────
+  // Same shape but computed against `d.minutesAbove` (raw 1-min sample
+  // count where value ≥ threshold). Used when the chart metric is
+  // "Min ≥ threshold"; units are minutes. Without these fields the UI
+  // had to fall back to the CPU-percent track and mis-label percent
+  // values as minutes — silently producing the bug where switching the
+  // global threshold (80% → 90%) changed nothing because the percent
+  // averages don't depend on the threshold parameter.
+  onMinAvg: number | null;
+  onMinPeak: number | null;
+  offMinAvg: number | null;
+  offMinPeak: number | null;
+  deltaMin: number | null;
+  deltaMinRel: number | null;
 }
 
 export function compareOnOff(
@@ -148,15 +166,24 @@ export function compareOnOff(
 ): CompareSummary {
   let onSum = 0, onPeak = -Infinity, onN = 0;
   let offSum = 0, offPeak = -Infinity, offN = 0;
+  // Parallel accumulators for the minutes-above-threshold track. Kept in
+  // the same loop so we never traverse `days` twice and the day-filter
+  // (`totalSamples === 0`) stays single-source-of-truth.
+  let onMinSum = 0, onMinPeak = -Infinity;
+  let offMinSum = 0, offMinPeak = -Infinity;
   for (const d of days) {
     if (d.agg.totalSamples === 0) continue;
     if (d.retellectOn) {
       onSum += d.agg.avg;
       if (d.agg.peak > onPeak) onPeak = d.agg.peak;
+      onMinSum += d.agg.minutesAbove;
+      if (d.agg.minutesAbove > onMinPeak) onMinPeak = d.agg.minutesAbove;
       onN += 1;
     } else {
       offSum += d.agg.avg;
       if (d.agg.peak > offPeak) offPeak = d.agg.peak;
+      offMinSum += d.agg.minutesAbove;
+      if (d.agg.minutesAbove > offMinPeak) offMinPeak = d.agg.minutesAbove;
       offN += 1;
     }
   }
@@ -174,6 +201,26 @@ export function compareOnOff(
       deltaRel = 0;
     }
   }
+  // Minutes-above-threshold track. Integers in the source data, but we
+  // round to one decimal anyway because onMinAvg is a mean across days
+  // (e.g., 12 ON days summing to 45.6 min/day average).
+  const onMinAvg = onN > 0 ? Math.round((onMinSum / onN) * 10) / 10 : null;
+  const offMinAvg = offN > 0 ? Math.round((offMinSum / offN) * 10) / 10 : null;
+  const onMinPeakOut = onN > 0 ? Math.round(onMinPeak * 10) / 10 : null;
+  const offMinPeakOut = offN > 0 ? Math.round(offMinPeak * 10) / 10 : null;
+  let deltaMin: number | null = null;
+  let deltaMinRel: number | null = null;
+  if (onMinAvg !== null && offMinAvg !== null) {
+    deltaMin = Math.round((onMinAvg - offMinAvg) * 10) / 10;
+    if (offMinAvg > 0) {
+      deltaMinRel = Math.round(((onMinAvg - offMinAvg) / offMinAvg) * 1000) / 10;
+    } else {
+      // OFF baseline 0 min → any ON activity is "infinite" relative. We
+      // report 0 to avoid NaN/Infinity in the UI; deltaMin (absolute)
+      // still carries the meaningful signal (e.g., +12 min).
+      deltaMinRel = 0;
+    }
+  }
   return {
     onCount: onN,
     offCount: offN,
@@ -183,6 +230,12 @@ export function compareOnOff(
     offPeak: offPeakOut,
     deltaPp,
     deltaRel,
+    onMinAvg,
+    onMinPeak: onMinPeakOut,
+    offMinAvg,
+    offMinPeak: offMinPeakOut,
+    deltaMin,
+    deltaMinRel,
   };
 }
 

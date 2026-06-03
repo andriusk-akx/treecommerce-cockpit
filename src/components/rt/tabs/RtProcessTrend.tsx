@@ -34,12 +34,22 @@ interface DayPoint {
 interface CompareSummary {
   onCount: number;
   offCount: number;
+  // CPU-percent track (avg / peak metrics use this).
   onAvg: number | null;
   onPeak: number | null;
   offAvg: number | null;
   offPeak: number | null;
   deltaPp: number | null;
   deltaRel: number | null;
+  // Minutes-above-threshold track (min≥thr metric uses this). Added
+  // alongside the CPU track so the cards/delta can reflect the active
+  // metric's units instead of mis-labelling CPU% as minutes.
+  onMinAvg: number | null;
+  onMinPeak: number | null;
+  offMinAvg: number | null;
+  offMinPeak: number | null;
+  deltaMin: number | null;
+  deltaMinRel: number | null;
 }
 
 interface ApiResponse {
@@ -651,46 +661,61 @@ export function RtProcessTrend({ hostId, sourceHostKey, displayName, threshold, 
               })()}
               </div>
 
-              {/* A/B compare row */}
-              {summary && (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr 1fr",
-                    gap: 8,
-                    marginTop: 12,
-                  }}
-                >
-                  <CompareCard
-                    label={`Retellect ON · ${summary.onCount} d`}
-                    bg={C.onBandBg}
-                    border={C.onBandStroke}
-                    text={C.onText}
-                    secondary={C.onSecondary}
-                    avg={summary.onAvg}
-                    peak={summary.onPeak}
-                    yIsTime={yIsTime}
-                    metric={metric}
-                  />
-                  <CompareCard
-                    label={`Retellect OFF · ${summary.offCount} d`}
-                    bg={C.offBandBg}
-                    border={C.border}
-                    text={C.offText}
-                    secondary={C.offSecondary}
-                    avg={summary.offAvg}
-                    peak={summary.offPeak}
-                    yIsTime={yIsTime}
-                    metric={metric}
-                  />
-                  <DeltaCard
-                    summary={summary}
-                    metric={metric}
-                    category={category}
-                    yIsTime={yIsTime}
-                  />
-                </div>
-              )}
+              {/* A/B compare row.
+                  Metric-aware field selection: when the user picks the
+                  "Min ≥ threshold" metric, the cards must reflect the
+                  minutes-above-threshold accumulators (which DO change
+                  with the threshold prop). For "Daily avg" / "Daily peak"
+                  we stay on the CPU-percent accumulators. Without this
+                  split the cards always showed CPU % values labelled as
+                  minutes — the bug where flipping the global threshold
+                  80→90 left every card number unchanged. */}
+              {summary && (() => {
+                const useMin = metric === "minAbove";
+                const onAvgVal  = useMin ? summary.onMinAvg  : summary.onAvg;
+                const onPeakVal = useMin ? summary.onMinPeak : summary.onPeak;
+                const offAvgVal = useMin ? summary.offMinAvg : summary.offAvg;
+                const offPeakVal= useMin ? summary.offMinPeak: summary.offPeak;
+                return (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr 1fr",
+                      gap: 8,
+                      marginTop: 12,
+                    }}
+                  >
+                    <CompareCard
+                      label={`Retellect ON · ${summary.onCount} d`}
+                      bg={C.onBandBg}
+                      border={C.onBandStroke}
+                      text={C.onText}
+                      secondary={C.onSecondary}
+                      avg={onAvgVal}
+                      peak={onPeakVal}
+                      yIsTime={yIsTime}
+                      metric={metric}
+                    />
+                    <CompareCard
+                      label={`Retellect OFF · ${summary.offCount} d`}
+                      bg={C.offBandBg}
+                      border={C.border}
+                      text={C.offText}
+                      secondary={C.offSecondary}
+                      avg={offAvgVal}
+                      peak={offPeakVal}
+                      yIsTime={yIsTime}
+                      metric={metric}
+                    />
+                    <DeltaCard
+                      summary={summary}
+                      metric={metric}
+                      category={category}
+                      yIsTime={yIsTime}
+                    />
+                  </div>
+                );
+              })()}
 
               {/* No-data note */}
               {!hasData && (
@@ -823,7 +848,16 @@ function DeltaCard({
     : metric === "minAbove" ? " min≥thr"
     : " avg";
 
-  if (summary.deltaPp === null || isSelfReference) {
+  // Metric-aware delta selection — see the matching block in the
+  // compare-row above. The CPU-percent (deltaPp/deltaRel) track is
+  // threshold-independent, so for the minutes-above metric we MUST
+  // read from the minutes track (deltaMin/deltaMinRel) or the card
+  // value won't change when the threshold prop does.
+  const useMin = metric === "minAbove";
+  const deltaPrimary = useMin ? summary.deltaMin    : summary.deltaPp;
+  const deltaRelative = useMin ? summary.deltaMinRel : summary.deltaRel;
+
+  if (deltaPrimary === null || isSelfReference) {
     return (
       <div
         style={{
@@ -842,10 +876,10 @@ function DeltaCard({
       </div>
     );
   }
-  // Negative ΔPp = CPU dropped when Retellect was ON → the win we want.
-  // Positive = CPU went UP → flag it amber so the user notices.
-  const win = summary.deltaPp < 0;
-  const sign = summary.deltaPp > 0 ? "+" : "";
+  // Negative Δ = metric dropped when Retellect was ON → the win we want.
+  // Positive = metric went UP → flag it amber so the user notices.
+  const win = deltaPrimary < 0;
+  const sign = deltaPrimary > 0 ? "+" : "";
   const tone = win
     ? { bg: C.deltaInfoBg, border: "#bfdbfe", text: C.deltaInfoText }
     : { bg: C.deltaWarnBg, border: "#fde68a", text: C.deltaWarnText };
@@ -860,13 +894,16 @@ function DeltaCard({
     >
       <div style={{ fontSize: 11, color: tone.text, marginBottom: 2 }}>Δ{metricSuffix} with Retellect</div>
       <div style={{ fontSize: 18, fontWeight: 600, color: tone.text, fontFamily: "'SF Mono','Cascadia Code',monospace" }}>
-        {sign}{formatVal(summary.deltaPp, yIsTime, true)}{" "}
+        {sign}{formatVal(deltaPrimary, yIsTime, true)}{" "}
         <span style={{ fontSize: 11, fontWeight: 400 }}>{yIsTime ? "min" : "pp"}</span>
       </div>
       <div style={{ fontSize: 11, color: tone.text }}>
-        {summary.deltaRel === null
+        {/* `formatVal(..., false, ...)` already appends "%" — concatenating
+            another "%" produced the "%%" double-percent that shipped to
+            production before this fix. Just append " relative" now. */}
+        {deltaRelative === null
           ? ""
-          : `${summary.deltaRel > 0 ? "+" : ""}${formatVal(summary.deltaRel, false, true)}% relative`}
+          : `${deltaRelative > 0 ? "+" : ""}${formatVal(deltaRelative, false, true)} relative`}
       </div>
     </div>
   );
