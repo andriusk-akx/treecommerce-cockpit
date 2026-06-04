@@ -36,7 +36,7 @@ export const TAB_LABELS: Record<TabKey, string> = {
   comparison: "CPU Comparison",
   reference: "Reference Store",
   capacity: "Capacity Risk",
-  rollout: "Rollout Insights",
+  rollout: "CPU Matrix",
   hypotheses: "Hypotheses & Recommendations",
   datahealth: "Data Health",
 };
