@@ -281,7 +281,16 @@ export function RtOverview({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       {/* Two-column: Investigation + Risks */}
       <div className="grid grid-cols-2 gap-6 mb-6">
         <div className="bg-white rounded-lg border border-gray-200 p-5">
-          <h3 className="font-semibold text-gray-900 mb-2">Live CPU Summary (Zabbix)</h3>
+          <div className="flex items-baseline justify-between gap-2 mb-2">
+            <h3 className="font-semibold text-gray-900">Live CPU Summary (Zabbix)</h3>
+            <span
+              className="text-[11px] text-gray-500 whitespace-nowrap"
+              title={`Hosts in this pilot that Zabbix reports as up (matched to DB devices). Total in pilot: ${pilot.devices.length}.`}
+            >
+              <span className="font-semibold text-gray-700">{matchedHosts.length}</span>
+              {" "}of {pilot.devices.length} hosts live
+            </span>
+          </div>
           <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-100 flex-wrap">
             <span className="text-[10px] uppercase tracking-wider text-gray-400">Group by</span>
             <div className="inline-flex rounded border border-gray-200 overflow-hidden text-[11px]">
