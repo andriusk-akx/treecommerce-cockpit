@@ -173,10 +173,16 @@ export async function GET(req: NextRequest) {
   // + system.cpu.num (cores). Cached per-host for 60s — item lists for a host
   // change only when SP redeploys the template, far less often than the user
   // clicks drill-down on different days.
+  // `value_type` + `name` added 2026-06-05 for transaction-overlay detection:
+  // value_type picks the correct history.get store (0=float, 3=unsigned) for
+  // the txn counter, and name widens pattern matching beyond the raw key_.
+  // Cache key bumped to v2 so a stale v1 entry (missing the new fields) can't
+  // suppress detection for up to the TTL window right after deploy.
+  type ZItem = { itemid: string; key_: string; lastvalue: string; value_type?: string; name?: string };
   const allItems = (await cached(
-    `zabbix:procHistItems:${hostId}`,
+    `zabbix:procHistItems2:${hostId}`,
     () => client.request("item.get", {
-      output: ["itemid", "key_", "lastvalue"],
+      output: ["itemid", "key_", "lastvalue", "value_type", "name"],
       hostids: [hostId],
       // Filter ONLY by status (item not administratively disabled).
       // Do NOT filter by state — `state: 0` would exclude items that are
@@ -187,9 +193,41 @@ export async function GET(req: NextRequest) {
       // state hides those samples and makes the day-drill render 0%
       // Retellect even though Retellect was running heavily that day.
       filter: { status: 0 },
-    }) as Promise<Array<{ itemid: string; key_: string; lastvalue: string }>>,
+    }) as Promise<ZItem[]>,
     60_000,
-  )) as Array<{ itemid: string; key_: string; lastvalue: string }>;
+  )) as ZItem[];
+
+  // ── Transaction-start overlay detection (2026-06-05) ───────────────────
+  // SP admin began publishing a per-SCO transaction-start counter on every
+  // monitored kasa (90-day retention). Its exact key is not yet uniform
+  // across the fleet, so we AUTO-DETECT it: match transaction-ish tokens in
+  // key_ or name and hard-exclude CPU / resource items so an unrelated
+  // counter can never be mistaken for transactions. Only numeric items
+  // (float / unsigned) are eligible because we bucket the values. The chosen
+  // item's key + detected semantics are echoed back in the response so the
+  // operator can confirm the match in the UI.
+  const TXN_INCLUDE = /tranzak|transact|\btxn\b|\btrans\b|receipt|checkout|\bsale[s]?\b|\bbasket\b/i;
+  const TXN_EXCLUDE = /cpu|processor|perf_counter|memory|\bmem\b|disk|net\.|swap|uptime|version|config|agent|ping|temp|fan|power|voltage|boot|proc\.num/i;
+  const txnItem =
+    allItems
+      .filter((it) => {
+        const hay = `${it.key_} ${it.name ?? ""}`;
+        if (TXN_EXCLUDE.test(hay)) return false;
+        if (!TXN_INCLUDE.test(hay)) return false;
+        const vt = Number(it.value_type);
+        return vt === 0 || vt === 3; // 0=float, 3=unsigned int
+      })
+      .sort((a, b) => {
+        const score = (it: ZItem) => {
+          const hay = `${it.key_} ${it.name ?? ""}`.toLowerCase();
+          let s = 0;
+          if (/tranzak|transact|\btxn\b/.test(hay)) s += 3;
+          if (/start/.test(hay)) s += 2;
+          if (/count|cnt|total|\bnum\b/.test(hay)) s += 1;
+          return s;
+        };
+        return score(b) - score(a); // highest score first
+      })[0] ?? null;
 
   // Two parallel telemetry sources for per-process CPU on the same host:
   //   *.cpu items  → 1-min sliding average, "% of host" (already normalised)
@@ -339,6 +377,21 @@ export async function GET(req: NextRequest) {
         limit: 50000,
       }) as Promise<Array<{ clock: string; value: string }>>)
     : null;
+  // Transaction-start counter fetched in parallel. Uses the item's own
+  // value_type for the history store (counters are usually unsigned = 3,
+  // not float = 0), otherwise history.get returns an empty set.
+  const txnPromise: Promise<Array<{ clock: string; value: string }>> | null = txnItem
+    ? (client.request("history.get", {
+        output: ["clock", "value"],
+        itemids: [txnItem.itemid],
+        history: Number(txnItem.value_type) === 3 ? 3 : 0,
+        time_from: String(timeFrom),
+        time_till: String(timeTill),
+        sortfield: "clock",
+        sortorder: "ASC",
+        limit: 50000,
+      }) as Promise<Array<{ clock: string; value: string }>>)
+    : null;
 
   const batchResults = await Promise.all(batchPromises.map((p) => p.catch((e) => {
     console.warn("[rt-process-history] batch failed:", e);
@@ -433,6 +486,58 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ── Transaction overlay: bucket samples into per-slot counts. ──────────
+  // Semantics are auto-detected from the data shape (SP admin's fleet keys
+  // aren't uniform yet): a cumulative counter is (almost) monotonically
+  // non-decreasing across the day → use consecutive deltas; anything else is
+  // treated as a per-poll count → sum the samples. Both paths attribute the
+  // resulting count to the Vilnius-local slot of the sample, matching the CPU
+  // slot keys exactly so the overlay aligns minute-for-minute with the line.
+  const txnSlotCounts = new Map<string, number>();
+  let txnSemantics: "counter" | "count" | "none" = "none";
+  let txnTotal = 0;
+  if (txnPromise) {
+    try {
+      const txnRecords = await txnPromise;
+      const samples = txnRecords
+        .map((r) => ({ clock: parseInt(r.clock, 10), value: parseFloat(r.value) }))
+        .filter((s) => Number.isFinite(s.clock) && Number.isFinite(s.value))
+        .sort((a, b) => a.clock - b.clock);
+      if (samples.length >= 2) {
+        let nonDec = 0;
+        for (let i = 1; i < samples.length; i++) {
+          if (samples[i].value >= samples[i - 1].value) nonDec++;
+        }
+        txnSemantics = nonDec / (samples.length - 1) >= 0.85 ? "counter" : "count";
+      } else if (samples.length === 1) {
+        txnSemantics = "count";
+      }
+      const addToSlot = (clockSec: number, n: number) => {
+        if (!(n > 0)) return;
+        const { yyyy, mm, dd, hh, mi } = vilniusFields(clockSec * 1000);
+        const minBucket = Math.floor(parseInt(mi, 10) / granularityMin) * granularityMin;
+        const slotKey = `${yyyy}-${mm}-${dd}T${hh}:${String(minBucket).padStart(2, "0")}`;
+        txnSlotCounts.set(slotKey, (txnSlotCounts.get(slotKey) ?? 0) + n);
+        txnTotal += n;
+      };
+      if (txnSemantics === "counter") {
+        for (let i = 1; i < samples.length; i++) {
+          let delta = samples[i].value - samples[i - 1].value;
+          // Counter reset (service restart / rollover): the post-reset sample
+          // is the count since reset — clamp negative deltas to 0 so a restart
+          // never paints a fake spike or a negative band.
+          if (delta < 0) delta = 0;
+          addToSlot(samples[i].clock, delta);
+        }
+      } else if (txnSemantics === "count") {
+        for (const s of samples) addToSlot(s.clock, s.value);
+      }
+    } catch (e) {
+      console.warn("[rt-process-history] transaction item fetch failed:", e);
+      txnSemantics = "none";
+    }
+  }
+
   // Build a top-level day summary directly from the raw 1-min samples — gives
   // the user an exact answer to "when did the 100% spike happen, how long did
   // it last, how many minutes were above each threshold". This is independent
@@ -488,6 +593,10 @@ export async function GET(req: NextRequest) {
     dataQuality: SlotDataQuality;
     sysCpuAvg: number | null;
     sysCpuMax: number | null;
+    /** Transaction count attributed to this 1-min slot, or null when the host
+     *  publishes no transaction item. Client buckets these into 15-min for the
+     *  load overlay; the raw per-slot value drives the tooltip. */
+    txn: number | null;
   }> = [];
   let baseDay: string;
   if (dateStr && isValidYyyyMmDd(dateStr)) {
@@ -682,6 +791,7 @@ export async function GET(req: NextRequest) {
       dataQuality: slotV2.dataQuality,
       sysCpuAvg,
       sysCpuMax,
+      txn: txnItem ? Math.round(txnSlotCounts.get(slotKey) ?? 0) : null,
     });
   }
   // Day-level unmonitored categories: items that were never published on this
@@ -754,5 +864,11 @@ export async function GET(req: NextRequest) {
       warn: warnCount,
       fail: failCount,
     },
+    // Transaction overlay provenance — lets the UI show which Zabbix item was
+    // auto-matched and how its values were interpreted, so the operator can
+    // confirm (or flag) the detection. Null when the host has no txn item.
+    txnMeta: txnItem
+      ? { key: txnItem.key_, name: txnItem.name ?? null, semantics: txnSemantics, total: Math.round(txnTotal) }
+      : null,
   });
 }

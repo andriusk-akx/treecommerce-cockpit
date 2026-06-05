@@ -352,7 +352,13 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     overshootPp?: number | null;
     dataQuality?: "ok" | "warn" | "fail";
     sysCpuAvg: number | null; sysCpuMax: number | null;
+    /** 2026-06-05: per-1-min transaction count for the load overlay. Optional —
+     *  null/absent on hosts with no txn item or on a pre-overlay route deploy. */
+    txn?: number | null;
   };
+  // Provenance of the auto-detected transaction item, surfaced under the chart
+  // so the operator can confirm the right Zabbix item was matched.
+  type TxnMeta = { key: string; name: string | null; semantics: "counter" | "count" | "none"; total: number };
   type DayDataQuality = {
     day: "ok" | "warn" | "fail";
     ok: number;
@@ -368,6 +374,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   // drill-down header tooltip so operators know whether the displayed numbers
   // were normalised and where the value came from.
   const [drillCoresInfo, setDrillCoresInfo] = useState<{ cores: number; coresKnown: boolean; coresSource: string | null } | null>(null);
+  const [drillTxnMeta, setDrillTxnMeta] = useState<TxnMeta | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
   // 2026-05-19: Sparse categories (BESClient / Elastic / OS Core) were rolled
   // out per-host on different dates (Pavilnionys SCO02: 2026-05-09; testlab:
@@ -785,6 +792,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
       setDaySummary(null);
       setDrillDataQuality(null);
       setDrillCoresInfo(null);
+      setDrillTxnMeta(null);
       return;
     }
     // Drill carries the unambiguous Zabbix host id (set when the cell was
@@ -831,6 +839,16 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
               }
             : null,
         );
+        setDrillTxnMeta(
+          d.txnMeta && typeof d.txnMeta.key === "string"
+            ? {
+                key: d.txnMeta.key,
+                name: d.txnMeta.name ?? null,
+                semantics: d.txnMeta.semantics === "counter" || d.txnMeta.semantics === "count" ? d.txnMeta.semantics : "none",
+                total: typeof d.txnMeta.total === "number" ? d.txnMeta.total : 0,
+              }
+            : null,
+        );
       })
       .catch(() => {
         setDrillIntervals(null);
@@ -838,6 +856,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
         setDayUnmonitored([]);
         setDrillDataQuality(null);
         setDrillCoresInfo(null);
+        setDrillTxnMeta(null);
       })
       .finally(() => setDrillLoading(false));
   }, [drill, granularity]);
@@ -2366,6 +2385,38 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   const peakIdx = peakSlot ? drillIntervals.findIndex((s) => s.slot === peakSlot.slot) : -1;
                   const peakValue = peakSlot?.sysCpuMax ?? 0;
                   const selIdx = selectedSlot !== null ? drillIntervals.findIndex((s) => s.slot === selectedSlot) : -1;
+
+                  // ── Transaction load overlay (15-min buckets) ──────────────
+                  // CPU stays at native 1-min; transactions are summed into
+                  // 15-consecutive-slot buckets so the load reads as a shape,
+                  // not per-minute jitter. Drawn FIRST (lowest in the SVG) so it
+                  // sits as a faint band behind the CPU line. Own scale: peak
+                  // bucket reaches BAND_FRAC of chart height, leaving the CPU
+                  // line legible above. Hidden entirely when the host has no
+                  // transaction data, so nothing changes on legacy hosts.
+                  const BUCKET = 15;
+                  const BAND_FRAC = 0.5;
+                  const nB = Math.ceil(N / BUCKET);
+                  const txnB = new Array<number>(nB).fill(0);
+                  let hasTxn = false;
+                  for (let i = 0; i < N; i++) {
+                    const t = drillIntervals[i].txn;
+                    if (typeof t === "number") { hasTxn = true; txnB[Math.floor(i / BUCKET)] += t; }
+                  }
+                  const txnMax = hasTxn ? Math.max(...txnB) : 0;
+                  let txnArea = "";
+                  if (hasTxn && txnMax > 0) {
+                    const xB = (k: number) => xAt(Math.min(k * BUCKET, N - 1));
+                    const yB = (c: number) => H - (c / txnMax) * (H * BAND_FRAC);
+                    let d = `M ${xB(0).toFixed(2)},${H}`;
+                    for (let b = 0; b < nB; b++) {
+                      const y = yB(txnB[b]).toFixed(2);
+                      d += ` L ${xB(b).toFixed(2)},${y} L ${xB(b + 1).toFixed(2)},${y}`;
+                    }
+                    d += ` L ${xB(nB).toFixed(2)},${H} Z`;
+                    txnArea = d;
+                  }
+
                   return (
                     <svg
                       aria-hidden
@@ -2373,6 +2424,17 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                       preserveAspectRatio="none"
                       style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 2 }}
                     >
+                      {txnArea && (
+                        <path
+                          d={txnArea}
+                          fill="#2563eb"
+                          fillOpacity="0.12"
+                          stroke="#2563eb"
+                          strokeOpacity="0.4"
+                          strokeWidth="0.8"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
                       {selIdx >= 0 && (
                         <line
                           x1={xAt(selIdx)} y1={0} x2={xAt(selIdx)} y2={H}
@@ -2455,7 +2517,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                           flex: "1 1 0%", cursor: "pointer", position: "relative",
                           background: isSelected ? "rgba(0,112,201,0.06)" : "transparent",
                         }}
-                        title={`${s.label}\nHost CPU: ${sysMax !== null ? Math.round(sysMax) + "% (max)" : "—"}${sysAvg !== null ? " · " + Math.round(sysAvg) + "% (avg)" : ""}\nMonitored processes: ${Math.round(tot)}%  (Retellect ${Math.round(s.retellect)}% · SCO ${Math.round(s.scoApp)}% · DB ${Math.round(s.db)}% · System ${Math.round(s.system)}% · BESClient ${Math.round(s.besclient)}% · Elastic ${Math.round(s.elastic)}% · OS Core ${Math.round(s.osCore)}%)`}
+                        title={`${s.label}\nHost CPU: ${sysMax !== null ? Math.round(sysMax) + "% (max)" : "—"}${sysAvg !== null ? " · " + Math.round(sysAvg) + "% (avg)" : ""}${typeof rawSlot.txn === "number" ? `\nTransactions: ${rawSlot.txn}` : ""}\nMonitored processes: ${Math.round(tot)}%  (Retellect ${Math.round(s.retellect)}% · SCO ${Math.round(s.scoApp)}% · DB ${Math.round(s.db)}% · System ${Math.round(s.system)}% · BESClient ${Math.round(s.besclient)}% · Elastic ${Math.round(s.elastic)}% · OS Core ${Math.round(s.osCore)}%)`}
                       />
                     );
                   })}
@@ -2526,6 +2588,15 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                     <span style={{ width: 12, height: 0, borderTop: "1px dashed #0f172a", display: "inline-block" }} />
                     Host CPU avg
                   </span>
+                  {drillTxnMeta && (
+                    <span
+                      style={{ display: "flex", alignItems: "center", gap: 4 }}
+                      title={`Transaction load (15-min buckets)\nAuto-detected item: ${drillTxnMeta.key}${drillTxnMeta.name ? ` (${drillTxnMeta.name})` : ""}\nValues read as: ${drillTxnMeta.semantics === "counter" ? "cumulative counter → deltas" : drillTxnMeta.semantics === "count" ? "per-poll count → summed" : "n/a"}\nDay total: ${drillTxnMeta.total} transactions\n\nWrong item matched? Tell Andrius to lock the exact key.`}
+                    >
+                      <span style={{ width: 12, height: 8, borderRadius: 2, background: "rgba(37,99,235,0.18)", border: "1px solid rgba(37,99,235,0.45)", display: "inline-block" }} />
+                      Transactions <span style={{ color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>({drillTxnMeta.key.length > 22 ? drillTxnMeta.key.slice(0, 21) + "…" : drillTxnMeta.key} · {drillTxnMeta.semantics})</span>
+                    </span>
+                  )}
                   {/* Day-level numbers tucked into the legend row so they
                       remain glanceable without spending a full banner row.
                       Source: same `daySummary` that used to feed the banner. */}
