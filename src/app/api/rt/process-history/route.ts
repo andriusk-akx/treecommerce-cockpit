@@ -215,7 +215,13 @@ export async function GET(req: NextRequest) {
         if (TXN_EXCLUDE.test(hay)) return false;
         if (!TXN_INCLUDE.test(hay)) return false;
         const vt = Number(it.value_type);
-        return vt === 0 || vt === 3; // 0=float, 3=unsigned int
+        // 0=float, 3=unsigned int (numeric counters), 2=log. SP's fleet
+        // publishes transaction starts as a Zabbix LOG item that captures one
+        // `StartTransaction` line per customer transaction
+        // (`log[E:\logs\spsss\pos.log,StartTransaction,,,all]`), so each log
+        // record == one transaction and we count records rather than read a
+        // numeric value.
+        return vt === 0 || vt === 2 || vt === 3;
       })
       .sort((a, b) => {
         const score = (it: ZItem) => {
@@ -380,11 +386,15 @@ export async function GET(req: NextRequest) {
   // Transaction-start counter fetched in parallel. Uses the item's own
   // value_type for the history store (counters are usually unsigned = 3,
   // not float = 0), otherwise history.get returns an empty set.
+  const txnIsLog = txnItem ? Number(txnItem.value_type) === 2 : false;
+  const txnHistoryType = txnItem ? (Number(txnItem.value_type) === 3 ? 3 : Number(txnItem.value_type) === 2 ? 2 : 0) : 0;
   const txnPromise: Promise<Array<{ clock: string; value: string }>> | null = txnItem
     ? (client.request("history.get", {
-        output: ["clock", "value"],
+        // Log items: we only need the timestamp (one record = one transaction);
+        // numeric items: we need the value to delta/sum.
+        output: txnIsLog ? ["clock"] : ["clock", "value"],
         itemids: [txnItem.itemid],
-        history: Number(txnItem.value_type) === 3 ? 3 : 0,
+        history: txnHistoryType,
         time_from: String(timeFrom),
         time_till: String(timeTill),
         sortfield: "clock",
@@ -494,24 +504,11 @@ export async function GET(req: NextRequest) {
   // resulting count to the Vilnius-local slot of the sample, matching the CPU
   // slot keys exactly so the overlay aligns minute-for-minute with the line.
   const txnSlotCounts = new Map<string, number>();
-  let txnSemantics: "counter" | "count" | "none" = "none";
+  let txnSemantics: "event" | "counter" | "count" | "none" = "none";
   let txnTotal = 0;
   if (txnPromise) {
     try {
       const txnRecords = await txnPromise;
-      const samples = txnRecords
-        .map((r) => ({ clock: parseInt(r.clock, 10), value: parseFloat(r.value) }))
-        .filter((s) => Number.isFinite(s.clock) && Number.isFinite(s.value))
-        .sort((a, b) => a.clock - b.clock);
-      if (samples.length >= 2) {
-        let nonDec = 0;
-        for (let i = 1; i < samples.length; i++) {
-          if (samples[i].value >= samples[i - 1].value) nonDec++;
-        }
-        txnSemantics = nonDec / (samples.length - 1) >= 0.85 ? "counter" : "count";
-      } else if (samples.length === 1) {
-        txnSemantics = "count";
-      }
       const addToSlot = (clockSec: number, n: number) => {
         if (!(n > 0)) return;
         const { yyyy, mm, dd, hh, mi } = vilniusFields(clockSec * 1000);
@@ -520,17 +517,41 @@ export async function GET(req: NextRequest) {
         txnSlotCounts.set(slotKey, (txnSlotCounts.get(slotKey) ?? 0) + n);
         txnTotal += n;
       };
-      if (txnSemantics === "counter") {
-        for (let i = 1; i < samples.length; i++) {
-          let delta = samples[i].value - samples[i - 1].value;
-          // Counter reset (service restart / rollover): the post-reset sample
-          // is the count since reset — clamp negative deltas to 0 so a restart
-          // never paints a fake spike or a negative band.
-          if (delta < 0) delta = 0;
-          addToSlot(samples[i].clock, delta);
+      if (txnIsLog) {
+        // Log item: each record is one `StartTransaction` line = one
+        // transaction. Count records per slot — no value parsing.
+        txnSemantics = "event";
+        for (const r of txnRecords) {
+          const clock = parseInt(r.clock, 10);
+          if (Number.isFinite(clock)) addToSlot(clock, 1);
         }
-      } else if (txnSemantics === "count") {
-        for (const s of samples) addToSlot(s.clock, s.value);
+      } else {
+        // Numeric item: auto-detect counter (deltas) vs per-poll count (sum).
+        const samples = txnRecords
+          .map((r) => ({ clock: parseInt(r.clock, 10), value: parseFloat(r.value) }))
+          .filter((s) => Number.isFinite(s.clock) && Number.isFinite(s.value))
+          .sort((a, b) => a.clock - b.clock);
+        if (samples.length >= 2) {
+          let nonDec = 0;
+          for (let i = 1; i < samples.length; i++) {
+            if (samples[i].value >= samples[i - 1].value) nonDec++;
+          }
+          txnSemantics = nonDec / (samples.length - 1) >= 0.85 ? "counter" : "count";
+        } else if (samples.length === 1) {
+          txnSemantics = "count";
+        }
+        if (txnSemantics === "counter") {
+          for (let i = 1; i < samples.length; i++) {
+            let delta = samples[i].value - samples[i - 1].value;
+            // Counter reset (service restart / rollover): the post-reset sample
+            // is the count since reset — clamp negative deltas to 0 so a restart
+            // never paints a fake spike or a negative band.
+            if (delta < 0) delta = 0;
+            addToSlot(samples[i].clock, delta);
+          }
+        } else if (txnSemantics === "count") {
+          for (const s of samples) addToSlot(s.clock, s.value);
+        }
       }
     } catch (e) {
       console.warn("[rt-process-history] transaction item fetch failed:", e);

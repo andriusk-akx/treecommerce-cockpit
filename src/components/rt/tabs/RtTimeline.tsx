@@ -358,7 +358,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   };
   // Provenance of the auto-detected transaction item, surfaced under the chart
   // so the operator can confirm the right Zabbix item was matched.
-  type TxnMeta = { key: string; name: string | null; semantics: "counter" | "count" | "none"; total: number };
+  type TxnMeta = { key: string; name: string | null; semantics: "event" | "counter" | "count" | "none"; total: number };
   type DayDataQuality = {
     day: "ok" | "warn" | "fail";
     ok: number;
@@ -844,7 +844,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
             ? {
                 key: d.txnMeta.key,
                 name: d.txnMeta.name ?? null,
-                semantics: d.txnMeta.semantics === "counter" || d.txnMeta.semantics === "count" ? d.txnMeta.semantics : "none",
+                semantics: ["event", "counter", "count"].includes(d.txnMeta.semantics) ? d.txnMeta.semantics : "none",
                 total: typeof d.txnMeta.total === "number" ? d.txnMeta.total : 0,
               }
             : null,
@@ -2591,10 +2591,10 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   {drillTxnMeta && (
                     <span
                       style={{ display: "flex", alignItems: "center", gap: 4 }}
-                      title={`Transaction load (15-min buckets)\nAuto-detected item: ${drillTxnMeta.key}${drillTxnMeta.name ? ` (${drillTxnMeta.name})` : ""}\nValues read as: ${drillTxnMeta.semantics === "counter" ? "cumulative counter → deltas" : drillTxnMeta.semantics === "count" ? "per-poll count → summed" : "n/a"}\nDay total: ${drillTxnMeta.total} transactions\n\nWrong item matched? Tell Andrius to lock the exact key.`}
+                      title={`Transaction load (15-min buckets)\nAuto-detected item: ${drillTxnMeta.key}${drillTxnMeta.name ? ` (${drillTxnMeta.name})` : ""}\nValues read as: ${drillTxnMeta.semantics === "event" ? "log records → 1 per transaction" : drillTxnMeta.semantics === "counter" ? "cumulative counter → deltas" : drillTxnMeta.semantics === "count" ? "per-poll count → summed" : "n/a"}\nDay total: ${drillTxnMeta.total} transactions\n\nWrong item matched? Tell Andrius to lock the exact key.`}
                     >
                       <span style={{ width: 12, height: 8, borderRadius: 2, background: "rgba(37,99,235,0.18)", border: "1px solid rgba(37,99,235,0.45)", display: "inline-block" }} />
-                      Transactions <span style={{ color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>({drillTxnMeta.key.length > 22 ? drillTxnMeta.key.slice(0, 21) + "…" : drillTxnMeta.key} · {drillTxnMeta.semantics})</span>
+                      Transactions <span style={{ color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>({drillTxnMeta.semantics === "event" ? "log" : drillTxnMeta.semantics})</span>
                     </span>
                   )}
                   {/* Day-level numbers tucked into the legend row so they
