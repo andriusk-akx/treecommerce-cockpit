@@ -922,6 +922,34 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     return raw ? normalizeSlot(raw) : null;
   }, [selectedSlot, drillIntervals, normalizeSlot]);
 
+  // 15-min transaction buckets — single source for the overlay band, the
+  // per-slot hover tooltip, and the click detail. Null when the host has no
+  // transaction data (overlay + readouts simply don't appear). Each bucket is
+  // 15 consecutive 1-min slots; `sums[b]` is the transaction total for that
+  // window. `startLabel/endLabel` give the human window ("13:00"–"13:15").
+  const TXN_BUCKET = 15;
+  const txn15 = useMemo(() => {
+    if (!drillIntervals) return null;
+    const N = drillIntervals.length;
+    const nB = Math.ceil(N / TXN_BUCKET);
+    const sums = new Array<number>(nB).fill(0);
+    let has = false;
+    for (let i = 0; i < N; i++) {
+      const t = drillIntervals[i].txn;
+      if (typeof t === "number") { has = true; sums[Math.floor(i / TXN_BUCKET)] += t; }
+    }
+    if (!has) return null;
+    const window = (b: number) => {
+      const startIdx = b * TXN_BUCKET;
+      const endIdx = Math.min(startIdx + TXN_BUCKET, N);
+      return {
+        startLabel: drillIntervals[startIdx]?.label ?? "",
+        endLabel: endIdx < N ? drillIntervals[endIdx].label : "24:00",
+      };
+    };
+    return { N, nB, sums, window };
+  }, [drillIntervals]);
+
   const openDrill = useCallback((date: Date, hostId: string, displayName: string, sourceHostKey: string, peak: number) => {
     const newDate = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
     if (drill?.date === newDate && drill?.hostId === hostId) { setDrill(null); setSelectedSlot(null); userClearedSelectionRef.current = false; return; }
@@ -1853,6 +1881,22 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           </div>
         </div>
         <div style={{ width: 1, height: 60, background: C.border, flexShrink: 0 }} />
+        {/* Transactions in the selected slot's 15-min window — matches the
+            overlay band. Only shown when the host publishes transaction data. */}
+        {txn15 && selectedSlot !== null && (() => {
+          const b = Math.floor(selectedSlot / TXN_BUCKET);
+          const w = txn15.window(b);
+          return (
+            <>
+              <div style={{ flexShrink: 0, textAlign: "center", minWidth: 70 }}>
+                <div style={{ fontSize: 10, color: "#2563eb", textTransform: "uppercase", fontWeight: 600, letterSpacing: 0.4 }}>Transactions</div>
+                <div style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.1, color: "#2563eb" }}>{txn15.sums[b]}</div>
+                <div style={{ fontSize: 9, color: C.textSec, marginTop: 2 }}>{w.startLabel}–{w.endLabel}</div>
+              </div>
+              <div style={{ width: 1, height: 60, background: C.border, flexShrink: 0 }} />
+            </>
+          );
+        })()}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
           {PROCESSES.filter(p => p.key !== "free").map((proc) => {
             // 2026-05-19: rows whose underlying Zabbix items had ZERO samples
@@ -2394,18 +2438,13 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   // bucket reaches BAND_FRAC of chart height, leaving the CPU
                   // line legible above. Hidden entirely when the host has no
                   // transaction data, so nothing changes on legacy hosts.
-                  const BUCKET = 15;
+                  const BUCKET = TXN_BUCKET;
                   const BAND_FRAC = 0.5;
-                  const nB = Math.ceil(N / BUCKET);
-                  const txnB = new Array<number>(nB).fill(0);
-                  let hasTxn = false;
-                  for (let i = 0; i < N; i++) {
-                    const t = drillIntervals[i].txn;
-                    if (typeof t === "number") { hasTxn = true; txnB[Math.floor(i / BUCKET)] += t; }
-                  }
-                  const txnMax = hasTxn ? Math.max(...txnB) : 0;
+                  const nB = txn15 ? txn15.nB : 0;
+                  const txnB = txn15 ? txn15.sums : [];
+                  const txnMax = txn15 ? Math.max(...txnB) : 0;
                   let txnArea = "";
-                  if (hasTxn && txnMax > 0) {
+                  if (txn15 && txnMax > 0) {
                     const xB = (k: number) => xAt(Math.min(k * BUCKET, N - 1));
                     const yB = (c: number) => H - (c / txnMax) * (H * BAND_FRAC);
                     let d = `M ${xB(0).toFixed(2)},${H}`;
@@ -2494,7 +2533,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
 
                 {/* Click targets — full-height transparent strips per slot. */}
                 <div style={{ position: "absolute", inset: 0, display: "flex", gap: 0, alignItems: "stretch", zIndex: 5 }}>
-                  {drillIntervals.map((rawSlot) => {
+                  {drillIntervals.map((rawSlot, idx) => {
                     const s = normalizeSlot(rawSlot);
                     const isSelected = selectedSlot === s.slot;
                     const sysMax = rawSlot.sysCpuMax;
@@ -2502,6 +2541,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                     const tot =
                       s.retellect + s.scoApp + s.db + s.system
                       + s.besclient + s.elastic + s.osCore;
+                    // Transaction readout is the 15-min bucket total (matches
+                    // the band), not the 1-min slot — answers "how many in this
+                    // period" on hover.
+                    const txnBucketIdx = Math.floor(idx / TXN_BUCKET);
+                    const txnW = txn15 ? txn15.window(txnBucketIdx) : null;
                     return (
                       <div key={s.slot}
                         onClick={() => {
@@ -2517,7 +2561,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                           flex: "1 1 0%", cursor: "pointer", position: "relative",
                           background: isSelected ? "rgba(0,112,201,0.06)" : "transparent",
                         }}
-                        title={`${s.label}\nHost CPU: ${sysMax !== null ? Math.round(sysMax) + "% (max)" : "—"}${sysAvg !== null ? " · " + Math.round(sysAvg) + "% (avg)" : ""}${typeof rawSlot.txn === "number" ? `\nTransactions: ${rawSlot.txn}` : ""}\nMonitored processes: ${Math.round(tot)}%  (Retellect ${Math.round(s.retellect)}% · SCO ${Math.round(s.scoApp)}% · DB ${Math.round(s.db)}% · System ${Math.round(s.system)}% · BESClient ${Math.round(s.besclient)}% · Elastic ${Math.round(s.elastic)}% · OS Core ${Math.round(s.osCore)}%)`}
+                        title={`${s.label}\nHost CPU: ${sysMax !== null ? Math.round(sysMax) + "% (max)" : "—"}${sysAvg !== null ? " · " + Math.round(sysAvg) + "% (avg)" : ""}${txn15 && txnW ? `\nTransactions ${txnW.startLabel}–${txnW.endLabel}: ${txn15.sums[txnBucketIdx]}` : ""}\nMonitored processes: ${Math.round(tot)}%  (Retellect ${Math.round(s.retellect)}% · SCO ${Math.round(s.scoApp)}% · DB ${Math.round(s.db)}% · System ${Math.round(s.system)}% · BESClient ${Math.round(s.besclient)}% · Elastic ${Math.round(s.elastic)}% · OS Core ${Math.round(s.osCore)}%)`}
                       />
                     );
                   })}
