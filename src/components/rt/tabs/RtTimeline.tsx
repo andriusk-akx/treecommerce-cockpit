@@ -2455,6 +2455,11 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                     d += ` L ${xB(nB).toFixed(2)},${H} Z`;
                     txnArea = d;
                   }
+                  // Busiest 15-min window — marked with a dot on the band top,
+                  // mirroring the CPU host-peak dot but in the transaction blue.
+                  const txnPeakB = txn15 && txnMax > 0 ? txnB.indexOf(txnMax) : -1;
+                  const txnPeakCx = txnPeakB >= 0 ? xAt(Math.min(txnPeakB * BUCKET + BUCKET / 2, N - 1)) : 0;
+                  const txnPeakCy = H - H * BAND_FRAC;
 
                   return (
                     <svg
@@ -2473,6 +2478,9 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                           strokeWidth="0.8"
                           vectorEffect="non-scaling-stroke"
                         />
+                      )}
+                      {txnPeakB >= 0 && (
+                        <circle cx={txnPeakCx} cy={txnPeakCy} r="2.5" fill="#2563eb" />
                       )}
                       {selIdx >= 0 && (
                         <line
@@ -2527,6 +2535,32 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                       zIndex: 3, pointerEvents: "none",
                     }}>
                       Host peak {Math.round(peakValue)}% at {peakSlot.label}
+                    </span>
+                  );
+                })()}
+                {/* Transaction peak label — busiest 15-min window. Blue to
+                    match the band; sits at the band top (always ~50% height
+                    since the peak bucket defines the band's own scale). */}
+                {txn15 && (() => {
+                  const txnMax = Math.max(...txn15.sums);
+                  if (!(txnMax > 0)) return null;
+                  const b = txn15.sums.indexOf(txnMax);
+                  const N = drillIntervals.length;
+                  const centerIdx = Math.min(b * TXN_BUCKET + TXN_BUCKET / 2, N - 1);
+                  const xPct = N > 1 ? (centerIdx / (N - 1)) * 100 : 50;
+                  const w = txn15.window(b);
+                  return (
+                    <span style={{
+                      position: "absolute",
+                      left: `${xPct}%`,
+                      bottom: "calc(50% + 6px)",
+                      transform: "translateX(-50%)",
+                      fontSize: 10, fontWeight: 700, color: "#fff",
+                      background: "#2563eb", padding: "1px 6px",
+                      borderRadius: 3, whiteSpace: "nowrap", letterSpacing: 0.3,
+                      zIndex: 3, pointerEvents: "none",
+                    }}>
+                      Tx peak {txnMax} at {w.startLabel}
                     </span>
                   );
                 })()}
