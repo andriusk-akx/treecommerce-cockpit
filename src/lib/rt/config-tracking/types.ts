@@ -1,51 +1,54 @@
 /**
  * Retellect Configuration Tracking — domain types.
  *
- * This is a PARAMETER-LEVEL model, deliberately NOT a "config profile"
- * model. Each host carries an independent set of parameters; any single
- * parameter (resolution, frame rate, Retellect version, SCO version, …)
- * can change on its own, on its own date. The page tracks current values
- * plus a parameter-by-parameter change history so operators can answer
- * "what is installed now?" and "what changed, where, and when?".
+ * PARAMETER-LEVEL model (NOT "config profiles"). Each host carries an
+ * independent set of parameters; any single one can change on its own date.
  *
- * Data provenance: until the daily configuration-snapshot ingestion
- * (RT-CFG) lands, `buildConfigTracking()` returns DERIVED placeholder
- * values (deterministic per host) rather than live Zabbix reads. The
- * `dataMode` flag on {@link ConfigTrackingData} surfaces this to the UI so
- * the page can label it honestly. When the real feed ships, only the
- * builder changes — these types and the page stay put.
+ * Data source is REAL: three Zabbix log-monitoring items the StrongPoint
+ * admin configured on the Rimi SCO hosts —
+ *   • `log[…server.log,"config.ini",…]`  → the Retellect server config dump
+ *     (resolution = video1.capture_width×height, camera index, model.version,
+ *     inference backend, …). See `parse.ts`.
+ *   • `log[…server.log,"Starting server",…]` → Retellect server version (e.g. "1.68")
+ *   • `log[E:\logs\spsss\app.log,"DEBUG.*evtAppStart",…]` → SCO/SPSSS version (e.g. "26.05.00")
+ *
+ * Coverage is genuinely partial today (only a subset of hosts have a parsed
+ * config.ini snapshot), which is exactly what the "Missing latest snapshot"
+ * KPI surfaces. Change history is derived by diffing each item's `history.get`
+ * snapshots, so a host with a steady config shows an empty timeline — honest.
  */
 
-/** Every tracked parameter. `retellectEnabled` is the only one derivable
- *  from today's real device data; the rest are placeholders until RT-CFG. */
+/** Tracked parameters. resolution / retellectVersion / scoVersion are the
+ *  high-priority trio. The rest are surfaced for operational context. */
 export type ConfigParamKey =
   | "resolution"
-  | "frameRate"
+  | "cameraSource"
   | "retellectVersion"
   | "scoVersion"
-  | "inferenceMode"
-  | "captureMode"
-  | "cameraSource"
-  | "retellectEnabled";
+  | "modelVersion"
+  | "inferenceBackend"
+  | "onnxProviders"
+  | "enablePrediction"
+  | "numberOfResults";
 
 export interface ConfigParamDef {
   key: ConfigParamKey;
   label: string;
-  /** High-priority params drive the headline KPI: resolution + the two
-   *  versions. A change to any of these flags the host for review first. */
+  /** High-priority params drive the headline KPI: resolution + both versions. */
   highPriority: boolean;
 }
 
 /** Canonical parameter list — also the render order in the detail view. */
 export const CONFIG_PARAMS: ConfigParamDef[] = [
   { key: "resolution", label: "Resolution", highPriority: true },
-  { key: "frameRate", label: "Frame rate", highPriority: false },
   { key: "retellectVersion", label: "Retellect version", highPriority: true },
   { key: "scoVersion", label: "SCO version", highPriority: true },
-  { key: "inferenceMode", label: "Inference mode", highPriority: false },
-  { key: "captureMode", label: "Capture mode", highPriority: false },
+  { key: "modelVersion", label: "Model version", highPriority: false },
+  { key: "inferenceBackend", label: "Inference backend", highPriority: false },
+  { key: "onnxProviders", label: "ONNX providers", highPriority: false },
   { key: "cameraSource", label: "Camera source", highPriority: false },
-  { key: "retellectEnabled", label: "Retellect enabled", highPriority: false },
+  { key: "enablePrediction", label: "Prediction enabled", highPriority: false },
+  { key: "numberOfResults", label: "Results returned", highPriority: false },
 ];
 
 export const HIGH_PRIORITY_PARAMS: ConfigParamKey[] = CONFIG_PARAMS
@@ -57,7 +60,7 @@ export const HIGH_PRIORITY_PARAMS: ConfigParamKey[] = CONFIG_PARAMS
  *  impact analysis — not implemented yet, but the seam is here. */
 export interface ConfigChange {
   hostId: string;
-  /** ISO date "YYYY-MM-DD" (the day the change was first observed). */
+  /** ISO date "YYYY-MM-DD" (Vilnius-local day the change was observed). */
   date: string;
   param: ConfigParamKey;
   paramLabel: string;
@@ -72,57 +75,51 @@ export interface HostConfig {
   storeName: string;
   cpuModel: string;
   country: string | null;
-  /** Current value of every parameter. "unknown" when the host has no
-   *  recent snapshot (see `snapshotFresh`). */
+  /** Current value of every tracked parameter. "unknown" when not present
+   *  in the host's latest snapshot. */
   params: Record<ConfigParamKey, string>;
-  /** Per-parameter last-changed date (YYYY-MM-DD), or null if it has not
-   *  changed within the tracked horizon. */
+  /** Per-parameter last-changed date (YYYY-MM-DD), or absent if unchanged
+   *  within the history horizon. */
   paramLastChanged: Partial<Record<ConfigParamKey, string>>;
-  /** Full change history (newest first), across the full 90d horizon. The
-   *  page filters this to the selected window for counts. */
+  /** Lower-priority detector / synthetic settings parsed from config.ini,
+   *  shown only in the host detail "Advanced" block. */
+  extras: { label: string; value: string }[];
+  /** Full change history (newest first) across the fetched horizon. */
   changes: ConfigChange[];
 
-  // ── Derived flags for the SELECTED window (set by buildConfigTracking) ──
-  /** Distinct params changed within the selected window. */
+  // ── Derived flags for the SELECTED window ──
   changedParamCount: number;
-  /** Newest change date within the window, or null. */
   lastConfigChange: string | null;
-  /** Resolution / Retellect version / SCO version changed in window. */
   highPriorityChange: boolean;
   resolutionChanged: boolean;
   versionChanged: boolean;
 
   // ── Snapshot freshness (visibility gap signal) ──
-  /** False = no recent configuration snapshot for this host. Drives the
-   *  "Missing latest snapshot" KPI and the stale row treatment. */
+  /** False = no recent configuration snapshot (config.ini) for this host. */
   snapshotFresh: boolean;
   /** Age of the latest snapshot in days, or null when never seen. */
   snapshotAgeDays: number | null;
 }
 
 export interface ConfigKpis {
-  /** Hosts where resolution, Retellect version, or SCO version changed. */
   highPriorityChanges: number;
-  /** Hosts where resolution changed. */
   resolutionChanges: number;
-  /** Hosts where Retellect or SCO version changed. */
   versionChanges: number;
-  /** Hosts without a recent configuration snapshot. */
   missingSnapshot: number;
-  /** Estate size — shown as a low-weight line, NOT a headline KPI. */
   trackedHosts: number;
-  /** highPriorityChanges as a % of trackedHosts (rounded to 1 dp). */
   pctHighPriority: number;
 }
 
 export interface ConfigTrackingData {
   hosts: HostConfig[];
   kpis: ConfigKpis;
-  /** Selected change window in days (7 / 30 / 90). */
   windowDays: number;
-  /** "derived" until the daily snapshot ingestion (RT-CFG) is wired. */
-  dataMode: "derived" | "live";
-  /** Distinct values present in the estate — populate the filter dropdowns. */
+  /** "live" once fed from real Zabbix items; "derived" only for fixtures. */
+  dataMode: "live" | "derived";
+  /** Freshness of the underlying Zabbix fetch (mirrors the rest of the app). */
+  sourceStatus: "live" | "cached" | "unavailable";
+  /** Hosts that have a config.ini snapshot at all (for the coverage line). */
+  hostsWithSnapshot: number;
   retellectVersions: string[];
   scoVersions: string[];
   cpuModels: string[];

@@ -1,121 +1,137 @@
 import { describe, it, expect } from "vitest";
 import { buildConfigTracking, computeKpis, compareHostConfig, type ConfigDeviceInput } from "./build";
+import type { RawHostConfig } from "@/lib/zabbix/config";
 
-// Fixed reference "now" so date math is stable across machines/CI.
 const NOW = Date.UTC(2026, 5, 8, 12, 0, 0); // 2026-06-08
+const DAY = 86400;
+const nowSec = Math.floor(NOW / 1000);
 
-function makeDevices(n: number): ConfigDeviceInput[] {
-  const cpus = ["Intel i3-4330", "Intel i3-6100", "Intel i3-12300HL"];
-  return Array.from({ length: n }, (_, i) => ({
-    id: `dev-${i}`,
-    name: `SC${String(i).padStart(3, "0")}`,
-    storeName: `Rimi Store ${i % 7}`,
-    cpuModel: cpus[i % cpus.length],
-    country: "LT",
-    retellectEnabled: i % 4 !== 0,
-  }));
+function ini(width: number, height: number, model = "20251122_30") {
+  return (
+    `2026 INFO config.ini: {'server': {'store': 's', 'name': 'sco_1'}, ` +
+    `'model': {'version': '${model}', 'inference_backend': 'onnx', 'onnx_providers': 'CPUExecutionProvider', 'enable_prediction': 'True', 'number_of_results': '3'}, ` +
+    `'video1': {'usb_camera_index': '0', 'capture_width': '${width}', 'capture_height': '${height}'}}`
+  );
+}
+
+function dev(id: string, name: string, over: Partial<ConfigDeviceInput> = {}): ConfigDeviceInput {
+  return { id, name, sourceHostKey: name, storeName: "Rimi X", cpuModel: "Intel i3-4330", country: "LT", retellectEnabled: true, ...over };
 }
 
 describe("buildConfigTracking", () => {
-  it("is deterministic — same input yields identical output", () => {
-    const devices = makeDevices(40);
-    const a = buildConfigTracking(devices, 30, NOW);
-    const b = buildConfigTracking(devices, 30, NOW);
-    expect(a).toEqual(b);
+  it("parses current values from the latest config.ini + version items", () => {
+    const raw = new Map<string, RawHostConfig>([
+      ["H1", {
+        hostId: "z1", hostName: "H1",
+        configIni: { value: ini(960, 540), clock: nowSec - 3600 },
+        configIniHistory: [{ value: ini(960, 540), clock: nowSec - 3600 }],
+        rtVersion: { value: "1.68", clock: nowSec - 3600 }, rtVersionHistory: [{ value: "1.68", clock: nowSec - 3600 }],
+        scoVersion: { value: "26.05.00", clock: nowSec - 3600 }, scoVersionHistory: [{ value: "26.05.00", clock: nowSec - 3600 }],
+      }],
+    ]);
+    const data = buildConfigTracking([dev("d1", "H1")], raw, 30, "live", NOW);
+    const h = data.hosts[0];
+    expect(h.params.resolution).toBe("960×540");
+    expect(h.params.retellectVersion).toBe("1.68");
+    expect(h.params.scoVersion).toBe("26.05.00");
+    expect(h.params.modelVersion).toBe("20251122_30");
+    expect(h.snapshotFresh).toBe(true);
+    expect(data.dataMode).toBe("live");
   });
 
-  it("flags dataMode as derived until the snapshot feed is wired", () => {
-    expect(buildConfigTracking(makeDevices(5), 30, NOW).dataMode).toBe("derived");
+  it("detects a resolution change from config.ini history", () => {
+    const raw = new Map<string, RawHostConfig>([
+      ["H1", {
+        hostId: "z1", hostName: "H1",
+        configIni: { value: ini(960, 540), clock: nowSec - 2 * DAY },
+        configIniHistory: [
+          { value: ini(1280, 720), clock: nowSec - 20 * DAY },
+          { value: ini(1280, 720), clock: nowSec - 15 * DAY }, // re-log, no change
+          { value: ini(960, 540), clock: nowSec - 5 * DAY },   // CHANGE here
+        ],
+        rtVersion: null, rtVersionHistory: [],
+        scoVersion: null, scoVersionHistory: [],
+      }],
+    ]);
+    const h = buildConfigTracking([dev("d1", "H1")], raw, 30, "live", NOW).hosts[0];
+    const resChanges = h.changes.filter((c) => c.param === "resolution");
+    expect(resChanges).toHaveLength(1);
+    expect(resChanges[0].before).toBe("1280×720");
+    expect(resChanges[0].after).toBe("960×540");
+    expect(h.resolutionChanged).toBe(true);
+    expect(h.highPriorityChange).toBe(true);
+    expect(h.changedParamCount).toBe(1);
   });
 
-  it("tracks every device", () => {
-    const data = buildConfigTracking(makeDevices(25), 30, NOW);
-    expect(data.hosts).toHaveLength(25);
-    expect(data.kpis.trackedHosts).toBe(25);
+  it("detects version changes and respects the window", () => {
+    const raw = new Map<string, RawHostConfig>([
+      ["H1", {
+        hostId: "z1", hostName: "H1",
+        configIni: { value: ini(960, 540), clock: nowSec - DAY }, configIniHistory: [{ value: ini(960, 540), clock: nowSec - DAY }],
+        rtVersion: { value: "1.68", clock: nowSec - DAY },
+        rtVersionHistory: [
+          { value: "1.67", clock: nowSec - 60 * DAY },
+          { value: "1.68", clock: nowSec - 50 * DAY }, // change 50 days ago
+        ],
+        scoVersion: null, scoVersionHistory: [],
+      }],
+    ]);
+    const dev1 = dev("d1", "H1");
+    const w30 = buildConfigTracking([dev1], raw, 30, "live", NOW).hosts[0];
+    const w90 = buildConfigTracking([dev1], raw, 90, "live", NOW).hosts[0];
+    // The change is 50 days old: in history regardless, but only counts for 90d window.
+    expect(w90.changes.some((c) => c.param === "retellectVersion")).toBe(true);
+    expect(w90.versionChanged).toBe(true);
+    expect(w30.versionChanged).toBe(false);
+    expect(w30.changedParamCount).toBe(0);
   });
 
-  it("snapshot freshness drives the missing-snapshot KPI", () => {
-    const data = buildConfigTracking(makeDevices(60), 30, NOW);
-    const stale = data.hosts.filter((h) => !h.snapshotFresh).length;
-    expect(data.kpis.missingSnapshot).toBe(stale);
-    // Stale hosts must read "unknown" for the high-priority params and
-    // never count as a high-priority change.
-    for (const h of data.hosts.filter((x) => !x.snapshotFresh)) {
-      expect(h.params.resolution).toBe("unknown");
-      expect(h.params.retellectVersion).toBe("unknown");
-      expect(h.highPriorityChange).toBe(false);
-      expect(h.changedParamCount).toBe(0);
-    }
+  it("marks hosts with no config item as missing snapshot", () => {
+    const data = buildConfigTracking([dev("d1", "H1")], new Map(), 30, "live", NOW);
+    const h = data.hosts[0];
+    expect(h.snapshotFresh).toBe(false);
+    expect(h.params.resolution).toBe("unknown");
+    expect(h.params.retellectVersion).toBe("unknown");
+    expect(data.kpis.missingSnapshot).toBe(1);
+    expect(data.hostsWithSnapshot).toBe(0);
   });
 
-  it("snapshot/timeline never contradict: current value = newest change's after", () => {
-    const data = buildConfigTracking(makeDevices(80), 90, NOW);
-    for (const h of data.hosts) {
-      if (!h.snapshotFresh) continue;
-      for (const param of ["resolution", "frameRate", "retellectVersion", "scoVersion"] as const) {
-        const newest = h.changes.find((c) => c.param === param);
-        if (newest) expect(h.params[param]).toBe(newest.after);
-      }
-    }
+  it("treats a config.ini older than the stale threshold as missing", () => {
+    const raw = new Map<string, RawHostConfig>([
+      ["H1", {
+        hostId: "z1", hostName: "H1",
+        configIni: { value: ini(960, 540), clock: nowSec - 20 * DAY }, // 20d old > 7d stale
+        configIniHistory: [{ value: ini(960, 540), clock: nowSec - 20 * DAY }],
+        rtVersion: null, rtVersionHistory: [], scoVersion: null, scoVersionHistory: [],
+      }],
+    ]);
+    const h = buildConfigTracking([dev("d1", "H1")], raw, 30, "live", NOW).hosts[0];
+    expect(h.snapshotFresh).toBe(false);
+    expect(h.snapshotAgeDays).toBeGreaterThanOrEqual(19);
   });
 
-  it("widening the window never decreases a host's changed-param count", () => {
-    const devices = makeDevices(50);
-    const w7 = buildConfigTracking(devices, 7, NOW);
-    const w90 = buildConfigTracking(devices, 90, NOW);
-    const by7 = new Map(w7.hosts.map((h) => [h.hostId, h]));
-    for (const h90 of w90.hosts) {
-      const h7 = by7.get(h90.hostId)!;
-      expect(h90.changedParamCount).toBeGreaterThanOrEqual(h7.changedParamCount);
-    }
-  });
-
-  it("high-priority KPI = hosts with resolution/version change, fresh only", () => {
-    const data = buildConfigTracking(makeDevices(70), 30, NOW);
-    const expected = data.hosts.filter(
-      (h) => h.snapshotFresh && (h.resolutionChanged || h.versionChanged ||
-        h.changes.some((c) => c.date >= "0000" && c.param === "retellectVersion")),
-    );
-    // highPriorityChange already encodes resolution|retellectVersion|scoVersion in window
-    const direct = data.hosts.filter((h) => h.snapshotFresh && h.highPriorityChange).length;
-    expect(data.kpis.highPriorityChanges).toBe(direct);
-    expect(data.kpis.highPriorityChanges).toBeLessThanOrEqual(expected.length + data.hosts.length);
-  });
-
-  it("default sort: fresh+high-priority first, missing-snapshot last", () => {
-    const data = buildConfigTracking(makeDevices(60), 30, NOW);
-    // Verify the array is sorted per the comparator (no inversions).
+  it("KPIs and sort: fresh+high-priority first, missing last", () => {
+    const fresh = ini(960, 540);
+    const raw = new Map<string, RawHostConfig>([
+      ["A", { hostId: "a", hostName: "A", configIni: { value: fresh, clock: nowSec - DAY }, configIniHistory: [
+        { value: ini(1280, 720), clock: nowSec - 4 * DAY }, { value: fresh, clock: nowSec - DAY }], rtVersion: null, rtVersionHistory: [], scoVersion: null, scoVersionHistory: [] }],
+      ["B", { hostId: "b", hostName: "B", configIni: { value: fresh, clock: nowSec - DAY }, configIniHistory: [{ value: fresh, clock: nowSec - DAY }], rtVersion: null, rtVersionHistory: [], scoVersion: null, scoVersionHistory: [] }],
+    ]);
+    const devices = [dev("a", "A"), dev("b", "B"), dev("c", "C")]; // C has no config
+    const data = buildConfigTracking(devices, raw, 30, "live", NOW);
+    expect(data.kpis.trackedHosts).toBe(3);
+    expect(data.kpis.missingSnapshot).toBe(1);
+    expect(data.kpis.highPriorityChanges).toBe(1); // only A changed resolution
+    // Sorted with no inversions; missing-snapshot host (C) last.
     for (let i = 1; i < data.hosts.length; i++) {
       expect(compareHostConfig(data.hosts[i - 1], data.hosts[i])).toBeLessThanOrEqual(0);
     }
-    // Last host (if any stale exists) should be a stale one.
-    if (data.kpis.missingSnapshot > 0) {
-      expect(data.hosts[data.hosts.length - 1].snapshotFresh).toBe(false);
-    }
+    expect(data.hosts[data.hosts.length - 1].snapshotFresh).toBe(false);
   });
 
-  it("computeKpis pctHighPriority is a percentage of tracked hosts", () => {
-    const data = buildConfigTracking(makeDevices(50), 30, NOW);
-    const k = computeKpis(data.hosts);
-    expect(k.pctHighPriority).toBeCloseTo(Math.round((k.highPriorityChanges / k.trackedHosts) * 1000) / 10, 5);
-    expect(k.pctHighPriority).toBeGreaterThanOrEqual(0);
-    expect(k.pctHighPriority).toBeLessThanOrEqual(100);
-  });
-
-  it("retellectEnabled reflects real device input", () => {
-    const devices: ConfigDeviceInput[] = [
-      { id: "a", name: "SC1", storeName: "S", cpuModel: "Intel i3-4330", country: "LT", retellectEnabled: true },
-      { id: "b", name: "SC2", storeName: "S", cpuModel: "Intel i3-4330", country: "LT", retellectEnabled: false },
-    ];
-    const data = buildConfigTracking(devices, 30, NOW);
-    expect(data.hosts.find((h) => h.hostId === "a")!.params.retellectEnabled).toBe("true");
-    expect(data.hosts.find((h) => h.hostId === "b")!.params.retellectEnabled).toBe("false");
-  });
-
-  it("handles an empty estate without throwing", () => {
-    const data = buildConfigTracking([], 30, NOW);
-    expect(data.hosts).toEqual([]);
-    expect(data.kpis.trackedHosts).toBe(0);
-    expect(data.kpis.pctHighPriority).toBe(0);
+  it("computeKpis pct is bounded 0..100", () => {
+    const k = computeKpis([]);
+    expect(k.trackedHosts).toBe(0);
+    expect(k.pctHighPriority).toBe(0);
   });
 });

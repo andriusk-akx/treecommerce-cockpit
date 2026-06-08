@@ -1,21 +1,15 @@
 /**
- * Retellect Configuration Tracking — builder.
+ * Retellect Configuration Tracking — builder (REAL data).
  *
- * `buildConfigTracking()` is the single adapter seam between the page and
- * the data source. TODAY it returns DETERMINISTIC DERIVED placeholders
- * (seeded per host, stable across reloads) because the real per-host
- * configuration items — Retellect version, SCO version, resolution, frame
- * rate, … — are not yet ingested into Zabbix. `retellectEnabled` and
- * `cpuModel` come from real device data; everything else is a stand-in.
+ * Assembles the per-host configuration state + parameter-level change
+ * timeline from the raw Zabbix log items fetched by
+ * `src/lib/zabbix/config.ts`, parsed via `./parse.ts`.
  *
- * When the daily configuration-snapshot ingestion (RT-CFG) lands, replace
- * the body of this function with reads from the snapshot table / Zabbix
- * config items and flip `dataMode` to "live". The page consumes only the
- * typed {@link ConfigTrackingData} output, so the UI does not change.
- *
- * Determinism matters: the same host always yields the same current values
- * and the same change history, so the page is stable to look at and the
- * unit tests can assert exact counts.
+ * Change detection: each item's `history.get` snapshots are walked in
+ * chronological order; a {@link ConfigChange} is emitted only when a tracked
+ * field's value actually differs from the previous snapshot (config re-logs
+ * on every restart, so most consecutive snapshots are identical and produce
+ * nothing — a steady host has an empty timeline, which is the truth).
  */
 import {
   CONFIG_PARAMS,
@@ -26,183 +20,165 @@ import {
   type HostConfig,
   type ConfigKpis,
 } from "./types";
+import { parseConfigIni, parseVersion } from "./parse";
+import type { RawHostConfig } from "@/lib/zabbix/config";
 
-/** Minimal device shape the builder needs (subset of RtPilotData.devices). */
+/** Device shape the builder needs (subset of RtPilotData.devices). */
 export interface ConfigDeviceInput {
   id: string;
   name: string;
+  sourceHostKey: string | null;
   storeName: string;
   cpuModel: string;
   country: string | null;
   retellectEnabled: boolean;
 }
 
-const VALUE_POOLS: Record<Exclude<ConfigParamKey, "retellectEnabled">, string[]> = {
-  // Ordered worst→best for resolution so the "downgrade" diff reads naturally.
-  resolution: ["480p", "720p", "1080p"],
-  frameRate: ["5 fps", "8 fps", "10 fps", "15 fps"],
-  retellectVersion: ["v1.14", "v1.15", "v1.16"],
-  scoVersion: ["7.2.3", "7.2.4", "7.3.1"],
-  inferenceMode: ["lite", "standard", "high-accuracy"],
-  captureMode: ["triggered", "continuous"],
-  cameraSource: ["USB Cam 1", "USB Cam 2", "IP Cam"],
-};
+/** A host is considered to have a current snapshot if its config.ini was
+ *  seen within this many days. Hosts beyond it (or with no config.ini at
+ *  all) feed the "Missing latest snapshot" KPI. */
+const STALE_DAYS = 7;
 
-// Probability a given parameter has changed at least once in the 90d
-// horizon. High-priority params are intentionally a bit more volatile so
-// the headline KPIs have signal; low-priority ones rarely move.
-const CHANGE_PROB: Record<ConfigParamKey, number> = {
-  resolution: 0.16,
-  retellectVersion: 0.22,
-  scoVersion: 0.2,
-  frameRate: 0.14,
-  inferenceMode: 0.08,
-  captureMode: 0.06,
-  cameraSource: 0.05,
-  retellectEnabled: 0, // treated as derived-real; no synthetic history
-};
+const PARAM_LABEL = new Map(CONFIG_PARAMS.map((p) => [p.key, p.label] as const));
+const PARAM_HP = new Map(CONFIG_PARAMS.map((p) => [p.key, p.highPriority] as const));
 
-const HORIZON_DAYS = 90;
-
-/** Tiny deterministic string hash → 31-bit seed. */
-function hashSeed(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0) % 0x7fffffff || 1;
+/** Vilnius-local "YYYY-MM-DD" — matches the day boundaries used across the app. */
+const vilniusDayFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Vilnius",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+function fmtDay(ms: number): string {
+  return vilniusDayFmt.format(new Date(ms));
 }
 
-function makeRng(seed: number): () => number {
-  let s = seed;
-  return () => {
-    s = (Math.imul(s, 1103515245) + 12345) & 0x7fffffff;
-    return s / 0x7fffffff;
-  };
-}
+/** Tracked params that come from config.ini (versions are handled separately). */
+const INI_PARAMS: ConfigParamKey[] = [
+  "resolution",
+  "cameraSource",
+  "modelVersion",
+  "inferenceBackend",
+  "onnxProviders",
+  "enablePrediction",
+  "numberOfResults",
+];
 
-function fmtDate(ms: number): string {
-  const d = new Date(ms);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function pick<T>(rng: () => number, arr: T[]): T {
-  return arr[Math.floor(rng() * arr.length) % arr.length];
-}
-
-/**
- * Build the change chain for one parameter: a sequence of distinct values
- * with ascending dates, ending at the CURRENT value. Returns the current
- * value plus the change events (before/after pairs). Guarantees the most
- * recent change's `after` equals the current value, so the snapshot and
- * the timeline never contradict each other.
- */
-function buildParamHistory(
-  rng: () => number,
+/** Emit a change event when `cur` differs from `prev` (both defined). */
+function pushChange(
+  out: ConfigChange[],
   hostId: string,
-  key: Exclude<ConfigParamKey, "retellectEnabled">,
-  nowMs: number,
-): { current: string; lastChanged: string | null; changes: ConfigChange[] } {
-  const pool = VALUE_POOLS[key];
-  const def = CONFIG_PARAMS.find((p) => p.key === key)!;
+  param: ConfigParamKey,
+  prev: string | undefined,
+  cur: string | undefined,
+  dateMs: number,
+) {
+  if (prev === undefined || cur === undefined) return;
+  if (prev === cur) return;
+  out.push({
+    hostId,
+    date: fmtDay(dateMs),
+    param,
+    paramLabel: PARAM_LABEL.get(param) ?? param,
+    before: prev,
+    after: cur,
+    highPriority: PARAM_HP.get(param) ?? false,
+  });
+}
+
+function detectChanges(hostId: string, raw: RawHostConfig): ConfigChange[] {
   const changes: ConfigChange[] = [];
 
-  const willChange = rng() < CHANGE_PROB[key];
-  if (!willChange) {
-    return { current: pick(rng, pool), lastChanged: null, changes: [] };
+  // config.ini-derived params.
+  let prevIni: Partial<Record<ConfigParamKey, string>> = {};
+  let first = true;
+  for (const snap of raw.configIniHistory) {
+    const { params } = parseConfigIni(snap.value);
+    if (!first) {
+      for (const key of INI_PARAMS) pushChange(changes, hostId, key, prevIni[key], params[key], snap.clock * 1000);
+    }
+    // Carry forward last-known values so a snapshot missing a field doesn't
+    // register a phantom change.
+    prevIni = { ...prevIni, ...params };
+    first = false;
   }
 
-  // 1 change usually, occasionally 2.
-  const nChanges = rng() < 0.78 ? 1 : 2;
-  // Distinct day offsets (days ago), newest is the smaller offset.
-  const offsets: number[] = [];
-  for (let i = 0; i < nChanges; i++) {
-    offsets.push(1 + Math.floor(rng() * (HORIZON_DAYS - 2)));
-  }
-  offsets.sort((a, b) => b - a); // oldest first
-
-  // Value chain: nChanges+1 values, consecutive distinct.
-  const values: string[] = [pick(rng, pool)];
-  for (let i = 0; i < nChanges; i++) {
-    let next = pick(rng, pool);
-    let guard = 0;
-    while (next === values[values.length - 1] && guard++ < 8) next = pick(rng, pool);
-    values.push(next);
-  }
-
-  for (let i = 0; i < nChanges; i++) {
-    const date = fmtDate(nowMs - offsets[i] * 86400000);
-    changes.push({
-      hostId,
-      date,
-      param: key,
-      paramLabel: def.label,
-      before: values[i],
-      after: values[i + 1],
-      highPriority: def.highPriority,
-    });
-  }
-  // Newest first.
-  changes.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  return {
-    current: values[values.length - 1],
-    lastChanged: changes[0]?.date ?? null,
-    changes,
+  // Version params.
+  const walkVersion = (key: ConfigParamKey, hist: RawHostConfig["rtVersionHistory"]) => {
+    let prev: string | undefined;
+    let firstV = true;
+    for (const snap of hist) {
+      const v = parseVersion(snap.value) ?? undefined;
+      if (v === undefined) continue;
+      if (!firstV) pushChange(changes, hostId, key, prev, v, snap.clock * 1000);
+      prev = v;
+      firstV = false;
+    }
   };
+  walkVersion("retellectVersion", raw.rtVersionHistory);
+  walkVersion("scoVersion", raw.scoVersionHistory);
+
+  changes.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  return changes;
+}
+
+function unknownParams(): Record<ConfigParamKey, string> {
+  const p = {} as Record<ConfigParamKey, string>;
+  for (const def of CONFIG_PARAMS) p[def.key] = "unknown";
+  return p;
 }
 
 /**
- * Build the full configuration-tracking dataset for a set of devices.
+ * Build the configuration-tracking dataset.
  *
- * @param devices  real device rows (cpuModel/retellectEnabled are honoured)
+ * @param devices  pilot devices (joined to Zabbix config by name / sourceHostKey)
+ * @param byHostName  raw config items keyed by Zabbix host name
  * @param windowDays  selected change window (7 / 30 / 90)
- * @param nowMs  reference "now" (injectable for tests); defaults to Date.now()
+ * @param sourceStatus  freshness of the underlying Zabbix fetch
+ * @param nowMs  reference "now" (injectable for tests)
  */
 export function buildConfigTracking(
   devices: ConfigDeviceInput[],
+  byHostName: Map<string, RawHostConfig>,
   windowDays: number,
+  sourceStatus: "live" | "cached" | "unavailable" = "live",
   nowMs: number = Date.now(),
 ): ConfigTrackingData {
-  const windowCutoff = fmtDate(nowMs - windowDays * 86400000);
+  const windowCutoff = fmtDay(nowMs - windowDays * 86400000);
   const hosts: HostConfig[] = [];
 
   for (const dev of devices) {
-    const rng = makeRng(hashSeed(`${dev.id}|${dev.name}`));
+    const raw = byHostName.get(dev.sourceHostKey || "") ?? byHostName.get(dev.name) ?? null;
 
-    // ~8% of hosts have no recent snapshot → configuration is invisible.
-    const stale = rng() < 0.08;
-
-    const params = {} as Record<ConfigParamKey, string>;
+    const params = unknownParams();
     const paramLastChanged: Partial<Record<ConfigParamKey, string>> = {};
-    let allChanges: ConfigChange[] = [];
+    let extras: { label: string; value: string }[] = [];
+    let changes: ConfigChange[] = [];
+    let snapshotAgeDays: number | null = null;
+    let hasIniSnapshot = false;
 
-    if (stale) {
-      // No visibility: high-priority params read "unknown", history blank.
-      for (const def of CONFIG_PARAMS) params[def.key] = "unknown";
-      params.retellectEnabled = dev.retellectEnabled ? "true" : "false";
-    } else {
-      for (const def of CONFIG_PARAMS) {
-        if (def.key === "retellectEnabled") {
-          // Derived from real device data — no synthetic change history.
-          params.retellectEnabled = dev.retellectEnabled ? "true" : "false";
-          continue;
-        }
-        const h = buildParamHistory(rng, dev.id, def.key, nowMs);
-        params[def.key] = h.current;
-        if (h.lastChanged) paramLastChanged[def.key] = h.lastChanged;
-        allChanges = allChanges.concat(h.changes);
+    if (raw) {
+      if (raw.configIni) {
+        const parsed = parseConfigIni(raw.configIni.value);
+        for (const key of INI_PARAMS) if (parsed.params[key] !== undefined) params[key] = parsed.params[key]!;
+        extras = parsed.extras;
+        snapshotAgeDays = Math.max(0, Math.floor((nowMs / 1000 - raw.configIni.clock) / 86400));
+        hasIniSnapshot = true;
       }
-      allChanges.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+      const rtv = parseVersion(raw.rtVersion?.value);
+      if (rtv) params.retellectVersion = rtv;
+      const scov = parseVersion(raw.scoVersion?.value);
+      if (scov) params.scoVersion = scov;
+
+      changes = detectChanges(dev.id, raw);
+      for (const c of changes) {
+        if (!(c.param in paramLastChanged)) paramLastChanged[c.param] = c.date; // changes are newest-first
+      }
     }
 
-    const snapshotAgeDays = stale ? 4 + Math.floor(rng() * 30) : rng() < 0.5 ? 0 : 1;
+    const snapshotFresh = hasIniSnapshot && snapshotAgeDays !== null && snapshotAgeDays <= STALE_DAYS;
 
-    // Window-scoped flags.
-    const inWindow = allChanges.filter((c) => c.date >= windowCutoff);
+    const inWindow = changes.filter((c) => c.date >= windowCutoff);
     const changedParams = new Set(inWindow.map((c) => c.param));
     const resolutionChanged = changedParams.has("resolution");
     const versionChanged = changedParams.has("retellectVersion") || changedParams.has("scoVersion");
@@ -216,46 +192,45 @@ export function buildConfigTracking(
       country: dev.country,
       params,
       paramLastChanged,
-      changes: allChanges,
+      extras,
+      changes,
       changedParamCount: changedParams.size,
       lastConfigChange: inWindow[0]?.date ?? null,
       highPriorityChange,
       resolutionChanged,
       versionChanged,
-      snapshotFresh: !stale,
+      snapshotFresh,
       snapshotAgeDays,
     });
   }
 
-  // Default sort: high-priority changes first → newest change → stale last.
-  hosts.sort((a, b) => compareHostConfig(a, b));
+  hosts.sort(compareHostConfig);
 
   const kpis = computeKpis(hosts);
   const retellectVersions = distinctSorted(hosts.map((h) => h.params.retellectVersion).filter((v) => v !== "unknown"));
   const scoVersions = distinctSorted(hosts.map((h) => h.params.scoVersion).filter((v) => v !== "unknown"));
-  const cpuModels = distinctSorted(hosts.map((h) => h.cpuModel).filter(Boolean));
+  const cpuModels = distinctSorted(hosts.map((h) => h.cpuModel).filter((v) => v && v !== "—"));
 
   return {
     hosts,
     kpis,
     windowDays,
-    dataMode: "derived",
+    dataMode: "live",
+    sourceStatus,
+    hostsWithSnapshot: hosts.filter((h) => h.snapshotFresh).length,
     retellectVersions,
     scoVersions,
     cpuModels,
   };
 }
 
-/** Primary sort: high-priority changes first, then most-recent change,
- *  then missing-snapshot hosts sink to the bottom. Stable tiebreak on
- *  host name so order is deterministic across renders. */
+/** Primary sort: fresh+high-priority first → most-recent change → stale last. */
 export function compareHostConfig(a: HostConfig, b: HostConfig): number {
-  // Missing-snapshot hosts always sink (they have no actionable change).
   if (a.snapshotFresh !== b.snapshotFresh) return a.snapshotFresh ? -1 : 1;
   if (a.highPriorityChange !== b.highPriorityChange) return a.highPriorityChange ? -1 : 1;
   const ad = a.lastConfigChange ?? "";
   const bd = b.lastConfigChange ?? "";
-  if (ad !== bd) return ad < bd ? 1 : -1; // newer date first
+  if (ad !== bd) return ad < bd ? 1 : -1;
   if (a.changedParamCount !== b.changedParamCount) return b.changedParamCount - a.changedParamCount;
   return a.hostName.localeCompare(b.hostName, undefined, { numeric: true });
 }

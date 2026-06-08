@@ -4,21 +4,21 @@
  * Retellect Configuration Tracking tab.
  *
  * A parameter-level configuration & change-monitoring workspace (NOT a
- * settings page, NOT a "config profile" view). It answers: what is
- * installed now on each host, what changed and when, which hosts have
- * high-priority changes, and where configuration visibility is missing.
+ * settings page, NOT a "config profile" view). Answers: what is installed
+ * now on each host, what changed and when, which hosts have high-priority
+ * changes, and where configuration visibility is missing.
  *
- * Data comes from `buildConfigTracking()` — currently DERIVED placeholders
- * (see that module) until the daily snapshot ingestion (RT-CFG) lands. The
- * amber note in the filter bar surfaces that provenance honestly.
+ * Data is REAL: it fetches `/api/rt/config-snapshot`, which reads the three
+ * Retellect Zabbix log items (config.ini + Retellect/SCO versions, current +
+ * history) and assembles the typed dataset. Coverage is genuinely partial
+ * (only a subset of hosts have a parsed config.ini), surfaced by the
+ * "Missing latest snapshot" KPI and the coverage line.
  *
  * Future extension: each change event carries { hostId, param, date }, so a
- * selected change can later deep-link into before/after CPU impact analysis
- * (CPU Timeline / Compare). The affordance is stubbed; the analysis is not
- * built here.
+ * selected change can later deep-link into before/after CPU impact analysis.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useRtFilters } from "../RtFiltersContext";
 import {
@@ -31,8 +31,8 @@ import {
 } from "../filters/RtFilterControls";
 import type { MultiOption } from "../filters/RtFilterControls";
 import type { RtPilotData, ZabbixData } from "../RtPilotWorkspace";
-import { buildConfigTracking, type ConfigDeviceInput } from "@/lib/rt/config-tracking/build";
-import { CONFIG_PARAMS, type ConfigParamKey, type HostConfig } from "@/lib/rt/config-tracking/types";
+import { CONFIG_PARAMS, type ConfigParamKey, type ConfigTrackingData, type HostConfig } from "@/lib/rt/config-tracking/types";
+import type { ConfigDeviceInput } from "@/lib/rt/config-tracking/build";
 
 // ─── Small presentational helpers ───────────────────────────────────
 
@@ -54,7 +54,6 @@ function Tag({ tone = "neutral", children }: { tone?: Tone; children: ReactNode 
   );
 }
 
-/** Date "YYYY-MM-DD" → "Jun 5" style short label. */
 function shortDate(iso: string | null): string {
   if (!iso) return "—";
   const [y, m, d] = iso.split("-").map(Number);
@@ -62,19 +61,13 @@ function shortDate(iso: string | null): string {
   return `${months[(m - 1) % 12]} ${d}${y !== new Date().getFullYear() ? ` '${String(y).slice(2)}` : ""}`;
 }
 
-function resolutionTone(v: string): Tone {
-  if (v === "unknown") return "risk";
-  if (v === "480p") return "change";
-  return "neutral";
-}
+const valueTone = (v: string): Tone => (v === "unknown" ? "risk" : "neutral");
 
 // ─── Component ───────────────────────────────────────────────────────
 
 export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix: ZabbixData }) {
   const { filters, setFilter } = useRtFilters();
 
-  // Change window is LOCAL — distinct from the CPU dashboards' ?period=
-  // (which triggers a server refetch). Here it only re-scopes change counts.
   const [windowDays, setWindowDays] = useState<number>(30);
   const [retVersion, setRetVersion] = useState<string>("all");
   const [scoVersion, setScoVersion] = useState<string>("all");
@@ -82,9 +75,40 @@ export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix
   const [showChangedOnly, setShowChangedOnly] = useState<boolean>(false);
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
 
-  // Store filter options — reuse the shared multi-select with Zabbix-first
-  // grouping, matching CPU Matrix / Timeline so the Store selection persists
-  // across tabs.
+  const [data, setData] = useState<ConfigTrackingData | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch real config snapshots whenever the change window changes.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    setLoading(true);
+    setError(null);
+    const devices: ConfigDeviceInput[] = pilot.devices.map((d) => ({
+      id: d.id,
+      name: d.name,
+      sourceHostKey: d.sourceHostKey,
+      storeName: d.storeName,
+      cpuModel: d.cpuModel || "—",
+      country: d.country,
+      retellectEnabled: d.retellectEnabled,
+    }));
+    fetch("/api/rt/config-snapshot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ devices, windowDays }),
+      signal: ctrl.signal,
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d: ConfigTrackingData) => setData(d))
+      .catch((e) => {
+        if ((e as Error).name !== "AbortError") setError((e as Error).message);
+      })
+      .finally(() => setLoading(false));
+    return () => ctrl.abort();
+  }, [pilot.devices, windowDays]);
+
+  // Store filter options — Zabbix-first grouping, matching the other tabs.
   const storeOptions = useMemo<MultiOption[]>(() => {
     const hostKeys = new Set<string>();
     for (const h of zabbix.hosts) hostKeys.add(h.hostName);
@@ -97,20 +121,6 @@ export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix
       .sort((a, b) => (a.tracked === b.tracked ? a.l.localeCompare(b.l) : a.tracked ? -1 : 1));
   }, [zabbix.hosts, pilot.devices, pilot.stores]);
 
-  const data = useMemo(() => {
-    const devices: ConfigDeviceInput[] = pilot.devices.map((d) => ({
-      id: d.id,
-      name: d.name,
-      storeName: d.storeName,
-      cpuModel: d.cpuModel || "—",
-      country: d.country,
-      retellectEnabled: d.retellectEnabled,
-    }));
-    return buildConfigTracking(devices, windowDays);
-  }, [pilot.devices, windowDays]);
-
-  // Same day-level cutoff the builder used, so the "changed parameter"
-  // filter agrees with the per-host window flags.
   const windowCutoff = useMemo(() => {
     // eslint-disable-next-line react-hooks/purity
     const d = new Date(Date.now() - windowDays * 86400000);
@@ -119,9 +129,10 @@ export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix
 
   const storeSet = useMemo(() => new Set(filters.store), [filters.store]);
 
+  const allHosts = data?.hosts ?? [];
   const filteredHosts = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
-    return data.hosts.filter((h) => {
+    return allHosts.filter((h) => {
       if (storeSet.size > 0 && !storeSet.has(h.storeName)) return false;
       if (filters.cpuModel !== "all" && h.cpuModel !== filters.cpuModel) return false;
       if (retVersion !== "all" && h.params.retellectVersion !== retVersion) return false;
@@ -135,13 +146,15 @@ export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix
       }
       return true;
     });
-  }, [data.hosts, storeSet, filters.cpuModel, filters.search, retVersion, scoVersion, changedParam, showChangedOnly, windowCutoff]);
+  }, [allHosts, storeSet, filters.cpuModel, filters.search, retVersion, scoVersion, changedParam, showChangedOnly, windowCutoff]);
 
-  // Auto-select the first row so the detail pane is never empty.
   const selected: HostConfig | null =
     filteredHosts.find((h) => h.hostId === selectedHostId) ?? filteredHosts[0] ?? null;
 
-  const k = data.kpis;
+  const k = data?.kpis;
+  const statusLabel = data?.sourceStatus === "live" ? "LIVE" : data?.sourceStatus === "cached" ? "CACHED" : "DOWN";
+  const statusColor =
+    data?.sourceStatus === "live" ? "text-emerald-600" : data?.sourceStatus === "cached" ? "text-amber-600" : "text-red-600";
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-5">
@@ -169,19 +182,19 @@ export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix
           <FilterSelect
             label="CPU model"
             value={filters.cpuModel}
-            options={[{ v: "all", l: "All models" }, ...data.cpuModels.map((m) => ({ v: m, l: m }))]}
+            options={[{ v: "all", l: "All models" }, ...(data?.cpuModels ?? []).map((m) => ({ v: m, l: m }))]}
             onChange={(v) => setFilter("cpuModel", v)}
           />
           <FilterSelect
             label="Retellect"
             value={retVersion}
-            options={[{ v: "all", l: "All versions" }, ...data.retellectVersions.map((v) => ({ v, l: v }))]}
+            options={[{ v: "all", l: "All versions" }, ...(data?.retellectVersions ?? []).map((v) => ({ v, l: v }))]}
             onChange={setRetVersion}
           />
           <FilterSelect
             label="SCO"
             value={scoVersion}
-            options={[{ v: "all", l: "All versions" }, ...data.scoVersions.map((v) => ({ v, l: v }))]}
+            options={[{ v: "all", l: "All versions" }, ...(data?.scoVersions ?? []).map((v) => ({ v, l: v }))]}
             onChange={setScoVersion}
           />
           <FilterSelect
@@ -215,56 +228,48 @@ export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix
             Show changed only
           </button>
         </FilterRow>
-        <div className="text-[11px] text-gray-500">
-          Tracking <strong className="text-gray-700">{k.trackedHosts} hosts</strong> with daily configuration snapshots across the LT estate.
+        <div className="text-[11px] text-gray-500 flex items-center gap-2 flex-wrap">
+          <span>
+            <span className="font-semibold text-gray-700">Zabbix</span>{" "}
+            <span className={`font-semibold ${statusColor}`}>{statusLabel}</span> · daily config snapshots from
+            Retellect <code>config.ini</code> + version log items.
+          </span>
+          {k && (
+            <span className="text-gray-400">
+              {data!.hostsWithSnapshot} of {k.trackedHosts} hosts have a current snapshot.
+            </span>
+          )}
         </div>
-        <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1">
-          Configuration snapshots are <strong>derived placeholders</strong> pending the daily config-snapshot ingestion (RT-CFG).
-          Versions, resolution and parameter history are deterministic stand-ins — not live Zabbix reads. <code>retellectEnabled</code> and CPU model are real.
-        </div>
+        {error && (
+          <div className="text-[11px] text-red-700 bg-red-50 border border-red-100 rounded px-2 py-1">
+            Could not load configuration data: {error}
+          </div>
+        )}
       </FilterBar>
 
-      {/* ── KPI layer (action-oriented) ── */}
+      {/* ── KPI layer ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
-        <KpiCard
-          label="High-priority changes"
-          value={k.highPriorityChanges}
+        <KpiCard label="High-priority changes" value={k?.highPriorityChanges} loading={loading}
           sub={`Resolution, Retellect or SCO version changed in ${windowDays}d`}
-          delta={`${k.pctHighPriority}% of tracked hosts`}
-          deltaTone="warn"
-        />
-        <KpiCard
-          label="Resolution changes"
-          value={k.resolutionChanges}
-          sub="Most sensitive operational setting"
-          delta="Review first"
-          deltaTone="warn"
-        />
-        <KpiCard
-          label="Version changes"
-          value={k.versionChanges}
-          sub={`Retellect or SCO version changed in ${windowDays}d`}
-          delta="Version spread to track"
-          deltaTone="neutral"
-        />
-        <KpiCard
-          label="Missing latest snapshot"
-          value={k.missingSnapshot}
-          sub="Hosts without recent configuration visibility"
-          delta="Needs follow-up"
-          deltaTone="bad"
-        />
+          delta={k ? `${k.pctHighPriority}% of tracked hosts` : ""} deltaTone="warn" />
+        <KpiCard label="Resolution changes" value={k?.resolutionChanges} loading={loading}
+          sub="Most sensitive operational setting" delta="Review first" deltaTone="warn" />
+        <KpiCard label="Version changes" value={k?.versionChanges} loading={loading}
+          sub={`Retellect or SCO version changed in ${windowDays}d`} delta="Version spread to track" deltaTone="neutral" />
+        <KpiCard label="Missing latest snapshot" value={k?.missingSnapshot} loading={loading}
+          sub="Hosts without recent configuration visibility" delta="Needs follow-up" deltaTone="bad" />
       </div>
 
-      {/* ── Inventory table + selected-host detail ── */}
+      {/* ── Inventory + detail ── */}
       <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.95fr] gap-4 mt-4">
         <InventoryTable
           hosts={filteredHosts}
-          totalCount={data.hosts.length}
+          totalCount={allHosts.length}
+          loading={loading}
           selectedHostId={selected?.hostId ?? null}
           onSelect={setSelectedHostId}
         />
-        <HostDetail host={selected} windowDays={windowDays} />
+        <HostDetail host={selected} windowDays={windowDays} loading={loading} />
       </div>
     </div>
   );
@@ -275,22 +280,25 @@ export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix
 function KpiCard({
   label,
   value,
+  loading,
   sub,
   delta,
   deltaTone,
 }: {
   label: string;
-  value: number;
+  value: number | undefined;
+  loading: boolean;
   sub: string;
   delta: string;
   deltaTone: "warn" | "bad" | "neutral";
 }) {
-  const deltaClass =
-    deltaTone === "bad" ? "text-red-600" : deltaTone === "warn" ? "text-amber-700" : "text-gray-400";
+  const deltaClass = deltaTone === "bad" ? "text-red-600" : deltaTone === "warn" ? "text-amber-700" : "text-gray-400";
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="text-[11px] text-gray-500 uppercase tracking-wide">{label}</div>
-      <div className="text-3xl font-bold text-gray-900 mt-1.5 tabular-nums">{value}</div>
+      <div className="text-3xl font-bold text-gray-900 mt-1.5 tabular-nums">
+        {value === undefined ? (loading ? "—" : "0") : value}
+      </div>
       <div className="text-[11px] text-gray-500 mt-1 leading-snug">{sub}</div>
       <div className={`text-[11px] font-semibold mt-2 ${deltaClass}`}>{delta}</div>
     </div>
@@ -299,16 +307,18 @@ function KpiCard({
 
 // ─── Inventory table ─────────────────────────────────────────────────
 
-const COLS = "grid grid-cols-[1.5fr_0.9fr_0.7fr_0.7fr_0.7fr_0.9fr_0.85fr_0.6fr] gap-2 items-center";
+const COLS = "grid grid-cols-[1.5fr_0.9fr_0.7fr_0.7fr_0.8fr_0.9fr_0.85fr_0.6fr] gap-2 items-center";
 
 function InventoryTable({
   hosts,
   totalCount,
+  loading,
   selectedHostId,
   onSelect,
 }: {
   hosts: HostConfig[];
   totalCount: number;
+  loading: boolean;
   selectedHostId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -316,13 +326,11 @@ function InventoryTable({
     <div className="bg-white rounded-lg border border-gray-200 p-4 min-w-0">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-sm font-semibold text-gray-800">Current host configuration inventory</h3>
-        <span className="text-[11px] text-gray-400">
-          {hosts.length} of {totalCount} hosts
-        </span>
+        <span className="text-[11px] text-gray-400">{hosts.length} of {totalCount} hosts</span>
       </div>
       <p className="text-[11px] text-gray-500 mt-1 leading-snug">
-        Current versions and key settings, with when something last changed. Resolution is surfaced directly because it
-        is operationally important. Sorted: high-priority changes → newest change → stale last.
+        Current versions and key settings, with when something last changed. Resolution is surfaced directly. Sorted:
+        high-priority changes → newest change → missing snapshot last.
       </p>
 
       <div className="mt-3 border border-gray-200 rounded-lg overflow-hidden">
@@ -336,11 +344,16 @@ function InventoryTable({
           <div>Last change</div>
           <div>Snapshot</div>
         </div>
-        {hosts.length === 0 && (
+        {loading && hosts.length === 0 && (
+          <div className="px-3 py-6 text-center text-xs text-gray-400">Loading configuration snapshots…</div>
+        )}
+        {!loading && hosts.length === 0 && (
           <div className="px-3 py-6 text-center text-xs text-gray-400">No hosts match the current filters.</div>
         )}
         {hosts.map((h) => {
           const isSel = h.hostId === selectedHostId;
+          const rtChanged = h.changes.some((c) => c.param === "retellectVersion");
+          const scoChanged = h.changes.some((c) => c.param === "scoVersion");
           return (
             <button
               key={h.hostId}
@@ -357,23 +370,23 @@ function InventoryTable({
               <div className="text-gray-600 truncate">{h.cpuModel}</div>
               <div>
                 {h.params.retellectVersion === "unknown" ? (
-                  <Tag tone="risk">unknown</Tag>
-                ) : h.versionChanged && h.changes.some((c) => c.param === "retellectVersion") ? (
+                  <span className="text-red-600">unknown</span>
+                ) : rtChanged && h.versionChanged ? (
                   <Tag tone="change">{h.params.retellectVersion}</Tag>
                 ) : (
                   <Tag tone="ok">{h.params.retellectVersion}</Tag>
                 )}
               </div>
-              <div className="text-gray-700">
+              <div className="text-gray-700 truncate">
                 {h.params.scoVersion === "unknown" ? (
                   <span className="text-red-600">unknown</span>
-                ) : h.changes.some((c) => c.param === "scoVersion") && h.versionChanged ? (
+                ) : scoChanged && h.versionChanged ? (
                   <Tag tone="change">{h.params.scoVersion}</Tag>
                 ) : (
                   h.params.scoVersion
                 )}
               </div>
-              <div className={resolutionTone(h.params.resolution) === "neutral" ? "text-gray-700" : resolutionTone(h.params.resolution) === "risk" ? "text-red-600 font-semibold" : "text-amber-700 font-semibold"}>
+              <div className={h.params.resolution === "unknown" ? "text-red-600 font-semibold" : h.resolutionChanged ? "text-amber-700 font-semibold" : "text-gray-700"}>
                 {h.params.resolution}
               </div>
               <div>
@@ -390,9 +403,7 @@ function InventoryTable({
               <div className={h.lastConfigChange ? (h.highPriorityChange ? "text-amber-700" : "text-gray-600") : "text-gray-400"}>
                 {h.snapshotFresh ? shortDate(h.lastConfigChange) : "—"}
               </div>
-              <div>
-                {h.snapshotFresh ? <Tag tone="ok">daily</Tag> : <Tag tone="muted">stale</Tag>}
-              </div>
+              <div>{h.snapshotFresh ? <Tag tone="ok">daily</Tag> : <Tag tone="muted">stale</Tag>}</div>
             </button>
           );
         })}
@@ -407,11 +418,11 @@ function InventoryTable({
 
 // ─── Selected host detail ────────────────────────────────────────────
 
-function HostDetail({ host, windowDays }: { host: HostConfig | null; windowDays: number }) {
+function HostDetail({ host, windowDays, loading }: { host: HostConfig | null; windowDays: number; loading: boolean }) {
   if (!host) {
     return (
       <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-center text-xs text-gray-400 min-h-[200px]">
-        Select a host to inspect its parameters and change history.
+        {loading ? "Loading…" : "Select a host to inspect its parameters and change history."}
       </div>
     );
   }
@@ -427,18 +438,18 @@ function HostDetail({ host, windowDays }: { host: HostConfig | null; windowDays:
         <span className="font-semibold text-gray-700">Parameter history</span>
       </div>
 
-      {/* Quick stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
         <Stat k="Retellect" v={host.params.retellectVersion} />
         <Stat k="SCO" v={host.params.scoVersion} />
-        <Stat k="Resolution" v={host.params.resolution} tone={resolutionTone(host.params.resolution)} />
+        <Stat k="Resolution" v={host.params.resolution} tone={valueTone(host.params.resolution)} />
         <Stat k="Last change" v={shortDate(host.lastConfigChange)} />
       </div>
 
       {!host.snapshotFresh && (
         <div className="mt-3 text-[11px] text-red-700 bg-red-50 border border-red-100 rounded px-2 py-1">
-          No recent configuration snapshot for this host (last seen ~{host.snapshotAgeDays}d ago). Current values and
-          history are unavailable until visibility is restored.
+          No recent configuration snapshot for this host
+          {host.snapshotAgeDays !== null ? ` (last seen ~${host.snapshotAgeDays}d ago)` : ""}. Config-derived values are
+          unavailable until visibility is restored.
         </div>
       )}
 
@@ -449,10 +460,21 @@ function HostDetail({ host, windowDays }: { host: HostConfig | null; windowDays:
           {CONFIG_PARAMS.map((p) => (
             <div key={p.key} className="bg-white border border-gray-200 rounded px-2.5 py-1.5">
               <div className="text-[10px] text-gray-400">{p.label}</div>
-              <div className="text-xs font-semibold text-gray-800 mt-0.5">{host.params[p.key]}</div>
+              <div className="text-xs font-semibold text-gray-800 mt-0.5 truncate" title={host.params[p.key]}>
+                {host.params[p.key]}
+              </div>
             </div>
           ))}
         </div>
+        {host.extras.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {host.extras.map((e) => (
+              <span key={e.label} className="text-[10px] text-gray-500 bg-white border border-gray-200 rounded px-2 py-0.5">
+                {e.label}: <span className="font-medium text-gray-700">{e.value}</span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Parameter list with last-changed */}
@@ -466,11 +488,9 @@ function HostDetail({ host, windowDays }: { host: HostConfig | null; windowDays:
           <div key={p.key} className="grid grid-cols-[1fr_0.8fr_0.8fr] gap-2 px-3 py-2 border-t border-gray-100 text-xs items-center">
             <div className="font-medium text-gray-700">
               {p.label}
-              {p.highPriority && <span className="ml-1 text-[9px] text-amber-600 uppercase">●</span>}
+              {p.highPriority && <span className="ml-1 text-[9px] text-amber-600">●</span>}
             </div>
-            <div className={p.key === "resolution" && resolutionTone(host.params[p.key]) !== "neutral" ? "text-amber-700 font-semibold" : "text-gray-700"}>
-              {host.params[p.key]}
-            </div>
+            <div className="text-gray-700 truncate" title={host.params[p.key]}>{host.params[p.key]}</div>
             <div className="text-gray-500">{host.paramLastChanged[p.key] ?? "—"}</div>
           </div>
         ))}
@@ -486,7 +506,7 @@ function HostDetail({ host, windowDays }: { host: HostConfig | null; windowDays:
         </div>
         {host.changes.length === 0 && (
           <div className="px-3 py-4 text-center text-[11px] text-gray-400">
-            No parameter changes recorded in the tracked horizon.
+            No parameter changes recorded in the last {windowDays >= 90 ? "90" : windowDays} days.
           </div>
         )}
         {host.changes.map((c, i) => {
@@ -504,15 +524,16 @@ function HostDetail({ host, windowDays }: { host: HostConfig | null; windowDays:
                 {c.paramLabel}
                 {c.highPriority && <span className="text-[9px] text-amber-600">●</span>}
               </div>
-              <div className="text-gray-400 line-through">{c.before}</div>
-              <div className="font-semibold text-gray-800">{c.after}</div>
+              <div className="text-gray-400 line-through truncate" title={c.before}>{c.before}</div>
+              <div className="font-semibold text-gray-800 truncate" title={c.after}>{c.after}</div>
             </div>
           );
         })}
       </div>
 
       <p className="text-[10px] text-gray-400 mt-2.5">
-        Timeline is parameter-level. A future release will let you open a change into before/after CPU impact analysis.
+        Timeline is parameter-level (diffed from Zabbix config history). A future release will let you open a change into
+        before/after CPU impact analysis.
       </p>
     </div>
   );
@@ -521,15 +542,13 @@ function HostDetail({ host, windowDays }: { host: HostConfig | null; windowDays:
 function Stat({ k, v, tone = "neutral" }: { k: string; v: string; tone?: Tone }) {
   const valClass = tone === "risk" ? "text-red-600" : tone === "change" ? "text-amber-700" : "text-gray-900";
   return (
-    <div className="bg-gray-50 border border-gray-200 rounded px-2.5 py-2">
+    <div className="bg-gray-50 border border-gray-200 rounded px-2.5 py-2 min-w-0">
       <div className="text-[10px] text-gray-400">{k}</div>
-      <div className={`text-base font-bold mt-0.5 ${valClass}`}>{v}</div>
+      <div className={`text-base font-bold mt-0.5 truncate ${valClass}`} title={v}>{v}</div>
     </div>
   );
 }
 
-/** Day-level "is this date within the last N days" — for dimming
- *  out-of-window timeline rows in the detail view. */
 function isWithin(iso: string, days: number): boolean {
   const cutoff = new Date(Date.now() - days * 86400000);
   const c = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
