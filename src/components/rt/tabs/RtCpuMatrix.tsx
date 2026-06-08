@@ -35,7 +35,8 @@ import type {
   RolloutPerHostEntry,
 } from "@/lib/rollout-insights/types";
 import { ACTIVE_ABOVE_BUCKETS } from "@/lib/rollout-insights/types";
-import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterDivider } from "../filters/RtFilterControls";
+import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterDivider, FilterMultiSelect } from "../filters/RtFilterControls";
+import type { MultiOption } from "../filters/RtFilterControls";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -240,6 +241,27 @@ export function RtCpuMatrix({
   // input to "tracked" regardless of what the cross-tab filter context
   // happens to hold from the legacy heatmap.
   const cpuCountFrom = "tracked" as const;
+
+  // Store filter is multi-select (string[]); empty = all stores.
+  // Build the option list once, ordering stores we have Zabbix data for
+  // first. "Has Zabbix data" = at least one device in the store maps to a
+  // configured Zabbix host (covers stores we currently or historically
+  // receive monitoring for; stores never wired to Zabbix sink to the
+  // bottom). Honours the active Country filter so the two slicers agree.
+  const storeOptions = useMemo<MultiOption[]>(() => {
+    const hostKeys = new Set<string>();
+    for (const h of zabbix.hosts) hostKeys.add(h.hostName);
+    const tracked = new Set<string>();
+    for (const d of pilot.devices) {
+      if (hostKeys.has(d.sourceHostKey || "") || hostKeys.has(d.name)) tracked.add(d.storeName);
+    }
+    return pilot.stores
+      .filter((s) => countryFilter === "all" || s.country === countryFilter)
+      .map((s) => ({ v: s.name, l: s.name, tracked: tracked.has(s.name) }))
+      .sort((a, b) =>
+        a.tracked === b.tracked ? a.l.localeCompare(b.l) : a.tracked ? -1 : 1,
+      );
+  }, [zabbix.hosts, pilot.devices, pilot.stores, countryFilter]);
 
   // Period selector mirrors RtTimeline / RtRolloutInsights — URL-driven
   // so a deep link keeps the same window. Period changes trigger a
@@ -472,7 +494,7 @@ export function RtCpuMatrix({
               likely cause so the operator doesn't go hunting for a
               data-health issue that doesn't exist. */}
           {matrix.length === 0
-            ? (filters.country !== "all" || filters.store !== "all" || filters.cpuModel !== "all")
+            ? (filters.country !== "all" || filters.store.length > 0 || filters.cpuModel !== "all")
               ? "No CPU classes match the current Country / Store / CPU filters. Clear filters to see the full matrix."
               : filters.businessHoursOnly
                 ? "No business-hour CPU history in this window. The available days came through the DB rollup (no business-hour filter applied yet). Switch off 'Business hours only' to read 24h aggregates, or pick a more recent Period."
@@ -550,7 +572,7 @@ export function RtCpuMatrix({
                   row={row}
                   threshold={threshold}
                   fleetTotal={fleetTotal}
-                  filtersNarrowed={filters.country !== "all" || filters.store !== "all"}
+                  filtersNarrowed={filters.country !== "all" || filters.store.length > 0}
                   onImpactChange={setImpactFor}
                   isSelected={row.model === selectedModel}
                   onSelect={onMatrixRowSelect}
@@ -612,30 +634,29 @@ export function RtCpuMatrix({
                 ]}
                 onChange={(v) => {
                   setFilter("country", v);
-                  // Reset store filter when switching country so the
-                  // operator doesn't see "no rows" because the
-                  // previously picked store doesn't exist in the new
-                  // country.
-                  if (v !== "all" && storeFilter !== "all") {
-                    const stillVisible = pilot.stores.some(
-                      (s) => s.name === storeFilter && s.country === v,
+                  // Drop any selected stores that don't belong to the new
+                  // country so the operator doesn't see "no rows" because
+                  // a previously picked store is out of scope. Multi-select:
+                  // keep the stores that survive, clear only the rest.
+                  if (v !== "all" && storeFilter.length > 0) {
+                    const stillVisible = storeFilter.filter((name) =>
+                      pilot.stores.some((s) => s.name === name && s.country === v),
                     );
-                    if (!stillVisible) setFilter("store", "all");
+                    if (stillVisible.length !== storeFilter.length) {
+                      setFilter("store", stillVisible);
+                    }
                   }
                 }}
               />
             );
           })()}
-          <FilterSelect
+          <FilterMultiSelect
             label="Store"
-            value={storeFilter}
-            options={[
-              { v: "all", l: "All stores" },
-              ...pilot.stores
-                .filter((s) => countryFilter === "all" || s.country === countryFilter)
-                .map((s) => ({ v: s.name, l: s.name })),
-            ]}
-            onChange={(v) => setFilter("store", v)}
+            selected={storeFilter}
+            options={storeOptions}
+            onChange={(next) => setFilter("store", next)}
+            allLabel="All stores"
+            title="Pick one or more stores. Stores we receive Zabbix data for are listed first."
           />
           <FilterDivider />
           {/* 90d removed (2026-06-01) — Zabbix trend.get retention only
@@ -2987,7 +3008,7 @@ function computeCpuMatrix(
   zabbix: ZabbixData,
   index: PilotZabbixIndex,
   threshold: number,
-  storeFilter: string,
+  storeFilter: string[],
   countryFilter: string,
   cpuCountFrom: "tracked" | "active",
   businessHoursOnly: boolean,
@@ -2995,11 +3016,14 @@ function computeCpuMatrix(
   const { zabbixByName, trendsByHost, perHostMap, deployedSet, periodDays } = index;
   // Combined country + store filter — both narrow the same device
   // set, applied as an AND. Country is the coarser slice (LT / LV /
-  // EE); store is finer. When country is "all" and store is "all"
-  // we operate on the full Baltic estate.
+  // EE); store is finer (multi-select). When country is "all" and the
+  // store set is empty we operate on the full Baltic estate. A
+  // non-empty store set ORs together — a device passes if its store is
+  // in the set.
+  const storeSet = new Set(storeFilter);
   const matchesFilters = (d: { storeName: string; country: string | null }) => {
     if (countryFilter !== "all" && d.country !== countryFilter) return false;
-    if (storeFilter !== "all" && d.storeName !== storeFilter) return false;
+    if (storeSet.size > 0 && !storeSet.has(d.storeName)) return false;
     return true;
   };
 

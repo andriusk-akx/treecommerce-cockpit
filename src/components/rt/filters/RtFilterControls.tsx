@@ -18,6 +18,7 @@
  */
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 /** Container wrapper for a filter row. Use as the outer element of a
@@ -171,4 +172,188 @@ export function FilterDivider() {
  *  treatment as Rollout's "Filters persist across tabs" footer. */
 export function FilterHint({ children }: { children: ReactNode }) {
   return <span className="text-gray-300 ml-auto text-[11px]">{children}</span>;
+}
+
+/** One option in a {@link FilterMultiSelect}. `tracked` marks stores we
+ *  currently (or historically) receive Zabbix data for — those float to
+ *  the top of the list under a "Zabbix data" group so the operator sees
+ *  the monitored stores first. */
+export interface MultiOption {
+  v: string;
+  l: string;
+  /** True when this store has at least one device mapped to a configured
+   *  Zabbix host (i.e. we get / have got monitoring data for it). */
+  tracked?: boolean;
+}
+
+/**
+ * Multi-select dropdown (checkbox list) bound to a `string[]` value.
+ * Empty array = "all" (no filter). Replaces the single-value
+ * {@link FilterSelect} for the Store filter so the operator can pin
+ * several stores at once.
+ *
+ * Options are auto-grouped: `tracked` options (stores with Zabbix data)
+ * render first under a "Zabbix data" header, the rest under "No Zabbix
+ * data" and dimmed. Within each group the incoming order is preserved
+ * (callers sort before passing).
+ *
+ * Closes on outside-click or Escape. Selecting toggles membership and
+ * keeps the popover open so the operator can pick a few in one go.
+ */
+export function FilterMultiSelect({
+  label,
+  selected,
+  options,
+  onChange,
+  allLabel = "All",
+  title,
+  groupLabels,
+}: {
+  label: string;
+  /** Currently selected option values. Empty = no filter ("all"). */
+  selected: string[];
+  options: MultiOption[];
+  onChange: (next: string[]) => void;
+  /** Summary text + reset row label when nothing is selected. */
+  allLabel?: string;
+  title?: string;
+  /** Override the two group headers (default: Zabbix data / No Zabbix data). */
+  groupLabels?: { tracked: string; untracked: string };
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // Close on outside click / Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const selectedSet = new Set(selected);
+  const tracked = options.filter((o) => o.tracked);
+  const untracked = options.filter((o) => !o.tracked);
+
+  // Summary shown on the closed button.
+  const summary =
+    selected.length === 0
+      ? allLabel
+      : selected.length === 1
+        ? (options.find((o) => o.v === selected[0])?.l ?? selected[0])
+        : `${selected.length} selected`;
+
+  const toggle = (v: string) => {
+    const next = new Set(selectedSet);
+    if (next.has(v)) next.delete(v);
+    else next.add(v);
+    onChange([...next]);
+  };
+
+  const gl = groupLabels ?? { tracked: "Zabbix data", untracked: "No Zabbix data" };
+
+  const renderRow = (o: MultiOption) => {
+    const checked = selectedSet.has(o.v);
+    return (
+      <button
+        key={o.v}
+        type="button"
+        onClick={() => toggle(o.v)}
+        className={[
+          "w-full flex items-center gap-2 px-2.5 py-1 text-left text-xs transition",
+          checked ? "bg-blue-50 text-blue-800" : "text-gray-700 hover:bg-gray-50",
+          o.tracked ? "" : "text-gray-400",
+        ].join(" ")}
+        role="option"
+        aria-selected={checked}
+      >
+        <span
+          className={[
+            "inline-flex items-center justify-center w-3.5 h-3.5 rounded-sm border text-[9px] leading-none",
+            checked ? "bg-blue-500 border-blue-500 text-white" : "border-gray-300 bg-white text-transparent",
+          ].join(" ")}
+          aria-hidden="true"
+        >
+          ✓
+        </span>
+        {o.tracked && (
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" aria-hidden="true" title="Has Zabbix data" />
+        )}
+        <span className="truncate">{o.l}</span>
+      </button>
+    );
+  };
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <label className="flex items-center gap-2" title={title}>
+        <span className="text-gray-500 font-medium">{label}</span>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          className={[
+            "inline-flex items-center gap-1.5 border rounded px-2 py-1 text-xs bg-white focus:outline-none focus:border-blue-400 transition",
+            selected.length > 0 ? "border-blue-300 text-blue-800" : "border-gray-200 text-gray-700",
+          ].join(" ")}
+        >
+          <span className="max-w-[10rem] truncate">{summary}</span>
+          <span className="text-gray-400 text-[9px]">▾</span>
+        </button>
+      </label>
+
+      {open && (
+        <div
+          className="absolute z-30 mt-1 w-60 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1"
+          role="listbox"
+          aria-multiselectable="true"
+        >
+          {/* All-stores reset row. */}
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className={[
+              "w-full flex items-center justify-between px-2.5 py-1 text-left text-xs transition",
+              selected.length === 0 ? "bg-blue-50 text-blue-800 font-medium" : "text-gray-700 hover:bg-gray-50",
+            ].join(" ")}
+          >
+            <span>{allLabel}</span>
+            {selected.length > 0 && <span className="text-[10px] text-blue-500 font-medium">Clear</span>}
+          </button>
+
+          {tracked.length > 0 && (
+            <>
+              <div className="px-2.5 pt-2 pb-0.5 text-[9px] uppercase tracking-wide text-emerald-600 font-semibold">
+                {gl.tracked}
+              </div>
+              {tracked.map(renderRow)}
+            </>
+          )}
+
+          {untracked.length > 0 && (
+            <>
+              <div className="px-2.5 pt-2 pb-0.5 text-[9px] uppercase tracking-wide text-gray-400 font-semibold">
+                {gl.untracked}
+              </div>
+              {untracked.map(renderRow)}
+            </>
+          )}
+
+          {options.length === 0 && (
+            <div className="px-2.5 py-2 text-[11px] text-gray-400">No stores</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

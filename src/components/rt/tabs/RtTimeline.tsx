@@ -5,7 +5,8 @@ import { useState, useMemo, useCallback, useRef, useEffect, useTransition } from
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { RtPilotData, ZabbixData, ZabbixCpuTrend } from "../RtPilotWorkspace";
 import type { PerDayActiveCounters } from "@/lib/rollout-insights/types";
-import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterDivider } from "../filters/RtFilterControls";
+import { FilterBar, FilterRow, FilterSelect, FilterSegmented, FilterDivider, FilterMultiSelect } from "../filters/RtFilterControls";
+import type { MultiOption } from "../filters/RtFilterControls";
 // `generateIntervalData` was used by an earlier synthetic-data prototype
 // for the drill-down chart; removed when the route switched to real
 // process-history data. Only the IntervalSlot type stays in scope (used
@@ -264,7 +265,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     });
   };
   const storeFilter = filters.store;
-  const setStoreFilter = (v: string) => setFilter("store", v);
+  const setStoreFilter = (v: string[]) => setFilter("store", v);
   const cpuModelFilter = filters.cpuModel;
   const setCpuModelFilter = (v: string) => setFilter("cpuModel", v);
   const search = filters.search;
@@ -504,6 +505,26 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
 
   const hasTrendData = (zabbix.cpuTrends?.length || 0) > 0;
 
+  // Store filter options (multi-select). Stores we have Zabbix data for
+  // — at least one device mapped to a configured Zabbix host — are
+  // marked `tracked` and float to the top of the dropdown; stores never
+  // wired to Zabbix sink to the bottom (dimmed). Reuses the same
+  // host-name index the heatmap rows use so the "has data" signal
+  // matches what the operator sees in the grid.
+  const storeOptions = useMemo<MultiOption[]>(() => {
+    const tracked = new Set<string>();
+    for (const d of pilot.devices) {
+      if (zabbixByName.get(d.sourceHostKey || "") || zabbixByName.get(d.name)) {
+        tracked.add(d.storeName);
+      }
+    }
+    return pilot.stores
+      .map((s) => ({ v: s.name, l: s.name, tracked: tracked.has(s.name) }))
+      .sort((a, b) =>
+        a.tracked === b.tracked ? a.l.localeCompare(b.l) : a.tracked ? -1 : 1,
+      );
+  }, [pilot.devices, pilot.stores, zabbixByName]);
+
   // Snap the user's threshold (50/60/70/80/90) to the closest minutesAbove
   // bucket key emitted by the trend rollup. The same expression also lives
   // inside `allHostRows` for the column totals; keeping a component-scope
@@ -520,8 +541,9 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
   ) as 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90;
 
   const allHostRows = useMemo(() => {
+    const storeSet = new Set(storeFilter);
     return pilot.devices
-      .filter((d) => storeFilter === "all" || d.storeName === storeFilter)
+      .filter((d) => storeSet.size === 0 || storeSet.has(d.storeName))
       .map((device) => {
         const zHost = zabbixByName.get(device.sourceHostKey || "") || zabbixByName.get(device.name);
         const detail = zHost ? cpuDetail.get(zHost.hostId) : null;
@@ -1023,7 +1045,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
     // can spot-check a row instead of trusting a fleet headline.
     // (`filteredAggregate` useMemo was deleted 2026-05-25 because nothing
     // else consumed it.)
-    const filtered = storeFilter !== "all" || cpuModelFilter !== "all" || retellectInstalled !== null || search !== "" || hideEmptyHosts;
+    const filtered = storeFilter.length > 0 || cpuModelFilter !== "all" || retellectInstalled !== null || search !== "" || hideEmptyHosts;
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: C.textSec, padding: "4px 0", flexWrap: "wrap" }}>
         <span style={{ fontWeight: 600, color: "#212529" }}>{stats.total} hosts</span>
@@ -1077,11 +1099,13 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
           }}
         />
         <FilterDivider />
-        <FilterSelect
+        <FilterMultiSelect
           label="Store"
-          value={storeFilter}
-          options={[{ v: "all", l: "All stores" }, ...pilot.stores.map((s) => ({ v: s.name, l: s.name }))]}
+          selected={storeFilter}
+          options={storeOptions}
           onChange={setStoreFilter}
+          allLabel="All stores"
+          title="Pick one or more stores. Stores we receive Zabbix data for are listed first."
         />
         <FilterSelect
           label="CPU"

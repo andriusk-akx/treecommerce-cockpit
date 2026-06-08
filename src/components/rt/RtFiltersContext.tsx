@@ -23,8 +23,18 @@ export interface DashboardFilters {
    *  matrix's CPU-class share-of-fleet between per-country and Baltic-
    *  wide views. */
   country: string;
-  /** Store name filter ("all" = no filter). Applied across Overview, Timeline, Inventory. */
-  store: string;
+  /**
+   * Store name filter. **Multi-select** since 2026-06-08: an array of
+   * store names; an EMPTY array means "all stores" (no filter). One
+   * entry narrows to a single store, several entries OR together
+   * (a host passes if its store is in the set). Applied across
+   * Overview, Timeline, Inventory.
+   *
+   * Was a plain `string` ("all" = no filter) until 2026-06-08. The
+   * localStorage migration in the provider collapses the legacy string
+   * form: "all"/"" → [], any other value → [value].
+   */
+  store: string[];
   /** CPU model filter ("all" = no filter). Lets the user narrow the heatmap
    * to one hardware class — useful when comparing same-spec hosts. */
   cpuModel: string;
@@ -83,7 +93,7 @@ export interface DashboardFilters {
 
 export const defaultFilters: DashboardFilters = {
   country: "all",
-  store: "all",
+  store: [],
   cpuModel: "all",
   search: "",
   retellectInstalled: null,
@@ -110,7 +120,14 @@ const FILTER_LABELS: Array<{
   format: (v: DashboardFilters[keyof DashboardFilters]) => string;
 }> = [
   { key: "country", label: "Country", format: (v) => String(v) },
-  { key: "store", label: "Store", format: (v) => String(v) },
+  // Store is multi-select (string[]). Empty array → "" (chip hidden,
+  // means "all"); one entry → the store name; several → "N stores".
+  { key: "store", label: "Store", format: (v) => {
+    if (!Array.isArray(v)) return v ? String(v) : "";
+    if (v.length === 0) return "";
+    if (v.length === 1) return v[0];
+    return `${v.length} stores`;
+  } },
   { key: "cpuModel", label: "CPU", format: (v) => String(v) },
   { key: "search", label: "Search", format: (v) => `"${String(v)}"` },
   { key: "retellectInstalled", label: "Retellect", format: (v) => v === "today" ? "active today" : v === "installed" ? "installed" : "" },
@@ -278,6 +295,21 @@ export function RtFiltersProvider({ pilotId, initialPeriod, initialActiveThresho
       // would silently disable the business filter for some sessions.
       if (typeof merged.businessHoursOnly !== "boolean") {
         merged.businessHoursOnly = defaultFilters.businessHoursOnly;
+      }
+      // Migration 2026-06-08: `store` became multi-select (string[]).
+      // Pre-migration payloads carry a plain string ("all" or a single
+      // store name). Collapse it: "all"/"" → [] (no filter), any other
+      // string → [value]. Also guard against hand-edited / corrupt
+      // arrays by dropping non-string entries. Without this, the old
+      // string value would ride into FilterMultiSelect / the tab
+      // .includes() checks and either throw or silently match nothing.
+      if (typeof merged.store === "string") {
+        const s = merged.store as string;
+        merged.store = s === "all" || s === "" ? [] : [s];
+      } else if (Array.isArray(merged.store)) {
+        merged.store = merged.store.filter((s): s is string => typeof s === "string");
+      } else {
+        merged.store = [];
       }
       return merged;
     } catch {
