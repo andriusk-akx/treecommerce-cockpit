@@ -76,15 +76,31 @@ export async function fetchRetellectConfig(windowDays: number): Promise<FetchedC
     )) as { hostid: string; name: string }[];
     const nameByHostId = new Map(hosts.map((h) => [h.hostid, h.name]));
 
-    const items = (await cached(
-      "cfg_items",
-      () =>
-        client.request("item.get", {
-          output: ["itemid", "hostid", "key_", "lastvalue", "lastclock"],
-          search: { key_: "log[" },
-          searchWildcardsEnabled: false,
-        }) as Promise<RawItem[]>,
-    )) as RawItem[];
+    // Targeted item searches — NOT a broad "log[" sweep.
+    //
+    // The old broad `search: { key_: "log[" }` returned every log item on
+    // every host the token can see. On the full LT estate (~1500+ hosts)
+    // that payload (plus the history.get that follows) blew past the 30s
+    // request timeout and threw → the whole tab fell back to "Zabbix DOWN"
+    // even though the three config items we need exist on only ~120 SCO
+    // hosts. These three substrings are distinctive to the Retellect/SCO
+    // log items, so each search stays ~120 items regardless of estate size.
+    const SEARCH_TERMS = ["config.ini", "Starting server", "evtAppStart"];
+    const itemGroups = await Promise.all(
+      SEARCH_TERMS.map(
+        (term, i) =>
+          cached(
+            `cfg_items_${i}`,
+            () =>
+              client.request("item.get", {
+                output: ["itemid", "hostid", "key_", "lastvalue", "lastclock"],
+                search: { key_: term },
+                searchWildcardsEnabled: false,
+              }) as Promise<RawItem[]>,
+          ) as Promise<RawItem[]>,
+      ),
+    );
+    const items = itemGroups.flat();
 
     const tracked = items
       .map((it) => ({ it, kind: classify(it.key_) }))
@@ -101,12 +117,21 @@ export async function fetchRetellectConfig(windowDays: number): Promise<FetchedC
     const idsByKind: Record<Kind, string[]> = { ini: [], rtver: [], scover: [] };
     for (const { it, kind } of tracked) idsByKind[kind].push(it.itemid);
 
-    // One history.get per kind (log history is sparse — config only re-logs
-    // on restart), so this is 3 calls regardless of host count.
+    // One history.get per kind. CRITICAL: the limit must stay bounded.
+    // config.ini values are large multi-KB dumps and (on some hosts)
+    // re-log every few seconds, so an unbounded `limit: 20000` produced a
+    // ~50 MB response that got truncated → JSON parse threw → the whole tab
+    // fell back to "Zabbix DOWN". We instead pull the most-recent rows
+    // (sortorder DESC) up to a payload-safe cap, then reverse to ascending
+    // for chronological change detection. The cap is per value size: ini
+    // dumps are big, version tokens are tiny. Most-recent coverage is what
+    // matters — a change shows up at the top; identical re-logs dedupe in
+    // the diff walk.
+    const HIST_LIMIT: Record<Kind, number> = { ini: 3000, rtver: 5000, scover: 5000 };
     async function histFor(kind: Kind): Promise<HistRow[]> {
       const ids = idsByKind[kind];
       if (ids.length === 0) return [];
-      return cached(
+      const rows = (await cached(
         `cfg_hist_${kind}_${windowDays}`,
         () =>
           client.request("history.get", {
@@ -115,11 +140,13 @@ export async function fetchRetellectConfig(windowDays: number): Promise<FetchedC
             history: 2,
             time_from: timeFrom,
             sortfield: "clock",
-            sortorder: "ASC",
-            limit: 20000,
+            sortorder: "DESC",
+            limit: HIST_LIMIT[kind],
           }) as Promise<HistRow[]>,
         120_000,
-      ) as Promise<HistRow[]>;
+      )) as HistRow[];
+      // Return ascending (oldest → newest) for the change-detection walk.
+      return [...rows].reverse();
     }
 
     const [iniHist, rtHist, scoHist] = await Promise.all([histFor("ini"), histFor("rtver"), histFor("scover")]);
