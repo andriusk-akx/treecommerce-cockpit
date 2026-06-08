@@ -134,29 +134,43 @@ export async function fetchRetellectConfig(windowDays: number): Promise<FetchedC
     // dumps are big, version tokens are tiny. Most-recent coverage is what
     // matters — a change shows up at the top; identical re-logs dedupe in
     // the diff walk.
-    const HIST_LIMIT: Record<Kind, number> = { ini: 3000, rtver: 5000, scover: 5000 };
+    // Keep the limit SMALL — especially for config.ini whose values are
+    // large multi-KB dumps. On Railway the Zabbix link is much slower than
+    // a local probe, and an 8 MB history response (limit 3000) blew past
+    // the 30 s request timeout → TimeoutError. A tight limit keeps the
+    // payload ~1 MB so the call completes well inside the budget.
+    const HIST_LIMIT: Record<Kind, number> = { ini: 400, rtver: 2000, scover: 2000 };
     async function histFor(kind: Kind): Promise<HistRow[]> {
       const ids = idsByKind[kind];
       if (ids.length === 0) return [];
-      const rows = (await cached(
-        `cfg_hist_${kind}_${windowDays}`,
-        () =>
-          client.request("history.get", {
-            output: ["itemid", "clock", "value"],
-            itemids: ids,
-            history: 2,
-            time_from: timeFrom,
-            sortfield: "clock",
-            sortorder: "DESC",
-            limit: HIST_LIMIT[kind],
-          }) as Promise<HistRow[]>,
-        120_000,
-      )) as HistRow[];
-      // Return ascending (oldest → newest) for the change-detection walk.
-      return [...rows].reverse();
+      try {
+        const rows = (await cached(
+          `cfg_hist_${kind}_${windowDays}`,
+          () =>
+            client.request("history.get", {
+              output: ["itemid", "clock", "value"],
+              itemids: ids,
+              history: 2,
+              time_from: timeFrom,
+              sortfield: "clock",
+              sortorder: "DESC",
+              limit: HIST_LIMIT[kind],
+            }) as Promise<HistRow[]>,
+          120_000,
+        )) as HistRow[];
+        // Return ascending (oldest → newest) for the change-detection walk.
+        return [...rows].reverse();
+      } catch {
+        // History is BEST-EFFORT and must never blank the tab. Current
+        // values come from item.get (already fetched above), so a history
+        // timeout just means no change timeline for this kind — the page
+        // still shows current versions / resolution / snapshot status.
+        return [];
+      }
     }
 
-    stage = "history.get";
+    // Note: stage stays "item.get" — history failures are swallowed per-kind
+    // above, so reaching here means current state was fetched successfully.
     const [iniHist, rtHist, scoHist] = await Promise.all([histFor("ini"), histFor("rtver"), histFor("scover")]);
 
     const byHostName = new Map<string, RawHostConfig>();
