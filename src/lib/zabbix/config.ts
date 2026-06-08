@@ -58,6 +58,10 @@ interface HistRow {
 export interface FetchedConfig {
   byHostName: Map<string, RawHostConfig>;
   status: "live" | "unavailable";
+  /** When status is "unavailable", the caught error message + which stage
+   *  it failed at — surfaced to the UI so a Zabbix problem is diagnosable
+   *  instead of an opaque "DOWN". */
+  error?: string;
 }
 
 /**
@@ -66,9 +70,11 @@ export interface FetchedConfig {
  * device list by name / sourceHostKey).
  */
 export async function fetchRetellectConfig(windowDays: number): Promise<FetchedConfig> {
+  let stage = "init";
   try {
     const client = getZabbixClient();
 
+    stage = "host.get";
     const hosts = (await cached(
       "cfg_hosts",
       () => client.request("host.get", { output: ["hostid", "name"] }) as Promise<{ hostid: string; name: string }[]>,
@@ -85,6 +91,7 @@ export async function fetchRetellectConfig(windowDays: number): Promise<FetchedC
     // even though the three config items we need exist on only ~120 SCO
     // hosts. These three substrings are distinctive to the Retellect/SCO
     // log items, so each search stays ~120 items regardless of estate size.
+    stage = "item.get";
     const SEARCH_TERMS = ["config.ini", "Starting server", "evtAppStart"];
     const itemGroups = await Promise.all(
       SEARCH_TERMS.map(
@@ -149,6 +156,7 @@ export async function fetchRetellectConfig(windowDays: number): Promise<FetchedC
       return [...rows].reverse();
     }
 
+    stage = "history.get";
     const [iniHist, rtHist, scoHist] = await Promise.all([histFor("ini"), histFor("rtver"), histFor("scover")]);
 
     const byHostName = new Map<string, RawHostConfig>();
@@ -212,7 +220,8 @@ export async function fetchRetellectConfig(windowDays: number): Promise<FetchedC
     }
 
     return { byHostName, status: "live" };
-  } catch {
-    return { byHostName: new Map(), status: "unavailable" };
+  } catch (e) {
+    const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    return { byHostName: new Map(), status: "unavailable", error: `[${stage}] ${msg}` };
   }
 }

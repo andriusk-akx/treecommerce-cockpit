@@ -121,6 +121,8 @@ export interface ConfigTrackingData {
   dataMode: "live" | "derived";
   /** Freshness of the underlying Zabbix fetch (mirrors the rest of the app). */
   sourceStatus: "live" | "cached" | "unavailable";
+  /** Diagnostic message when sourceStatus is "unavailable". */
+  sourceError?: string;
   /** Hosts that have a config.ini snapshot at all (for the coverage line). */
   hostsWithSnapshot: number;
   retellectVersions: string[];

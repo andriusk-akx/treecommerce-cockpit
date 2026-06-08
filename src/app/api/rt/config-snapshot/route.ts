@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   const devices = Array.isArray(body.devices) ? body.devices : [];
   const windowDays = [7, 30, 90].includes(Number(body.windowDays)) ? Number(body.windowDays) : 30;
 
-  const { byHostName, status } = await fetchRetellectConfig(windowDays);
+  const { byHostName, status, error } = await fetchRetellectConfig(windowDays);
   const data = buildConfigTracking(
     devices,
     byHostName,
@@ -36,5 +36,5 @@ export async function POST(req: NextRequest) {
     status === "live" ? "live" : "unavailable",
   );
 
-  return NextResponse.json(data);
+  return NextResponse.json({ ...data, sourceError: error });
 }

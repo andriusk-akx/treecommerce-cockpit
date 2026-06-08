@@ -256,6 +256,11 @@ export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix
             Could not load configuration data: {error}
           </div>
         )}
+        {data?.sourceStatus === "unavailable" && data.sourceError && (
+          <div className="text-[11px] text-red-700 bg-red-50 border border-red-100 rounded px-2 py-1 font-mono">
+            Zabbix fetch failed: {data.sourceError}
+          </div>
+        )}
       </FilterBar>
 
       {/* ── Inventory + detail ── */}
