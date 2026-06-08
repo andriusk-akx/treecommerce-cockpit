@@ -176,10 +176,10 @@ export default async function PilotPatternsPage({ params, searchParams }: PagePr
 
       {/* Peak insights */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Peak valanda" value={`${String(data.peakHour).padStart(2, "0")}:00`} sub={`${data.hourSummary[data.peakHour]?.count || 0} įvykiai`} />
-        <StatCard label="Rami valanda" value={`${String(data.quietHour).padStart(2, "0")}:00`} sub={`${data.hourSummary[data.quietHour]?.count || 0} įvykiai`} variant="success" />
-        <StatCard label="Peak diena" value={data.peakDay} sub={`${data.daySummary.find((d) => d.count === Math.max(...data.daySummary.map((x) => x.count)))?.count || 0} įvykiai`} />
-        <StatCard label="Rami diena" value={data.quietDay} sub={`${data.daySummary.find((d) => d.count === Math.min(...data.daySummary.map((x) => x.count)))?.count || 0} įvykiai`} variant="success" />
+        <StatCard label="Peak valanda" value={data.peakHour === null ? "—" : `${String(data.peakHour).padStart(2, "0")}:00`} sub={data.peakHour === null ? "nėra įvykių" : `${data.hourSummary[data.peakHour]?.count || 0} įvykiai`} />
+        <StatCard label="Rami valanda" value={data.quietHour === null ? "—" : `${String(data.quietHour).padStart(2, "0")}:00`} sub={data.quietHour === null ? "nėra įvykių" : `${data.hourSummary[data.quietHour]?.count || 0} įvykiai`} variant="success" />
+        <StatCard label="Peak diena" value={data.peakDay ?? "—"} sub={data.peakDay === null ? "nėra įvykių" : `${data.daySummary.find((d) => d.count === Math.max(...data.daySummary.map((x) => x.count)))?.count || 0} įvykiai`} />
+        <StatCard label="Rami diena" value={data.quietDay ?? "—"} sub={data.quietDay === null ? "nėra įvykių" : `${data.daySummary.find((d) => d.count === Math.min(...data.daySummary.map((x) => x.count)))?.count || 0} įvykiai`} variant="success" />
       </div>
 
       {/* Hour + Day distribution */}

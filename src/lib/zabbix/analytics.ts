@@ -186,13 +186,22 @@ export async function getAnalytics(daysBack: number = 30, clientStoreName: strin
   const avgResolutionMinutes = resolvedOnly.length > 0 ? Math.round(totalResolutionMinutes / resolvedOnly.length) : 0;
 
   // Host downtimes
-  const hostDowntimeMap = new Map<string, { totalMinutes: number; count: number; resolutionSum: number; resolvedCount: number; lastIncident: number }>();
+  // Bug fix: total downtime must be computed over OVERLAP-MERGED
+  // intervals, not a naive sum of per-incident durations. When a host has
+  // concurrent problems (e.g. "high CPU" overlapping "agent unavailable")
+  // the naive sum double-counts the overlap, inflating downtime and
+  // deflating uptimePercent (clamped to 0 in the worst case). The sibling
+  // modules uptime.ts, availability.ts and patterns.ts all merge before
+  // this calculation; getAnalytics was the odd one out. We keep
+  // `intervals` per host and merge them below. `count` (incident count)
+  // and `resolutionSum` stay per-incident — those are genuinely per-event.
+  const hostDowntimeMap = new Map<string, { intervals: { startSec: number; endSec: number }[]; count: number; resolutionSum: number; resolvedCount: number; lastIncident: number }>();
 
   for (const prob of resolvedProblems) {
     for (const hostName of prob.hosts) {
-      const existing = hostDowntimeMap.get(hostName) || { totalMinutes: 0, count: 0, resolutionSum: 0, resolvedCount: 0, lastIncident: 0 };
+      const existing = hostDowntimeMap.get(hostName) || { intervals: [], count: 0, resolutionSum: 0, resolvedCount: 0, lastIncident: 0 };
       const durationMinutes = (prob.endClock - prob.startClock) / 60;
-      existing.totalMinutes += durationMinutes;
+      existing.intervals.push({ startSec: prob.startClock, endSec: prob.endClock });
       existing.count++;
       if (prob.endClock !== nowSec) {
         existing.resolutionSum += durationMinutes;
@@ -207,15 +216,18 @@ export async function getAnalytics(daysBack: number = 30, clientStoreName: strin
 
   const totalPeriodMinutes = safeDaysBack * 24 * 60;
   const hostDowntimes: HostDowntime[] = Array.from(hostDowntimeMap.entries())
-    .map(([hostName, data]) => ({
-      hostId: hostName,
-      hostName,
-      totalDowntimeMinutes: Math.round(data.totalMinutes),
-      incidentCount: data.count,
-      avgResolutionMinutes: data.resolvedCount > 0 ? Math.round(data.resolutionSum / data.resolvedCount) : 0,
-      uptimePercent: Math.min(100, Math.max(0, Math.round((1 - data.totalMinutes / totalPeriodMinutes) * 10000) / 100)),
-      lastIncident: data.lastIncident > 0 ? new Date(data.lastIncident * 1000).toISOString() : null,
-    }))
+    .map(([hostName, data]) => {
+      const mergedMinutes = mergeIntervalMinutes(data.intervals);
+      return {
+        hostId: hostName,
+        hostName,
+        totalDowntimeMinutes: Math.round(mergedMinutes),
+        incidentCount: data.count,
+        avgResolutionMinutes: data.resolvedCount > 0 ? Math.round(data.resolutionSum / data.resolvedCount) : 0,
+        uptimePercent: Math.min(100, Math.max(0, Math.round((1 - mergedMinutes / totalPeriodMinutes) * 10000) / 100)),
+        lastIncident: data.lastIncident > 0 ? new Date(data.lastIncident * 1000).toISOString() : null,
+      };
+    })
     .sort((a, b) => b.totalDowntimeMinutes - a.totalDowntimeMinutes);
 
   // Top problems by frequency
@@ -309,4 +321,31 @@ export async function getAnalytics(daysBack: number = 30, clientStoreName: strin
       .map(([hostName, data]) => ({ hostName, ...data }))
       .sort((a, b) => b.activeProblemCount - a.activeProblemCount),
   };
+}
+
+/**
+ * Sum the total minutes covered by a set of [startSec, endSec] intervals
+ * after merging overlaps, so concurrent incidents on the same host are
+ * counted once. Mirrors the overlap-merge done in uptime.ts /
+ * availability.ts / patterns.ts. Returns minutes (fractional).
+ */
+function mergeIntervalMinutes(intervals: { startSec: number; endSec: number }[]): number {
+  if (intervals.length === 0) return 0;
+  const sorted = [...intervals].sort((a, b) => a.startSec - b.startSec);
+  let totalSec = 0;
+  let curStart = sorted[0].startSec;
+  let curEnd = sorted[0].endSec;
+  for (let i = 1; i < sorted.length; i++) {
+    const iv = sorted[i];
+    if (iv.startSec <= curEnd) {
+      // Overlaps (or touches) the current run — extend it.
+      if (iv.endSec > curEnd) curEnd = iv.endSec;
+    } else {
+      totalSec += curEnd - curStart;
+      curStart = iv.startSec;
+      curEnd = iv.endSec;
+    }
+  }
+  totalSec += curEnd - curStart;
+  return totalSec / 60;
 }

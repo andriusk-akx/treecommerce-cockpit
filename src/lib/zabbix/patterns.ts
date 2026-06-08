@@ -71,10 +71,13 @@ export interface PatternData {
   timeline: TimelineSlot[];
   maxCount: number;
   totalEvents: number;
-  peakHour: number;
-  peakDay: string;
-  quietHour: number;
-  quietDay: string;
+  // null when there are no events in the window — see the empty-data
+  // guard in the analyser. Consumers must render "—" rather than treating
+  // a missing peak/quiet as hour 0 / Monday.
+  peakHour: number | null;
+  peakDay: string | null;
+  quietHour: number | null;
+  quietDay: string | null;
   totalDowntimeMinutes: number;
   downtimeHosts: string[];
 }
@@ -287,6 +290,12 @@ export async function getPatternData(
   const peakDayIdx = daySummary.length > 0 ? daySummary.reduce((max, d, i) => d.count > daySummary[max].count ? i : max, 0) : 0;
   const quietDayIdx = daySummary.length > 0 ? daySummary.reduce((min, d, i) => d.count < daySummary[min].count ? i : min, 0) : 0;
 
+  // Bug fix: when there are NO events, every hour/day count is 0 and the
+  // reducers above all return index 0 — the dashboard then claimed
+  // "Monday 00:00" as BOTH the busiest and the quietest slot for an empty
+  // dataset. Surface null instead so the UI shows "—".
+  const hasEvents = events.length > 0;
+
   return {
     heatmap,
     hourSummary,
@@ -294,10 +303,10 @@ export async function getPatternData(
     timeline,
     maxCount,
     totalEvents: events.length,
-    peakHour: peakHourIdx,
-    peakDay: DAY_LABELS_FULL[peakDayIdx],
-    quietHour: quietHourIdx,
-    quietDay: DAY_LABELS_FULL[quietDayIdx],
+    peakHour: hasEvents ? peakHourIdx : null,
+    peakDay: hasEvents ? DAY_LABELS_FULL[peakDayIdx] : null,
+    quietHour: hasEvents ? quietHourIdx : null,
+    quietDay: hasEvents ? DAY_LABELS_FULL[quietDayIdx] : null,
     totalDowntimeMinutes,
     downtimeHosts: Array.from(downtimeHostsSet),
   };

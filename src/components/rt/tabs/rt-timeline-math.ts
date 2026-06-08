@@ -51,7 +51,13 @@ export function generateTimelineData(
 
   for (let i = 0; i < days; i++) {
     const r = nextRand();
-    const dayOfWeek = (new Date().getDay() - (days - 1 - i) + 7) % 7;
+    // Bug fix: `(x + 7) % 7` only corrects offsets within a single week.
+    // For windows longer than 7 days (this is called with days up to 30),
+    // `getDay() - (days-1-i)` can be far below -7 — e.g. days=30, i=0 →
+    // `getDay() - 29`, which is ~-22, and JS `(-22) % 7 === -1` (negative),
+    // yielding a negative day index so the weekend factor never matched for
+    // the oldest ~3 weeks. Wrap fully with `((x % 7) + 7) % 7`.
+    const dayOfWeek = ((new Date().getDay() - (days - 1 - i)) % 7 + 7) % 7;
     const weekendFactor = (dayOfWeek === 0 || dayOfWeek === 6) ? 0.65 : 1.0;
     const dailyVariance = 0.7 + r * 0.6;
     const spike = nextRand() > 0.85 ? 1.2 + nextRand() * 0.25 : 1.0;

@@ -107,11 +107,21 @@ export async function generateInsights(prefetched?: {
     });
   }
 
-  // Week-over-week restart trend
-  const restartsThisWeek = restartEvents7d.length;
+  // Week-over-week restart trend.
+  // Bug fix: derive BOTH halves of the comparison from the SAME 30d event
+  // array. Previously `restartsThisWeek` was `restartEvents7d.length`
+  // (from the separately-capped 7d query, limit 1000) while `restartsPrev`
+  // was sliced out of the 30d query (limit 2000). If either fetch hit its
+  // cap, the two windows were drawn from inconsistently-truncated
+  // populations, skewing the percentage (a false jump or drop). Slicing
+  // the last-7d window out of the 30d array too makes it apples-to-apples.
+  const restartsThisWeek = restartEvents30d.filter((e: any) => {
+    const ts = parseInt(e.clock) * 1000;
+    return ts >= now - days7 * 1000;
+  }).length;
   const restartsPrev = restartEvents30d.filter((e: any) => {
     const ts = parseInt(e.clock) * 1000;
-    return ts < now - days7 * 1000 && ts > now - days7 * 2 * 1000;
+    return ts < now - days7 * 1000 && ts >= now - days7 * 2 * 1000;
   }).length;
 
   if (restartsPrev > 0 && restartsThisWeek > restartsPrev * 1.5) {

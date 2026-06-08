@@ -181,7 +181,14 @@ export async function getDeviceUptimeData(
     const mergedMs = mergeOverlappingPeriods(periods);
     const totalDowntime = mergedMs / 60000;
 
-    const resolvedPeriods = periods.filter((p) => p.end !== null);
+    // MTTR = mean time to REPAIR, so it must only average true resolved
+    // incidents. Bug fix: exclude `event_gap` periods — those are
+    // inferred "no monitoring data" windows (often multi-day) detected by
+    // availability.ts, not real incidents with a repair time. Folding a
+    // 2-day data gap into the mean silently inflated MTTR. (Gaps still
+    // count toward downtime/uptime via the merged total above; they just
+    // don't represent a repair duration.)
+    const resolvedPeriods = periods.filter((p) => p.end !== null && p.source !== "event_gap");
     const mttr = resolvedPeriods.length > 0
       ? Math.round(resolvedPeriods.reduce((s, p) => s + p.durationMinutes, 0) / resolvedPeriods.length)
       : 0;
