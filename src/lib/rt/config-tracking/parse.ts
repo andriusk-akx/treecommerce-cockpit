@@ -97,5 +97,11 @@ export function parseVersion(raw: string | null | undefined): string | null {
   const trimmed = raw.trim();
   if (/^[0-9]+(?:\.[0-9]+)*$/.test(trimmed)) return trimmed;
   const m = trimmed.match(/([0-9]+(?:\.[0-9]+){1,3})\s*$/);
-  return m ? m[1] : trimmed || null;
+  // Bug fix: return null (not the whole line) when no version token is
+  // present. The old `trimmed || null` fallback let a tokenless log line
+  // (e.g. "Starting server (no build tag)") become the host's version —
+  // junk in the inventory + version-filter dropdowns, and two different
+  // junk lines across history compared unequal and emitted a PHANTOM
+  // high-priority version-change event, inflating the KPIs.
+  return m ? m[1] : null;
 }

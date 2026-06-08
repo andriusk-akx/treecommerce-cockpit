@@ -62,6 +62,9 @@ export interface ConfigChange {
   hostId: string;
   /** ISO date "YYYY-MM-DD" (Vilnius-local day the change was observed). */
   date: string;
+  /** Unix milliseconds of the change — the precise sort key (the day
+   *  string alone can't order two changes on the same calendar day). */
+  clock: number;
   param: ConfigParamKey;
   paramLabel: string;
   before: string;

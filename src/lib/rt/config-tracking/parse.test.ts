@@ -53,4 +53,9 @@ describe("parseVersion", () => {
     expect(parseVersion("")).toBe(null);
     expect(parseVersion(undefined)).toBe(null);
   });
+
+  it("returns null (not the raw line) when no version token is present", () => {
+    expect(parseVersion("Starting server (no build tag)")).toBe(null);
+    expect(parseVersion("evtAppStart begin")).toBe(null);
+  });
 });

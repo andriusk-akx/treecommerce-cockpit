@@ -167,6 +167,23 @@ export async function fetchRetellectConfig(windowDays: number): Promise<FetchedC
     pushHist(rtHist, (r) => r.rtVersionHistory);
     pushHist(scoHist, (r) => r.scoVersionHistory);
 
+    // Bug fix: ensure the CURRENT value (item.get lastvalue) is the final
+    // history snapshot. history.get is cached separately and time-bounded,
+    // so the newest re-log can be present in lastvalue but absent from the
+    // history rows — a real config change would then show as the current
+    // value yet emit no change event. Append lastvalue when it is newer
+    // than the last history row (dedupe on clock).
+    const appendCurrent = (hist: RawConfigItem[], cur: RawConfigItem | null) => {
+      if (!cur) return;
+      const last = hist[hist.length - 1];
+      if (!last || last.clock < cur.clock) hist.push({ value: cur.value, clock: cur.clock });
+    };
+    for (const rec of byHostName.values()) {
+      appendCurrent(rec.configIniHistory, rec.configIni);
+      appendCurrent(rec.rtVersionHistory, rec.rtVersion);
+      appendCurrent(rec.scoVersionHistory, rec.scoVersion);
+    }
+
     return { byHostName, status: "live" };
   } catch {
     return { byHostName: new Map(), status: "unavailable" };

@@ -129,6 +129,32 @@ describe("buildConfigTracking", () => {
     expect(data.hosts[data.hosts.length - 1].snapshotFresh).toBe(false);
   });
 
+  it("orders same-day changes by clock, newest first", () => {
+    const raw = new Map<string, RawHostConfig>([
+      ["H1", {
+        hostId: "z1", hostName: "H1",
+        configIni: { value: ini(960, 540), clock: nowSec - DAY },
+        configIniHistory: [
+          { value: ini(1280, 720), clock: nowSec - DAY - 200 },
+          { value: ini(960, 540), clock: nowSec - DAY }, // resolution change (earlier clock, same day)
+        ],
+        rtVersion: { value: "1.68", clock: nowSec - DAY + 300 },
+        rtVersionHistory: [
+          { value: "1.67", clock: nowSec - DAY - 100 },
+          { value: "1.68", clock: nowSec - DAY + 300 }, // version change (later clock, same day)
+        ],
+        scoVersion: null, scoVersionHistory: [],
+      }],
+    ]);
+    const h = buildConfigTracking([dev("d1", "H1")], raw, 30, "live", NOW).hosts[0];
+    expect(h.changes.length).toBeGreaterThanOrEqual(2);
+    // Later clock (version) must sort ahead of the earlier same-day resolution change.
+    expect(h.changes[0].param).toBe("retellectVersion");
+    expect(h.changes[0].clock).toBeGreaterThan(h.changes[1].clock);
+    // lastConfigChange reflects that day.
+    expect(h.changedParamCount).toBe(2);
+  });
+
   it("computeKpis pct is bounded 0..100", () => {
     const k = computeKpis([]);
     expect(k.trackedHosts).toBe(0);

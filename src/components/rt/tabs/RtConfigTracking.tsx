@@ -63,6 +63,18 @@ function shortDate(iso: string | null): string {
 
 const valueTone = (v: string): Tone => (v === "unknown" ? "risk" : "neutral");
 
+/** Vilnius-local "YYYY-MM-DD". The server (build.ts) tags every change
+ *  `date` in Europe/Vilnius, so the client must use the SAME day boundaries
+ *  when filtering / dimming by window — otherwise a non-Vilnius browser
+ *  disagrees with the server's KPI counts on boundary-day changes. */
+const VILNIUS_DAY_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Vilnius",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const vilniusDay = (ms: number): string => VILNIUS_DAY_FMT.format(new Date(ms));
+
 // ─── Component ───────────────────────────────────────────────────────
 
 export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix: ZabbixData }) {
@@ -123,8 +135,7 @@ export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix
 
   const windowCutoff = useMemo(() => {
     // eslint-disable-next-line react-hooks/purity
-    const d = new Date(Date.now() - windowDays * 86400000);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return vilniusDay(Date.now() - windowDays * 86400000);
   }, [windowDays]);
 
   const storeSet = useMemo(() => new Set(filters.store), [filters.store]);
@@ -550,7 +561,5 @@ function Stat({ k, v, tone = "neutral" }: { k: string; v: string; tone?: Tone })
 }
 
 function isWithin(iso: string, days: number): boolean {
-  const cutoff = new Date(Date.now() - days * 86400000);
-  const c = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
-  return iso >= c;
+  return iso >= vilniusDay(Date.now() - days * 86400000);
 }

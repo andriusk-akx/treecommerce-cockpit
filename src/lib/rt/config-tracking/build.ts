@@ -53,6 +53,13 @@ function fmtDay(ms: number): string {
   return vilniusDayFmt.format(new Date(ms));
 }
 
+/** Whole-calendar-day difference between two instants, in Vilnius-local
+ *  days — matches the day semantics used for change dates and STALE_DAYS
+ *  (an elapsed-seconds floor was off by one near midnight / DST). */
+function vilniusDayDiff(laterMs: number, earlierMs: number): number {
+  return Math.round((Date.parse(fmtDay(laterMs)) - Date.parse(fmtDay(earlierMs))) / 86400000);
+}
+
 /** Tracked params that come from config.ini (versions are handled separately). */
 const INI_PARAMS: ConfigParamKey[] = [
   "resolution",
@@ -78,6 +85,7 @@ function pushChange(
   out.push({
     hostId,
     date: fmtDay(dateMs),
+    clock: dateMs,
     param,
     paramLabel: PARAM_LABEL.get(param) ?? param,
     before: prev,
@@ -118,7 +126,10 @@ function detectChanges(hostId: string, raw: RawHostConfig): ConfigChange[] {
   walkVersion("retellectVersion", raw.rtVersionHistory);
   walkVersion("scoVersion", raw.scoVersionHistory);
 
-  changes.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  // Newest first by precise clock (not the day string) so same-day changes
+  // — and ini-walk vs version-walk events — order by real time, which is
+  // what `paramLastChanged` / `lastConfigChange` rely on.
+  changes.sort((a, b) => b.clock - a.clock);
   return changes;
 }
 
@@ -162,7 +173,7 @@ export function buildConfigTracking(
         const parsed = parseConfigIni(raw.configIni.value);
         for (const key of INI_PARAMS) if (parsed.params[key] !== undefined) params[key] = parsed.params[key]!;
         extras = parsed.extras;
-        snapshotAgeDays = Math.max(0, Math.floor((nowMs / 1000 - raw.configIni.clock) / 86400));
+        snapshotAgeDays = Math.max(0, vilniusDayDiff(nowMs, raw.configIni.clock * 1000));
         hasIniSnapshot = true;
       }
       const rtv = parseVersion(raw.rtVersion?.value);
