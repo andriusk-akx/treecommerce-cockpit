@@ -258,19 +258,6 @@ export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix
         )}
       </FilterBar>
 
-      {/* ── KPI layer ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
-        <KpiCard label="High-priority changes" value={k?.highPriorityChanges} loading={loading}
-          sub={`Resolution, Retellect or SCO version changed in ${windowDays}d`}
-          delta={k ? `${k.pctHighPriority}% of tracked hosts` : ""} deltaTone="warn" />
-        <KpiCard label="Resolution changes" value={k?.resolutionChanges} loading={loading}
-          sub="Most sensitive operational setting" delta="Review first" deltaTone="warn" />
-        <KpiCard label="Version changes" value={k?.versionChanges} loading={loading}
-          sub={`Retellect or SCO version changed in ${windowDays}d`} delta="Version spread to track" deltaTone="neutral" />
-        <KpiCard label="Missing latest snapshot" value={k?.missingSnapshot} loading={loading}
-          sub="Hosts without recent configuration visibility" delta="Needs follow-up" deltaTone="bad" />
-      </div>
-
       {/* ── Inventory + detail ── */}
       <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.95fr] gap-4 mt-4">
         <InventoryTable
@@ -282,36 +269,6 @@ export function RtConfigTracking({ pilot, zabbix }: { pilot: RtPilotData; zabbix
         />
         <HostDetail host={selected} windowDays={windowDays} loading={loading} />
       </div>
-    </div>
-  );
-}
-
-// ─── KPI card ────────────────────────────────────────────────────────
-
-function KpiCard({
-  label,
-  value,
-  loading,
-  sub,
-  delta,
-  deltaTone,
-}: {
-  label: string;
-  value: number | undefined;
-  loading: boolean;
-  sub: string;
-  delta: string;
-  deltaTone: "warn" | "bad" | "neutral";
-}) {
-  const deltaClass = deltaTone === "bad" ? "text-red-600" : deltaTone === "warn" ? "text-amber-700" : "text-gray-400";
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
-      <div className="text-[11px] text-gray-500 uppercase tracking-wide">{label}</div>
-      <div className="text-3xl font-bold text-gray-900 mt-1.5 tabular-nums">
-        {value === undefined ? (loading ? "—" : "0") : value}
-      </div>
-      <div className="text-[11px] text-gray-500 mt-1 leading-snug">{sub}</div>
-      <div className={`text-[11px] font-semibold mt-2 ${deltaClass}`}>{delta}</div>
     </div>
   );
 }
