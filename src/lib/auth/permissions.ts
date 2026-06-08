@@ -24,6 +24,7 @@ export const ALL_TABS = [
   "rollout",
   "hypotheses",
   "datahealth",
+  "configuration",
 ] as const;
 
 export type TabKey = (typeof ALL_TABS)[number];
@@ -39,6 +40,7 @@ export const TAB_LABELS: Record<TabKey, string> = {
   rollout: "CPU Matrix",
   hypotheses: "Hypotheses & Recommendations",
   datahealth: "Data Health",
+  configuration: "Configuration Tracking",
 };
 
 export interface UserAuthState {

@@ -12,6 +12,7 @@ import { RtCapacityRisk } from "./tabs/RtCapacityRisk";
 import { RtRolloutInsights } from "./tabs/RtRolloutInsights";
 import { RtHypotheses } from "./tabs/RtHypotheses";
 import { RtDataHealth } from "./tabs/RtDataHealth";
+import { RtConfigTracking } from "./tabs/RtConfigTracking";
 // `RtFiltersBar` (chip bar with active-filter chips and "Clear all") is
 // implemented in RtFiltersContext but intentionally not mounted here yet —
 // the surface felt too noisy for the current dashboard. Filters still persist
@@ -236,6 +237,7 @@ const tabs = [
   { id: "overview",    label: "Overview",                  permKey: "overview" },
   { id: "rollout",     label: "CPU Matrix",                permKey: "rollout" },
   { id: "timeline",    label: "CPU Timeline",              permKey: "timeline" },
+  { id: "configuration", label: "Configuration",           permKey: "configuration" },
   { id: "inventory",   label: "Host Inventory",            permKey: "inventory" },
   { id: "health",      label: "Data Health",               permKey: "datahealth" },
   { id: "cpu",         label: "CPU Comparison",            permKey: "comparison" },
@@ -500,6 +502,7 @@ export function RtPilotWorkspace({
         )}
         {activeTab === "rollout"    && allowedSet.has("rollout")    && <RtRolloutInsights pilot={pilot} zabbix={zabbix} />}
         {activeTab === "timeline"   && allowedSet.has("timeline")   && <RtTimeline pilot={pilot} zabbix={zabbix} />}
+        {activeTab === "configuration" && allowedSet.has("configuration") && <RtConfigTracking pilot={pilot} zabbix={zabbix} />}
         {activeTab === "cpu"        && allowedSet.has("comparison") && <RtCpuComparison pilot={pilot} zabbix={zabbix} />}
         {activeTab === "reference"  && allowedSet.has("reference")  && <RtReference pilot={pilot} zabbix={zabbix} />}
         {activeTab === "risk"       && allowedSet.has("capacity")   && <RtCapacityRisk pilot={pilot} zabbix={zabbix} />}
