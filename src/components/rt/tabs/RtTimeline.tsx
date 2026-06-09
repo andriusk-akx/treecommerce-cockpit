@@ -2563,8 +2563,9 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   );
                 })()}
                 {/* Transaction peak label — busiest 15-min window. Blue to
-                    match the band; sits at the band top (always ~50% height
-                    since the peak bucket defines the band's own scale). */}
+                    match the band. Lifted to the top of the chart so it never
+                    overlaps the CPU line, and annotated with the host CPU% at
+                    that moment so a shared screenshot reads on its own. */}
                 {txn15 && (() => {
                   const txnMax = Math.max(...txn15.sums);
                   if (!(txnMax > 0)) return null;
@@ -2573,18 +2574,30 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   const centerIdx = Math.min(b * TXN_BUCKET + TXN_BUCKET / 2, N - 1);
                   const xPct = N > 1 ? (centerIdx / (N - 1)) * 100 : 50;
                   const w = txn15.window(b);
+                  // Host CPU at the busiest 15-min window — max sysCpuMax over
+                  // the bucket's slots, shown on the marker's second line.
+                  const bStart = b * TXN_BUCKET;
+                  const bEnd = Math.min(bStart + TXN_BUCKET, N);
+                  let cpuAtPeak = 0;
+                  for (let i = bStart; i < bEnd; i++) {
+                    const v = drillIntervals[i]?.sysCpuMax;
+                    if (v != null && v > cpuAtPeak) cpuAtPeak = v;
+                  }
                   return (
                     <span style={{
                       position: "absolute",
-                      left: `${xPct}%`,
-                      bottom: "calc(50% + 6px)",
+                      left: `${Math.min(94, Math.max(6, xPct))}%`,
+                      top: 4,
                       transform: "translateX(-50%)",
+                      display: "flex", flexDirection: "column", alignItems: "center",
                       fontSize: 10, fontWeight: 700, color: "#fff",
-                      background: "#2563eb", padding: "1px 6px",
+                      background: "#2563eb", padding: "2px 6px",
                       borderRadius: 3, whiteSpace: "nowrap", letterSpacing: 0.3,
+                      lineHeight: 1.25, textAlign: "center",
                       zIndex: 3, pointerEvents: "none",
                     }}>
-                      Tx peak {txnMax} at {w.startLabel}
+                      <span>Tx peak {txnMax} at {w.startLabel}</span>
+                      <span style={{ fontWeight: 600, opacity: 0.95 }}>Host CPU {Math.round(cpuAtPeak)}%</span>
                     </span>
                   );
                 })()}
@@ -2696,7 +2709,7 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                       title={`Transaction load (15-min buckets)\nAuto-detected item: ${drillTxnMeta.key}${drillTxnMeta.name ? ` (${drillTxnMeta.name})` : ""}\nValues read as: ${drillTxnMeta.semantics === "event" ? "log records → 1 per transaction" : drillTxnMeta.semantics === "counter" ? "cumulative counter → deltas" : drillTxnMeta.semantics === "count" ? "per-poll count → summed" : "n/a"}\nDay total: ${drillTxnMeta.total} transactions\n\nWrong item matched? Tell Andrius to lock the exact key.`}
                     >
                       <span style={{ width: 12, height: 8, borderRadius: 2, background: "rgba(37,99,235,0.18)", border: "1px solid rgba(37,99,235,0.45)", display: "inline-block" }} />
-                      Transactions <span style={{ color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>({drillTxnMeta.semantics === "event" ? "log" : drillTxnMeta.semantics})</span>
+                      Transactions per 15 min (blue band) <span style={{ color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>({drillTxnMeta.semantics === "event" ? "log" : drillTxnMeta.semantics})</span>
                     </span>
                   )}
                   {/* Day-level numbers tucked into the legend row so they
