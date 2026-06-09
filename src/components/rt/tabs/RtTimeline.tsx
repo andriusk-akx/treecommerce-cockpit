@@ -2391,6 +2391,38 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   alias. The state still exists (default 1) for the API call;
                   we just stopped exposing it as a control. */}
 
+              {/* Peak readouts — docked in a tidy row ABOVE the plot so they
+                  never sit on the CPU line or collide with each other. The
+                  coloured dots inside the chart mark the exact positions; these
+                  chips carry the numbers. */}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 6, flexShrink: 0 }}>
+                {peakSlot && (peakSlot.sysCpuMax ?? 0) > 0 && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 4, padding: "2px 8px" }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ef4444", flexShrink: 0 }} />
+                    Host CPU peak {Math.round(peakSlot.sysCpuMax ?? 0)}% at {peakSlot.label}
+                  </span>
+                )}
+                {txn15 && Math.max(...txn15.sums) > 0 && (() => {
+                  const txnMax = Math.max(...txn15.sums);
+                  const b = txn15.sums.indexOf(txnMax);
+                  const N = drillIntervals.length;
+                  const w = txn15.window(b);
+                  const bStart = b * TXN_BUCKET;
+                  const bEnd = Math.min(bStart + TXN_BUCKET, N);
+                  let cpuAtPeak = 0;
+                  for (let i = bStart; i < bEnd; i++) {
+                    const v = drillIntervals[i]?.sysCpuMax;
+                    if (v != null && v > cpuAtPeak) cpuAtPeak = v;
+                  }
+                  return (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "#1d4ed8", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 4, padding: "2px 8px" }}>
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#2563eb", flexShrink: 0 }} />
+                      Tx peak {txnMax} at {w.startLabel} · Host CPU {Math.round(cpuAtPeak)}%
+                    </span>
+                  );
+                })()}
+              </div>
+
               {/* Chart — host CPU line + reference levels + peak marker + selection cursor.
                   Process breakdown for the selected moment lives in the panel below; we
                   don't paint it on the chart because at low percentages it becomes a flat
@@ -2539,68 +2571,10 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                     </svg>
                   );
                 })()}
-                {/* Peak label (host CPU). Absolute-positioned HTML so the
-                    text isn't stretched by SVG preserveAspectRatio="none". */}
-                {peakSlot && (peakSlot.sysCpuMax ?? 0) > 0 && (() => {
-                  const idx = drillIntervals.findIndex((s) => s.slot === peakSlot.slot);
-                  if (idx < 0) return null;
-                  const N = drillIntervals.length;
-                  const xPct = N > 1 ? (idx / (N - 1)) * 100 : 50;
-                  const peakValue = peakSlot.sysCpuMax ?? 0;
-                  return (
-                    <span style={{
-                      position: "absolute",
-                      left: `${xPct}%`,
-                      bottom: `calc(${Math.min(100, peakValue)}% + 8px)`,
-                      transform: "translateX(-50%)",
-                      fontSize: 10, fontWeight: 700, color: "#fff",
-                      background: "#ef4444", padding: "1px 6px",
-                      borderRadius: 3, whiteSpace: "nowrap", letterSpacing: 0.3,
-                      zIndex: 3, pointerEvents: "none",
-                    }}>
-                      Host peak {Math.round(peakValue)}% at {peakSlot.label}
-                    </span>
-                  );
-                })()}
-                {/* Transaction peak label — busiest 15-min window. Blue to
-                    match the band. Lifted to the top of the chart so it never
-                    overlaps the CPU line, and annotated with the host CPU% at
-                    that moment so a shared screenshot reads on its own. */}
-                {txn15 && (() => {
-                  const txnMax = Math.max(...txn15.sums);
-                  if (!(txnMax > 0)) return null;
-                  const b = txn15.sums.indexOf(txnMax);
-                  const N = drillIntervals.length;
-                  const centerIdx = Math.min(b * TXN_BUCKET + TXN_BUCKET / 2, N - 1);
-                  const xPct = N > 1 ? (centerIdx / (N - 1)) * 100 : 50;
-                  const w = txn15.window(b);
-                  // Host CPU at the busiest 15-min window — max sysCpuMax over
-                  // the bucket's slots, shown on the marker's second line.
-                  const bStart = b * TXN_BUCKET;
-                  const bEnd = Math.min(bStart + TXN_BUCKET, N);
-                  let cpuAtPeak = 0;
-                  for (let i = bStart; i < bEnd; i++) {
-                    const v = drillIntervals[i]?.sysCpuMax;
-                    if (v != null && v > cpuAtPeak) cpuAtPeak = v;
-                  }
-                  return (
-                    <span style={{
-                      position: "absolute",
-                      left: `${Math.min(94, Math.max(6, xPct))}%`,
-                      top: 4,
-                      transform: "translateX(-50%)",
-                      display: "flex", flexDirection: "column", alignItems: "center",
-                      fontSize: 10, fontWeight: 700, color: "#fff",
-                      background: "#2563eb", padding: "2px 6px",
-                      borderRadius: 3, whiteSpace: "nowrap", letterSpacing: 0.3,
-                      lineHeight: 1.25, textAlign: "center",
-                      zIndex: 3, pointerEvents: "none",
-                    }}>
-                      <span>Tx peak {txnMax} at {w.startLabel}</span>
-                      <span style={{ fontWeight: 600, opacity: 0.95 }}>Host CPU {Math.round(cpuAtPeak)}%</span>
-                    </span>
-                  );
-                })()}
+                {/* Peak readouts moved to the docked chip row above the chart
+                    (2026-06-09) so they no longer overlap the CPU line or each
+                    other. The red/blue dots in the SVG above still mark the
+                    exact peak positions. */}
 
                 {/* Click targets — full-height transparent strips per slot. */}
                 <div style={{ position: "absolute", inset: 0, display: "flex", gap: 0, alignItems: "stretch", zIndex: 5 }}>
