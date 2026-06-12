@@ -2436,7 +2436,9 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                 border: `1px solid ${C.border}`,
                 borderRadius: 6,
               }}>
-                {/* Reference grid: 100% ceiling, 70% threshold, 0% baseline. */}
+                {/* Reference grid: 100% ceiling, active threshold, 0% baseline.
+                    The dashed amber line tracks the threshold dropdown so the
+                    drill-down marker always matches the heatmap's >N% scope. */}
                 <div aria-hidden style={{
                   position: "absolute", left: 0, right: 0, top: 0,
                   borderTop: "1px dashed #d0d7de", pointerEvents: "none", zIndex: 1,
@@ -2448,14 +2450,14 @@ export function RtTimeline({ pilot, zabbix }: { pilot: RtPilotData; zabbix: Zabb
                   }}>100%</span>
                 </div>
                 <div aria-hidden style={{
-                  position: "absolute", left: 0, right: 0, top: "30%",
+                  position: "absolute", left: 0, right: 0, top: `${100 - threshold}%`,
                   borderTop: "1px dashed #fcd34d", pointerEvents: "none", zIndex: 1,
                 }}>
                   <span style={{
                     position: "absolute", right: 0, top: -1,
                     fontSize: 9, color: "#a16207", background: "transparent",
                     padding: "0 4px", transform: "translateY(-50%)",
-                  }}>70%</span>
+                  }}>{threshold}%</span>
                 </div>
                 <div aria-hidden style={{
                   position: "absolute", left: 0, right: 0, bottom: 0,
